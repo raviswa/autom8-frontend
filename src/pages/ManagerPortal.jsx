@@ -210,7 +210,7 @@ export default function ManagerPortal() {
                         <p className="text-sm font-semibold text-gray-700 mb-2">Items</p>
                         <div className="space-y-1">
                           {order.order_items?.map((item, idx) => (
-                            <p key={idx} className=\"text-sm text-gray-600\">
+                            <p key={idx} className="text-sm text-gray-600">
                               {item.quantity}x {item.menu_item?.name}
                               <span
                                 className={`ml-2 px-2 py-1 rounded text-xs font-semibold ${
@@ -237,21 +237,21 @@ export default function ManagerPortal() {
                           ${order.total_amount?.toFixed(2)}
                         </p>
                         <p className="text-xs text-gray-500 mt-1">
-                          Status: <span className=\"font-semibold capitalize\">{order.status}</span>
+                          Status: <span className="font-semibold capitalize">{order.status}</span>
                         </p>
                       </div>
 
                       {/* Actions */}
-                      <div className=\"flex flex-col gap-2\">
-                        <button className=\"bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded-lg transition text-sm\">
+                      <div className="flex flex-col gap-2">
+                        <button className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded-lg transition text-sm">
                           View Details
                         </button>
                         {order.status === 'in_progress' && (
-                          <button className=\"bg-green-600 hover:bg-green-700 text-white font-semibold py-2 rounded-lg transition text-sm\">
+                          <button className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 rounded-lg transition text-sm">
                             Mark Ready
                           </button>
                         )}
-                        <button className=\"bg-red-600 hover:bg-red-700 text-white font-semibold py-2 rounded-lg transition text-sm\">
+                        <button className="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 rounded-lg transition text-sm">
                           Cancel
                         </button>
                       </div>
@@ -265,23 +265,23 @@ export default function ManagerPortal() {
 
       {/* New Order Modal */}
       {showNewOrder && (
-        <div className=\"fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50\">
-          <div className=\"bg-white rounded-lg shadow-2xl max-w-2xl w-full max-h-96 overflow-y-auto\">
-            <div className=\"sticky top-0 bg-blue-600 text-white p-6 flex justify-between items-center\">
-              <h3 className=\"text-2xl font-bold\">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-2xl max-w-2xl w-full max-h-96 overflow-y-auto">
+            <div className="sticky top-0 bg-blue-600 text-white p-6 flex justify-between items-center">
+              <h3 className="text-2xl font-bold">
                 New Order {selectedTable ? `- Table ${tables.find(t => t.id === selectedTable)?.table_number}` : ''}
               </h3>
               <button
                 onClick={() => setShowNewOrder(false)}
-                className=\"text-2xl hover:opacity-80 transition\"
+                className="text-2xl hover:opacity-80 transition"
               >
                 ✕
               </button>
             </div>
 
-            <div className=\"p-6\">
-              <p className=\"font-semibold text-gray-900 mb-4\">Select items:</p>
-              <div className=\"grid grid-cols-1 md:grid-cols-2 gap-4 mb-6\">
+            <div className="p-6">
+              <p className="font-semibold text-gray-900 mb-4">Select items:</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                 {menuItems.map((item) => (
                   <button
                     key={item.id}
@@ -299,22 +299,22 @@ export default function ManagerPortal() {
                         : 'border-gray-300 hover:border-blue-600'
                     }`}
                   >
-                    <p className=\"font-semibold text-gray-900\">{item.name}</p>
-                    <p className=\"text-blue-600 font-bold\">${item.price.toFixed(2)}</p>
+                    <p className="font-semibold text-gray-900">{item.name}</p>
+                    <p className="text-blue-600 font-bold">${item.price.toFixed(2)}</p>
                   </button>
                 ))}
               </div>
 
-              <div className=\"flex gap-4\">
+              <div className="flex gap-4">
                 <button
                   onClick={() => setShowNewOrder(false)}
-                  className=\"flex-1 bg-gray-300 hover:bg-gray-400 text-gray-900 font-bold py-3 rounded-lg transition\"
+                  className="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-900 font-bold py-3 rounded-lg transition"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={createOrder}
-                  className=\"flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition\"
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition"
                 >
                   Create Order
                 </button>
