@@ -9,7 +9,7 @@ import { useWebSocket } from '../contexts/WebSocketContext';
 import { formatDistanceToNow } from 'date-fns';
 
 export default function KDSScreen() {
-  const { user, apiClient } = useAuth();
+  const { user, apiClient, logout } = useAuth();
   const { connected, updates } = useWebSocket();
   
   const [items, setItems] = useState([]);
@@ -154,6 +154,17 @@ export default function KDSScreen() {
               </button>
             ))}
           </div>
+
+          {/* Logout */}
+          <button
+            onClick={logout}
+            className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition flex items-center text-sm"
+          >
+            <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h6a2 2 0 012 2v1" />
+            </svg>
+            Logout
+          </button>
 
           {/* Sound Toggle */}
           <button
