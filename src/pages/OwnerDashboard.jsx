@@ -8,7 +8,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { format } from 'date-fns';
 
 export default function OwnerDashboard() {
-  const { user, apiClient } = useAuth();
+  const { user, apiClient, logout } = useAuth();
 
   const [report, setReport] = useState(null);
   const [orders, setOrders] = useState([]);
@@ -72,13 +72,23 @@ export default function OwnerDashboard() {
               </h1>
               <p className="text-gray-600 mt-1">Restaurant analytics and management</p>
             </div>
-            <div>
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-gray-600">👤 {user?.full_name || user?.email}</span>
               <input
                 type="date"
                 value={selectedDate}
                 onChange={(e) => setSelectedDate(e.target.value)}
                 className="border-2 border-gray-300 rounded-lg px-4 py-2 text-gray-900"
               />
+              <button
+                onClick={logout}
+                className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-5 rounded-lg transition flex items-center"
+              >
+                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h6a2 2 0 012 2v1" />
+                </svg>
+                Logout
+              </button>
             </div>
           </div>
         </div>
