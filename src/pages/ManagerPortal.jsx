@@ -8,7 +8,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { format } from 'date-fns';
 
 export default function ManagerPortal() {
-  const { user, apiClient } = useAuth();
+  const { user, apiClient, logout } = useAuth();
   
   const [tables, setTables] = useState([]);
   const [orders, setOrders] = useState([]);
@@ -133,15 +133,27 @@ export default function ManagerPortal() {
               </h1>
               <p className="text-gray-600 mt-1">Manage tables, orders, and kitchen operations</p>
             </div>
-            <button
-              onClick={() => setShowNewOrder(true)}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition flex items-center"
-            >
-              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              New Order
-            </button>
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-gray-600">👤 {user?.full_name || user?.email}</span>
+              <button
+                onClick={() => setShowNewOrder(true)}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition flex items-center"
+              >
+                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                New Order
+              </button>
+              <button
+                onClick={logout}
+                className="bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-5 rounded-lg transition flex items-center"
+              >
+                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h6a2 2 0 012 2v1" />
+                </svg>
+                Logout
+              </button>
+            </div>
           </div>
         </div>
       </div>
