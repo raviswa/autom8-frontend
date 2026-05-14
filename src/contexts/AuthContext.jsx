@@ -26,22 +26,18 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Initialize auth from stored token
+  // Initialize auth from stored token + setup auto token refresh interceptor
   useEffect(() => {
     const initAuth = async () => {
       const token = localStorage.getItem('authToken');
+      const refreshTokenValue = localStorage.getItem('refreshToken');
+
       if (token) {
         try {
-          // Validate token is still valid
-          const response = await apiClient.get('/health', {
-            headers: { Authorization: `Bearer ${token}` }
-          });
-          
           const userData = JSON.parse(localStorage.getItem('userData'));
           setUser(userData);
           apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
         } catch (err) {
-          // Token invalid, clear storage
           localStorage.removeItem('authToken');
           localStorage.removeItem('userData');
           localStorage.removeItem('refreshToken');
@@ -51,6 +47,44 @@ export function AuthProvider({ children }) {
     };
 
     initAuth();
+
+    // Axios interceptor: on 401/403, try to refresh token automatically
+    const interceptor = apiClient.interceptors.response.use(
+      (response) => response,
+      async (error) => {
+        const originalRequest = error.config;
+        if ((error.response?.status === 401 || error.response?.status === 403) && !originalRequest._retry) {
+          originalRequest._retry = true;
+          try {
+            const refreshTokenValue = localStorage.getItem('refreshToken');
+            if (!refreshTokenValue) throw new Error('No refresh token');
+
+            const response = await apiClient.post('/api/auth/refresh', {
+              refreshToken: refreshTokenValue
+            });
+
+            const { token, refreshToken: newRefreshToken } = response.data;
+            localStorage.setItem('authToken', token);
+            localStorage.setItem('refreshToken', newRefreshToken);
+            apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+            originalRequest.headers['Authorization'] = `Bearer ${token}`;
+
+            return apiClient(originalRequest);
+          } catch (refreshErr) {
+            // Refresh failed — clear and redirect to login
+            localStorage.removeItem('authToken');
+            localStorage.removeItem('userData');
+            localStorage.removeItem('refreshToken');
+            delete apiClient.defaults.headers.common['Authorization'];
+            setUser(null);
+            return Promise.reject(refreshErr);
+          }
+        }
+        return Promise.reject(error);
+      }
+    );
+
+    return () => apiClient.interceptors.response.eject(interceptor);
   }, []);
 
   const loginWithEmail = useCallback(async (email, password) => {
