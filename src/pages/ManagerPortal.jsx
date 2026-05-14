@@ -18,6 +18,7 @@ export default function ManagerPortal() {
   const [loading, setLoading] = useState(true);
   const [showNewOrder, setShowNewOrder] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState(null);
 
   // Fetch all data
   const fetchData = useCallback(async () => {
@@ -107,6 +108,17 @@ export default function ManagerPortal() {
     } catch (err) {
       console.error('Failed to cancel order:', err);
       alert('Error cancelling order: ' + err.message);
+    }
+  };
+
+
+  const markOrderReady = async (orderId) => {
+    try {
+      await apiClient.put(`/api/orders/${orderId}/status`, { status: 'completed' });
+      fetchData();
+    } catch (err) {
+      console.error('Failed to update order:', err);
+      alert('Error updating order: ' + err.message);
     }
   };
 
@@ -281,11 +293,17 @@ export default function ManagerPortal() {
 
                       {/* Actions */}
                       <div className="flex flex-col gap-2">
-                        <button className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded-lg transition text-sm">
+                        <button
+                          onClick={() => setSelectedOrder(order)}
+                          className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded-lg transition text-sm"
+                        >
                           View Details
                         </button>
                         {order.status === 'in_progress' && (
-                          <button className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 rounded-lg transition text-sm">
+                          <button
+                            onClick={() => markOrderReady(order.id)}
+                            className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 rounded-lg transition text-sm"
+                          >
                             Mark Ready
                           </button>
                         )}
@@ -304,6 +322,76 @@ export default function ManagerPortal() {
         </div>
       </div>
 
+
+      {/* Order Detail Modal */}
+      {selectedOrder && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-2xl max-w-lg w-full">
+            <div className="bg-blue-600 text-white p-5 rounded-t-lg flex justify-between items-center">
+              <h3 className="text-xl font-bold">Order #{selectedOrder.order_number?.slice(-4)}</h3>
+              <button onClick={() => setSelectedOrder(null)} className="text-2xl hover:opacity-80">✕</button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p className="text-gray-500">Table</p>
+                  <p className="font-semibold">{tables.find(t => t.id === selectedOrder.table_id)?.table_number || 'N/A'} • {tables.find(t => t.id === selectedOrder.table_id)?.section}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Status</p>
+                  <p className="font-semibold capitalize">{selectedOrder.status}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Time</p>
+                  <p className="font-semibold">{format(new Date(selectedOrder.created_at), 'HH:mm:ss')}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Payment</p>
+                  <p className="font-semibold capitalize">{selectedOrder.payment_status || 'Unpaid'}</p>
+                </div>
+              </div>
+              <div>
+                <p className="text-gray-500 text-sm mb-2 font-semibold">Items</p>
+                <div className="space-y-2">
+                  {selectedOrder.order_items?.map((item, idx) => (
+                    <div key={idx} className="flex justify-between items-center bg-gray-50 rounded p-2 text-sm">
+                      <span>{item.quantity}x {item.menu_item?.name}</span>
+                      <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                        item.status === 'pending' ? 'bg-red-100 text-red-700' :
+                        item.status === 'in_progress' ? 'bg-yellow-100 text-yellow-700' :
+                        item.status === 'ready' ? 'bg-green-100 text-green-700' :
+                        'bg-gray-100 text-gray-700'
+                      }`}>{item.status}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="border-t pt-4 flex justify-between items-center">
+                <div>
+                  <p className="text-gray-500 text-sm">Total</p>
+                  <p className="text-2xl font-bold text-blue-600">${selectedOrder.total_amount?.toFixed(2)}</p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { cancelOrder(selectedOrder.id, selectedOrder.table_id); setSelectedOrder(null); }}
+                    className="bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg text-sm"
+                  >
+                    Cancel Order
+                  </button>
+                  {selectedOrder.status === 'in_progress' && (
+                    <button
+                      onClick={() => { markOrderReady(selectedOrder.id); setSelectedOrder(null); }}
+                      className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg text-sm"
+                    >
+                      Mark Ready
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {/* New Order Modal */}
       {showNewOrder && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
