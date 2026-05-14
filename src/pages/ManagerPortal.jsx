@@ -17,6 +17,7 @@ export default function ManagerPortal() {
   const [selectedItems, setSelectedItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showNewOrder, setShowNewOrder] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Fetch all data
   const fetchData = useCallback(async () => {
@@ -49,6 +50,9 @@ export default function ManagerPortal() {
       return;
     }
 
+    if (isSubmitting) return; // Prevent double submission
+    setIsSubmitting(true);
+
     try {
       const items = selectedItems.map(item => ({
         menu_item_id: item.id,
@@ -56,7 +60,7 @@ export default function ManagerPortal() {
         special_instructions: item.special_instructions
       }));
 
-      const response = await apiClient.post('/api/orders', {
+      await apiClient.post('/api/orders', {
         table_id: selectedTable,
         items,
         notes: ''
@@ -72,6 +76,8 @@ export default function ManagerPortal() {
     } catch (err) {
       console.error('Failed to create order:', err);
       alert('Error creating order: ' + err.message);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -326,9 +332,10 @@ export default function ManagerPortal() {
                 </button>
                 <button
                   onClick={createOrder}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition"
+                  disabled={isSubmitting}
+                  className={`flex-1 font-bold py-3 rounded-lg transition text-white ${isSubmitting ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
                 >
-                  Create Order
+                  {isSubmitting ? 'Creating...' : 'Create Order'}
                 </button>
               </div>
             </div>
