@@ -15,7 +15,7 @@ const supabase = createClient(
 );
 
 const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3001',
+  VITE_API_URL=https://autom8-backend-production.up.railway.app,
   headers: {
     'Content-Type': 'application/json'
   }
