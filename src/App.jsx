@@ -17,6 +17,18 @@ import ManagerPortal from './pages/ManagerPortal';
 import KDSScreen from './pages/KDSScreen';
 import NotFound from './pages/NotFound';
 
+// Add this import at top of App.jsx
+import MenuPage from './pages/MenuPage';
+
+// Add this route inside <Routes>
+<Route
+  path="/dashboard/menu"
+  element={
+    <ProtectedRoute allowedRoles={['owner', 'manager']}>
+      <MenuPage />
+    </ProtectedRoute>
+  }
+/>
 // Protected Route Component
 function ProtectedRoute({ children, allowedRoles }) {
   const { user, loading } = useAuth();
