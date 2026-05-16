@@ -51,13 +51,11 @@ export default function ManagerPortal() {
       return;
     }
 
-    if (isSubmitting) return; // Prevent double submission
+    if (isSubmitting) return;
     setIsSubmitting(true);
 
-    // Close modal immediately to prevent multiple submissions
     setShowNewOrder(false);
 
-    // Capture selected values before resetting
     const tableId = selectedTable;
     const items = selectedItems.map(item => ({
       menu_item_id: item.id,
@@ -65,7 +63,6 @@ export default function ManagerPortal() {
       special_instructions: item.special_instructions
     }));
 
-    // Reset form immediately
     setSelectedItems([]);
     setSelectedTable(null);
 
@@ -76,7 +73,6 @@ export default function ManagerPortal() {
         notes: ''
       });
 
-      // Refresh data
       fetchData();
     } catch (err) {
       console.error('Failed to create order:', err);
@@ -95,12 +91,10 @@ export default function ManagerPortal() {
     }
   };
 
-
   const cancelOrder = async (orderId, tableId) => {
     if (!window.confirm('Cancel this order?')) return;
     try {
       await apiClient.delete(`/api/orders/${orderId}`);
-      // Release the table if it was occupied by this order
       if (tableId) {
         await apiClient.put(`/api/tables/${tableId}/status`, { status: 'available' });
       }
@@ -110,7 +104,6 @@ export default function ManagerPortal() {
       alert('Error cancelling order: ' + err.message);
     }
   };
-
 
   const markOrderReady = async (orderId) => {
     try {
@@ -133,15 +126,15 @@ export default function ManagerPortal() {
   const getStatusColor = (status) => {
     switch (status) {
       case 'available':
-        return 'bg-green-500 hover:bg-green-600';
+        return 'bg-green-500';
       case 'occupied':
-        return 'bg-blue-500 hover:bg-blue-600';
+        return 'bg-blue-500';
       case 'reserved':
-        return 'bg-yellow-500 hover:bg-yellow-600';
+        return 'bg-yellow-500';
       case 'dirty':
-        return 'bg-red-500 hover:bg-red-600';
+        return 'bg-red-500';
       default:
-        return 'bg-gray-500 hover:bg-gray-600';
+        return 'bg-gray-500';
     }
   };
 
@@ -204,25 +197,41 @@ export default function ManagerPortal() {
             {tables.map((table) => {
               const { status, order } = getTableStatus(table);
               return (
-                <button
+                <div
                   key={table.id}
-                  onClick={() => {
-                    setSelectedTable(table.id);
-                    setShowNewOrder(true);
-                  }}
-                  className={`p-6 rounded-lg text-white font-bold text-xl transition transform hover:scale-105 shadow-lg ${getStatusColor(
-                    status
-                  )}`}
+                  className={`p-6 rounded-lg text-white font-bold text-xl shadow-lg flex flex-col items-center ${getStatusColor(status)}`}
                 >
                   <p className="text-sm opacity-90 mb-2">Table {table.table_number}</p>
                   <p className="text-2xl mb-3">🪑</p>
                   <p className="capitalize text-sm mb-2">{status}</p>
                   {order && (
-                    <p className="text-xs opacity-80 bg-black bg-opacity-20 px-2 py-1 rounded">
+                    <p className="text-xs opacity-80 bg-black bg-opacity-20 px-2 py-1 rounded mb-3">
                       Order: {order.order_number?.slice(-4)}
                     </p>
                   )}
-                </button>
+                  {status === 'occupied' ? (
+                    <button
+                      onClick={() => {
+                        if (window.confirm(`Mark Table ${table.table_number} as available?`)) {
+                          updateTableStatus(table.id, 'available');
+                        }
+                      }}
+                      className="mt-auto text-xs bg-white bg-opacity-25 hover:bg-opacity-40 border border-white border-opacity-50 px-3 py-1.5 rounded-lg font-semibold transition w-full"
+                    >
+                      Mark Available
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setSelectedTable(table.id);
+                        setShowNewOrder(true);
+                      }}
+                      className="mt-auto text-xs bg-white bg-opacity-25 hover:bg-opacity-40 border border-white border-opacity-50 px-3 py-1.5 rounded-lg font-semibold transition w-full"
+                    >
+                      + New Order
+                    </button>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -322,7 +331,6 @@ export default function ManagerPortal() {
         </div>
       </div>
 
-
       {/* Order Detail Modal */}
       {selectedOrder && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -392,6 +400,7 @@ export default function ManagerPortal() {
           </div>
         </div>
       )}
+
       {/* New Order Modal */}
       {showNewOrder && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
