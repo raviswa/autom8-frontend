@@ -16,20 +16,10 @@ import OwnerDashboard from './pages/OwnerDashboard';
 import ManagerPortal from './pages/ManagerPortal';
 import KDSScreen from './pages/KDSScreen';
 import NotFound from './pages/NotFound';
-
-// Add this import at top of App.jsx
 import MenuPage from './pages/MenuPage';
+import WalkInForm from './pages/WalkInForm';   // ← ADDED
 
-// Add this route inside <Routes>
-<Route
-  path="/dashboard/menu"
-  element={
-    <ProtectedRoute allowedRoles={['owner', 'manager']}>
-      <MenuPage />
-    </ProtectedRoute>
-  }
-/>
-// Protected Route Component
+// ── Protected Route Component ─────────────────────────────────────────────────
 function ProtectedRoute({ children, allowedRoles }) {
   const { user, loading } = useAuth();
 
@@ -55,51 +45,70 @@ function ProtectedRoute({ children, allowedRoles }) {
   return children;
 }
 
+// ── Routes ────────────────────────────────────────────────────────────────────
 function AppRoutes() {
   const { user } = useAuth();
 
   return (
     <Routes>
-      {/* Public Routes */}
+
+      {/* ── Public routes ── */}
       <Route path="/login" element={<LoginPage />} />
-      
-      {/* Protected Routes */}
-      <Route 
-        path="/dashboard/owner" 
+
+      {/* Customer walk-in form — no auth required, accessed via QR code */}
+      <Route path="/checkin" element={<WalkInForm />} />   {/* ← ADDED */}
+
+      {/* ── Protected routes ── */}
+      <Route
+        path="/dashboard/owner"
         element={
           <ProtectedRoute allowedRoles={['owner']}>
             <OwnerDashboard />
           </ProtectedRoute>
-        } 
+        }
       />
-      
-      <Route 
-        path="/dashboard/manager" 
+
+      <Route
+        path="/dashboard/manager"
         element={
           <ProtectedRoute allowedRoles={['manager', 'owner']}>
             <ManagerPortal />
           </ProtectedRoute>
-        } 
+        }
       />
-      
-      <Route 
-        path="/dashboard/kitchen" 
+
+      <Route
+        path="/dashboard/kitchen"
         element={
           <ProtectedRoute allowedRoles={['kitchen_staff', 'owner', 'manager']}>
             <KDSScreen />
           </ProtectedRoute>
-        } 
+        }
       />
 
-      {/* Redirect root to login */}
-      <Route path="/" element={<Navigate to={user ? `/dashboard/${user.role}` : '/login'} />} />
-      
-      {/* 404 */}
+      <Route
+        path="/dashboard/menu"
+        element={
+          <ProtectedRoute allowedRoles={['owner', 'manager']}>
+            <MenuPage />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* ── Redirects ── */}
+      <Route
+        path="/"
+        element={<Navigate to={user ? `/dashboard/${user.role}` : '/login'} />}
+      />
+
+      {/* ── 404 ── */}
       <Route path="*" element={<NotFound />} />
+
     </Routes>
   );
 }
 
+// ── App root ──────────────────────────────────────────────────────────────────
 export default function App() {
   return (
     <Router>
