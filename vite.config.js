@@ -2,8 +2,6 @@
 // Add this comment to force cache bust
 // build: 2026-05-17
 
-npm install react-chartjs-2 chart.js
-
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
