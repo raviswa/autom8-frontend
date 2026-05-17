@@ -1,4 +1,7 @@
 // vite.config.js
+// Add this comment to force cache bust
+// build: 2026-05-17
+
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
