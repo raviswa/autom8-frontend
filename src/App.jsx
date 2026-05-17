@@ -59,14 +59,17 @@ function AppRoutes() {
       <Route path="/checkin" element={<WalkInForm />} />   {/* ← ADDED */}
 
       {/* ── Protected routes ── */}
-      <Route
-        path="/dashboard/owner"
-        element={
-          <ProtectedRoute allowedRoles={['owner']}>
-            <OwnerDashboard />
-          </ProtectedRoute>
-        }
-      />
+      import OwnerDashboard from "./pages/dashboard/OwnerDashboard";
+
+// Inside your routes, protected by role check:
+    <Route path="/dashboard/owner" element={
+        <ProtectedRoute role="owner">
+          <OwnerDashboard
+          restaurantId={user.restaurant_id}
+          restaurantName={user.restaurant_name}
+          />
+  </ProtectedRoute>
+} />
 
       <Route
         path="/dashboard/manager"
