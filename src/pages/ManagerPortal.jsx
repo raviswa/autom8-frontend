@@ -115,7 +115,7 @@ export default function ManagerPortal() {
     const tableId = assignTableSel[token.id];
     if (!tableId) { showToast('Please select a table first'); return; }
 
-    const table = tables.find(t => t.id === parseInt(tableId));
+    const table = tables.find(t => String(t.id) === String(tableId));
     if (!table) return;
 
     setAssigningToken(token.id);
