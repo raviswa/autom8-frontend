@@ -113,6 +113,7 @@ export default function ManagerPortal() {
   // ─── assign table to token ─────────────────────────────────────────────────
   const assignTable = async (token) => {
     const tableId = assignTableSel[token.id];
+    console.log('tableId:', tableId, 'assignTableSel:', assignTableSel);
     if (!tableId) { showToast('Please select a table first'); return; }
 
     const table = tables.find(t => String(t.id) === String(tableId));
@@ -368,7 +369,10 @@ export default function ManagerPortal() {
                             <div className="flex items-center gap-2 mt-3 flex-wrap">
                               <select
                                 value={assignTableSel[token.id] || ''}
-                                onChange={e => setAssignTableSel(prev => ({ ...prev, [token.id]: e.target.value }))}
+                                onChange={e => {
+                                  const val = e.target.value;
+                                  setAssignTableSel(prev => ({ ...prev, [token.id]: val }));
+                                }}
                                 disabled={avail.length === 0}
                                 className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:opacity-50"
                               >
