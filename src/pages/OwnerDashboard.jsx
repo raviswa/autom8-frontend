@@ -1,10 +1,4 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { createClient } from "@supabase/supabase-js";
-
-export const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY
-);
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const HEAT_COLORS = ["#E6F1FB", "#85B7EB", "#378ADD", "#185FA5", "#0C447C"];
