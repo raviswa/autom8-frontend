@@ -1,17 +1,6 @@
 // ============================================================================
 // AUTOM8 FRONTEND - MANAGER PORTAL
 // src/pages/ManagerPortal.jsx
-//
-// FIX LOG (this patch)
-// --------------------
-//  Fix A  — "Mark Available" confirm dialog replaced with React state modal
-//            (browser window.confirm() is non-blocking in some embeddings and
-//             swallowed entirely inside iframes / Railway preview panes)
-//  Fix B  — updateTableStatus now also completes any seated walk-in tokens on
-//            the table via PUT /api/tokens/:id/complete so the queue clears too
-//  Fix C  — Removed inner apiClient.get('/api/orders') from updateTableStatus;
-//            stale-order cleanup delegated entirely to the backend which already
-//            handles it in PUT /api/tables/:id/status handler
 // ============================================================================
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -46,10 +35,15 @@ function safeFormat(dateVal, fmt) {
   }
 }
 
+// ─── Active order statuses — the ONLY statuses that keep a table "occupied" ──
+// "cancelled" and "completed" are explicitly excluded so stale orders don't
+// lock tables in the UI.
+const ACTIVE_ORDER_STATUSES = ['pending', 'confirmed', 'in_progress'];
+
 export default function ManagerPortal() {
   const { user, apiClient, logout } = useAuth();
 
-  // ── existing state ─────────────────────────────────────────────────────────
+  // ── core state ─────────────────────────────────────────────────────────────
   const [tables,        setTables]        = useState([]);
   const [orders,        setOrders]        = useState([]);
   const [menuItems,     setMenuItems]     = useState([]);
@@ -60,29 +54,30 @@ export default function ManagerPortal() {
   const [isSubmitting,  setIsSubmitting]  = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
 
-  // ── token/queue state ──────────────────────────────────────────────────────
+  // ── token / queue state ────────────────────────────────────────────────────
   const [tokens,         setTokens]         = useState([]);
   const [assigningToken, setAssigningToken] = useState(null);
   const [assignTableSel, setAssignTableSel] = useState({});
   const [activeTab,      setActiveTab]      = useState('queue');
   const [toastMsg,       setToastMsg]       = useState('');
 
-  // Fix A: React-state confirm modal instead of window.confirm()
-  const [confirmModal, setConfirmModal] = useState(null);
-  // confirmModal shape: { message: string, onConfirm: fn }
+  // ── "free table" modal ─────────────────────────────────────────────────────
+  // Opened when manager clicks "Mark Available" on an occupied table.
+  // Asks: Complete Order / Cancel Order / Just Free (if no order linked).
+  const [freeTableModal, setFreeTableModal] = useState(null);
+  // shape: { tableId, tableNumber, order | null, token | null }
 
   // ─── toast helper ──────────────────────────────────────────────────────────
   const showToast = (msg) => {
     setToastMsg(msg);
-    setTimeout(() => setToastMsg(''), 3000);
+    setTimeout(() => setToastMsg(''), 3500);
   };
 
   // ─── fetch helpers ─────────────────────────────────────────────────────────
   const fetchTokens = useCallback(async () => {
     try {
       const res = await apiClient.get('/api/tokens');
-      const raw = res.data.tokens || res.data || [];
-      setTokens(raw);
+      setTokens(res.data.tokens || res.data || []);
     } catch (err) {
       console.error('Failed to fetch tokens:', err.message);
     }
@@ -116,10 +111,7 @@ export default function ManagerPortal() {
   }, [apiClient]);
 
   const fetchData = useCallback(async () => {
-    await fetchTables();
-    await fetchOrders();
-    await fetchTokens();
-    await fetchMenuItems();
+    await Promise.all([fetchTables(), fetchOrders(), fetchTokens(), fetchMenuItems()]);
     setLoading(false);
   }, [fetchTables, fetchOrders, fetchTokens, fetchMenuItems]);
 
@@ -129,19 +121,25 @@ export default function ManagerPortal() {
     const quickInterval = setInterval(async () => {
       await fetchTokens();
       await fetchTables();
+      await fetchOrders();
     }, 8000);
     return () => {
       clearInterval(fullInterval);
       clearInterval(quickInterval);
     };
-  }, [fetchData, fetchTokens, fetchTables]);
+  }, [fetchData, fetchTokens, fetchTables, fetchOrders]);
 
   // ─── derived helpers ───────────────────────────────────────────────────────
+  // FIX: only orders with ACTIVE_ORDER_STATUSES count toward "occupied".
+  // Completed/cancelled orders no longer lock a table in the UI.
   const getTableStatus = (table) => {
-    const order = orders.find(o => o.table_id === table.id && o.status !== 'completed');
+    const order = orders.find(
+      o => o.table_id === table.id && ACTIVE_ORDER_STATUSES.includes(o.status)
+    );
     const token = tokens.find(t => t.table_id === table.id && t.status === 'seated');
+    const dbStatus = table.status || 'available';
     return {
-      status: order ? 'occupied' : token ? 'occupied' : (table.status || 'available'),
+      status: (order || token) ? 'occupied' : dbStatus,
       order,
       token,
     };
@@ -171,14 +169,59 @@ export default function ManagerPortal() {
   const takeawayTokens   = normalisedTokens.filter(t => t.status === 'takeaway');
   const freeTablesCount  = tables.filter(t => getTableStatus(t).status === 'available').length;
 
-  // ─── assign table to token ─────────────────────────────────────────────────
+  // ─── open "free table" choice modal ───────────────────────────────────────
+  const openFreeTableModal = (table) => {
+    const { order, token } = getTableStatus(table);
+    setFreeTableModal({
+      tableId:     table.id,
+      tableNumber: table.table_number,
+      order:       order || null,
+      token:       token || null,
+    });
+  };
+
+  // ─── confirm freeing the table ─────────────────────────────────────────────
+  // orderAction: 'complete' | 'cancel' | null (null = no order to handle)
+  const confirmFreeTable = async (orderAction) => {
+    const { tableId, tableNumber, order, token } = freeTableModal;
+    setFreeTableModal(null);
+
+    try {
+      // 1. Handle the linked order
+      if (order && orderAction === 'complete') {
+        await apiClient.put(`/api/orders/${order.id}/status`, { status: 'completed' });
+      } else if (order && orderAction === 'cancel') {
+        await apiClient.delete(`/api/orders/${order.id}`);
+      }
+
+      // 2. Complete any seated walk-in token on this table
+      if (token) {
+        try {
+          await apiClient.put(`/api/tokens/${token.id}/complete`);
+        } catch (tokErr) {
+          console.warn('Could not complete token:', tokErr.message);
+        }
+      }
+
+      // 3. Force the table to available in DB
+      await apiClient.put(`/api/tables/${tableId}/status`, { status: 'available' });
+
+      await fetchTables();
+      await fetchOrders();
+      await fetchTokens();
+      showToast(`✅ Table ${tableNumber} is now available`);
+    } catch (err) {
+      console.error('Failed to free table:', err);
+      showToast(`❌ Failed: ${err.message}`);
+    }
+  };
+
+  // ─── token helpers ─────────────────────────────────────────────────────────
   const assignTable = async (token) => {
     const tableId = assignTableSel[token.id];
     if (!tableId) { showToast('Please select a table first'); return; }
-
     const table = tables.find(t => String(t.id) === String(tableId));
     if (!table) return;
-
     setAssigningToken(token.id);
     try {
       await apiClient.put(`/api/tokens/${token.id}/assign`, {
@@ -197,7 +240,6 @@ export default function ManagerPortal() {
     }
   };
 
-  // ─── complete / free table ─────────────────────────────────────────────────
   const completeToken = async (token) => {
     try {
       await apiClient.put(`/api/tokens/${token.id}/complete`);
@@ -210,7 +252,6 @@ export default function ManagerPortal() {
     }
   };
 
-  // ─── dismiss / delete token ────────────────────────────────────────────────
   const dismissToken = async (tokenId) => {
     try {
       await apiClient.delete(`/api/tokens/${tokenId}`);
@@ -220,48 +261,7 @@ export default function ManagerPortal() {
     }
   };
 
-  // ─── mark table available ──────────────────────────────────────────────────
-  // Fix A: uses React confirm modal instead of window.confirm()
-  // Fix B: also completes any seated token on this table
-  // Fix C: removed inner fetchOrders() stale-order cleanup — backend owns that
-  const updateTableStatus = (tableId, status, tableNumber) => {
-    setConfirmModal({
-      message: `Mark Table ${tableNumber || tableId} as available?`,
-      onConfirm: async () => {
-        setConfirmModal(null);
-        try {
-          console.log(`[updateTableStatus] tableId=${tableId} status=${status}`);
-
-          // Fix B: complete any seated walk-in token on this table first
-          // This clears the queue and lets the backend free the table too.
-          const seatedOnThisTable = normalisedTokens.filter(
-            t => t.table_id === tableId && t.status === 'seated'
-          );
-          for (const tok of seatedOnThisTable) {
-            try {
-              await apiClient.put(`/api/tokens/${tok.id}/complete`);
-              console.log(`[updateTableStatus] Completed token ${tok.id} on table ${tableNumber}`);
-            } catch (tokErr) {
-              console.warn(`[updateTableStatus] Could not complete token ${tok.id}:`, tokErr.message);
-            }
-          }
-
-          // Fix C: just update the table status — backend handles stale orders
-          await apiClient.put(`/api/tables/${tableId}/status`, { status });
-
-          await fetchTables();
-          await fetchTokens();
-          await fetchOrders();
-          showToast(`✅ Table ${tableNumber || tableId} is now available`);
-        } catch (err) {
-          console.error('[updateTableStatus] Failed:', err.message);
-          showToast(`❌ Failed: ${err.message}`);
-        }
-      },
-    });
-  };
-
-  // ─── existing order helpers ────────────────────────────────────────────────
+  // ─── order helpers ─────────────────────────────────────────────────────────
   const createOrder = async () => {
     if (!selectedTable || selectedItems.length === 0) {
       showToast('Please select a table and items');
@@ -334,23 +334,69 @@ export default function ManagerPortal() {
         </div>
       )}
 
-      {/* ── Fix A: React Confirm Modal (replaces window.confirm) ───────────── */}
-      {confirmModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full p-6">
-            <p className="text-gray-800 text-base font-medium mb-6">{confirmModal.message}</p>
-            <div className="flex gap-3 justify-end">
+      {/* ── Free Table Modal ───────────────────────────────────────────────── */}
+      {freeTableModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden">
+            <div className="bg-blue-600 text-white px-6 py-5">
+              <h3 className="text-lg font-bold">Free Table {freeTableModal.tableNumber}</h3>
+              <p className="text-blue-100 text-sm mt-0.5">What happened with this table?</p>
+            </div>
+            <div className="p-6 space-y-3">
+              {freeTableModal.order ? (
+                <>
+                  {/* Order summary */}
+                  <div className="bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-700 mb-2">
+                    <p className="font-semibold text-gray-900 mb-1">
+                      Order #{freeTableModal.order.order_number?.slice(-4)}
+                    </p>
+                    <p>Status: <span className="capitalize font-medium">{freeTableModal.order.status}</span></p>
+                    <p>Amount: <span className="font-medium">₹{freeTableModal.order.total_amount?.toFixed(2) ?? '—'}</span></p>
+                  </div>
+
+                  {/* Option A: Complete */}
+                  <button
+                    onClick={() => confirmFreeTable('complete')}
+                    className="w-full flex items-center gap-3 bg-green-50 hover:bg-green-100 border border-green-200 text-green-800 font-semibold px-4 py-3 rounded-xl transition text-sm text-left"
+                  >
+                    <span className="text-xl">✅</span>
+                    <div>
+                      <p className="font-bold">Order Completed</p>
+                      <p className="text-green-600 font-normal text-xs">Guests paid and left — mark order done</p>
+                    </div>
+                  </button>
+
+                  {/* Option B: Cancel */}
+                  <button
+                    onClick={() => confirmFreeTable('cancel')}
+                    className="w-full flex items-center gap-3 bg-red-50 hover:bg-red-100 border border-red-200 text-red-800 font-semibold px-4 py-3 rounded-xl transition text-sm text-left"
+                  >
+                    <span className="text-xl">❌</span>
+                    <div>
+                      <p className="font-bold">Cancel Order</p>
+                      <p className="text-red-500 font-normal text-xs">Guests left / mistake — void the order</p>
+                    </div>
+                  </button>
+                </>
+              ) : (
+                /* No active order — just free the table */
+                <button
+                  onClick={() => confirmFreeTable(null)}
+                  className="w-full flex items-center gap-3 bg-green-50 hover:bg-green-100 border border-green-200 text-green-800 font-semibold px-4 py-3 rounded-xl transition text-sm text-left"
+                >
+                  <span className="text-xl">🟢</span>
+                  <div>
+                    <p className="font-bold">Mark Available</p>
+                    <p className="text-green-600 font-normal text-xs">No active order — just free the table</p>
+                  </div>
+                </button>
+              )}
+
               <button
-                onClick={() => setConfirmModal(null)}
-                className="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold text-sm transition"
+                onClick={() => setFreeTableModal(null)}
+                className="w-full text-center text-sm text-gray-400 hover:text-gray-600 py-2 transition"
               >
-                Cancel
-              </button>
-              <button
-                onClick={confirmModal.onConfirm}
-                className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white font-semibold text-sm transition"
-              >
-                OK
+                Never mind
               </button>
             </div>
           </div>
@@ -412,14 +458,6 @@ export default function ManagerPortal() {
           ))}
         </div>
 
-        {/* ── Debug panel ───────────────────────────────────────────────────── */}
-        {normalisedTokens.length === 0 && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6 text-sm text-yellow-800">
-            ⚠️ No tokens loaded. Check that <code>/api/tokens</code> returns data and the backend is running.
-            <button onClick={fetchData} className="ml-3 underline font-semibold">Retry</button>
-          </div>
-        )}
-
         {/* ── Tab bar ───────────────────────────────────────────────────────── */}
         <div className="flex gap-2 mb-6 bg-white rounded-xl p-1.5 shadow-sm w-fit">
           {[
@@ -447,7 +485,6 @@ export default function ManagerPortal() {
         {activeTab === 'queue' && (
           <div className="space-y-10">
 
-            {/* Waiting for table */}
             <section>
               <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
                 🟠 Waiting for Table
@@ -468,28 +505,18 @@ export default function ManagerPortal() {
                     return (
                       <div key={token.id} className="bg-white rounded-xl shadow-sm p-5 border border-orange-100">
                         <div className="flex items-start justify-between gap-4">
-
-                          {/* Token circle */}
                           <div className="w-14 h-14 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-lg font-bold flex-shrink-0">
                             {String(token.id).replace('T-', '')}
                           </div>
-
-                          {/* Info */}
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-bold text-gray-900 text-lg">{token.id}</span>
-                              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${TOKEN_PILL.waiting}`}>
-                                Waiting
-                              </span>
+                              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${TOKEN_PILL.waiting}`}>Waiting</span>
                             </div>
                             <p className="text-gray-600 text-sm mt-0.5">
                               {token.name} · {token.pax} {token.pax === 1 ? 'person' : 'people'} · Arrived {safeFormat(token.arrived_at, 'HH:mm')}
                             </p>
-                            {token.phone && (
-                              <p className="text-gray-400 text-xs mt-0.5">📱 +{token.phone}</p>
-                            )}
-
-                            {/* Assign row */}
+                            {token.phone && <p className="text-gray-400 text-xs mt-0.5">📱 +{token.phone}</p>}
                             <div className="flex items-center gap-2 mt-3 flex-wrap">
                               <select
                                 value={assignTableSel[token.id] || ''}
@@ -497,38 +524,24 @@ export default function ManagerPortal() {
                                 disabled={avail.length === 0}
                                 className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:opacity-50"
                               >
-                                <option value="">
-                                  {avail.length === 0 ? 'No tables available' : '— assign table —'}
-                                </option>
+                                <option value="">{avail.length === 0 ? 'No tables available' : '— assign table —'}</option>
                                 {avail.map(t => (
                                   <option key={t.id} value={t.id}>
                                     Table {t.table_number}{t.capacity ? ` (${t.capacity} seats)` : ''}{t.section ? ` · ${t.section}` : ''}
                                   </option>
                                 ))}
                               </select>
-
                               <button
                                 onClick={() => assignTable(token)}
                                 disabled={!assignTableSel[token.id] || isAssigning}
                                 className="bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-1"
                               >
-                                {isAssigning ? (
-                                  <>
-                                    <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" />
-                                    Assigning...
-                                  </>
-                                ) : (
-                                  <>✓ Assign + Notify</>
-                                )}
+                                {isAssigning
+                                  ? <><span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" />Assigning...</>
+                                  : '✓ Assign + Notify'
+                                }
                               </button>
-
-                              <button
-                                onClick={() => dismissToken(token.id)}
-                                className="text-gray-400 hover:text-red-500 text-sm px-2 py-2 transition"
-                                title="Dismiss token"
-                              >
-                                ✕
-                              </button>
+                              <button onClick={() => dismissToken(token.id)} className="text-gray-400 hover:text-red-500 text-sm px-2 py-2 transition" title="Dismiss">✕</button>
                             </div>
                           </div>
                         </div>
@@ -539,7 +552,6 @@ export default function ManagerPortal() {
               )}
             </section>
 
-            {/* Seated */}
             {seatedTokens.length > 0 && (
               <section>
                 <h2 className="text-xl font-bold text-gray-900 mb-4">🟢 Seated</h2>
@@ -553,17 +565,12 @@ export default function ManagerPortal() {
                         <div>
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-gray-900">{token.id}</span>
-                            <span className="text-xs font-semibold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
-                              Table {token.table_number}
-                            </span>
+                            <span className="text-xs font-semibold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Table {token.table_number}</span>
                           </div>
                           <p className="text-gray-500 text-sm">{token.name} · {token.pax} pax</p>
                         </div>
                       </div>
-                      <button
-                        onClick={() => completeToken(token)}
-                        className="text-xs bg-gray-100 hover:bg-red-50 hover:text-red-600 text-gray-600 font-semibold px-3 py-2 rounded-lg transition"
-                      >
+                      <button onClick={() => completeToken(token)} className="text-xs bg-gray-100 hover:bg-red-50 hover:text-red-600 text-gray-600 font-semibold px-3 py-2 rounded-lg transition">
                         Free Table
                       </button>
                     </div>
@@ -572,7 +579,6 @@ export default function ManagerPortal() {
               </section>
             )}
 
-            {/* Takeaway */}
             {takeawayTokens.length > 0 && (
               <section>
                 <h2 className="text-xl font-bold text-gray-900 mb-4">🔵 Takeaway</h2>
@@ -585,18 +591,11 @@ export default function ManagerPortal() {
                         </div>
                         <div>
                           <span className="font-bold text-gray-900">{token.id}</span>
-                          <span className={`ml-2 text-xs font-semibold px-2 py-0.5 rounded-full ${TOKEN_PILL.takeaway}`}>
-                            Takeaway
-                          </span>
+                          <span className={`ml-2 text-xs font-semibold px-2 py-0.5 rounded-full ${TOKEN_PILL.takeaway}`}>Takeaway</span>
                           <p className="text-gray-500 text-sm">{token.name} · {safeFormat(token.arrived_at, 'HH:mm')}</p>
                         </div>
                       </div>
-                      <button
-                        onClick={() => dismissToken(token.id)}
-                        className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 font-semibold px-3 py-2 rounded-lg transition"
-                      >
-                        Done
-                      </button>
+                      <button onClick={() => dismissToken(token.id)} className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 font-semibold px-3 py-2 rounded-lg transition">Done</button>
                     </div>
                   ))}
                 </div>
@@ -623,7 +622,6 @@ export default function ManagerPortal() {
                     <p className="text-sm opacity-90 mb-2">Table {table.table_number}</p>
                     <p className="text-2xl mb-3">🪑</p>
                     <p className="capitalize text-sm mb-2">{status}</p>
-
                     {token && (
                       <p className="text-xs opacity-90 bg-black bg-opacity-20 px-2 py-1 rounded mb-1">
                         Token: {token.id}
@@ -634,10 +632,9 @@ export default function ManagerPortal() {
                         Order: {order.order_number?.slice(-4)}
                       </p>
                     )}
-
                     {status === 'occupied' ? (
                       <button
-                        onClick={() => updateTableStatus(table.id, 'available', table.table_number)}
+                        onClick={() => openFreeTableModal(table)}
                         className="mt-auto text-xs bg-white bg-opacity-25 hover:bg-opacity-40 border border-white border-opacity-50 px-3 py-1.5 rounded-lg font-semibold transition w-full"
                       >
                         Mark Available
@@ -673,7 +670,7 @@ export default function ManagerPortal() {
             <h2 className="text-2xl font-bold text-gray-900 mb-6">Active Orders</h2>
             <div className="grid gap-6">
               {orders
-                .filter(o => ['pending', 'confirmed', 'in_progress'].includes(o.status))
+                .filter(o => ACTIVE_ORDER_STATUSES.includes(o.status))
                 .map(order => {
                   const table = tables.find(t => t.id === order.table_id);
                   return (
@@ -706,23 +703,17 @@ export default function ManagerPortal() {
                           <p className="text-xs text-gray-500 mt-1">Status: <span className="font-semibold capitalize">{order.status}</span></p>
                         </div>
                         <div className="flex flex-col gap-2">
-                          <button onClick={() => setSelectedOrder(order)} className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded-lg transition text-sm">
-                            View Details
-                          </button>
+                          <button onClick={() => setSelectedOrder(order)} className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded-lg transition text-sm">View Details</button>
                           {order.status === 'in_progress' && (
-                            <button onClick={() => markOrderReady(order.id)} className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 rounded-lg transition text-sm">
-                              Mark Ready
-                            </button>
+                            <button onClick={() => markOrderReady(order.id)} className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 rounded-lg transition text-sm">Mark Ready</button>
                           )}
-                          <button onClick={() => cancelOrder(order.id, order.table_id)} className="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 rounded-lg transition text-sm">
-                            Cancel
-                          </button>
+                          <button onClick={() => cancelOrder(order.id, order.table_id)} className="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 rounded-lg transition text-sm">Cancel</button>
                         </div>
                       </div>
                     </div>
                   );
                 })}
-              {orders.filter(o => ['pending', 'confirmed', 'in_progress'].includes(o.status)).length === 0 && (
+              {orders.filter(o => ACTIVE_ORDER_STATUSES.includes(o.status)).length === 0 && (
                 <div className="bg-white rounded-xl p-10 text-center text-gray-400 shadow-sm">No active orders.</div>
               )}
             </div>
