@@ -42,9 +42,10 @@ function ProtectedRoute({ children, allowedRoles }) {
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 function AppRoutes() {
-  const { user, loading } = useAuth();
+  // 1. All hooks first
+  const { user, loading, logout } = useAuth();
 
-  // Wait for auth to load before doing anything
+  // 2. Early return while auth is loading
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -56,10 +57,11 @@ function AppRoutes() {
     );
   }
 
-  // Safe access — user may be null on first render
+  // 3. Derive values after hooks — safe null access
   const restaurantId   = user?.restaurant_id   ?? user?.restaurantId   ?? null;
   const restaurantName = user?.restaurant_name ?? user?.restaurantName ?? 'My Restaurant';
 
+  // 4. JSX return last
   return (
     <Routes>
 
@@ -75,6 +77,7 @@ function AppRoutes() {
             <OwnerDashboard
               restaurantId={restaurantId}
               restaurantName={restaurantName}
+              onLogout={logout}
             />
           </ProtectedRoute>
         }
