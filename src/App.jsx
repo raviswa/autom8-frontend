@@ -2,24 +2,21 @@
 // AUTOM8 FRONTEND - MAIN APP
 // src/App.jsx
 // ============================================================================
-// Install: npm install react react-router-dom axios zustand date-fns
-// Run: npm run dev
-
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { WebSocketProvider } from './contexts/WebSocketContext';
 
 // Pages
-import LoginPage from './pages/LoginPage';
+import LoginPage      from './pages/LoginPage';
 import OwnerDashboard from './pages/OwnerDashboard';
-import ManagerPortal from './pages/ManagerPortal';
-import KDSScreen from './pages/KDSScreen';
-import NotFound from './pages/NotFound';
-import MenuPage from './pages/MenuPage';
-import WalkInForm from './pages/WalkInForm';   // ← ADDED
+import ManagerPortal  from './pages/ManagerPortal';
+import KDSScreen      from './pages/KDSScreen';
+import NotFound       from './pages/NotFound';
+import MenuPage       from './pages/MenuPage';
+import WalkInForm     from './pages/WalkInForm';
 
-// ── Protected Route Component ─────────────────────────────────────────────────
+// ── Protected Route ───────────────────────────────────────────────────────────
 function ProtectedRoute({ children, allowedRoles }) {
   const { user, loading } = useAuth();
 
@@ -34,9 +31,7 @@ function ProtectedRoute({ children, allowedRoles }) {
     );
   }
 
-  if (!user) {
-    return <Navigate to="/login" />;
-  }
+  if (!user) return <Navigate to="/login" />;
 
   if (allowedRoles && !allowedRoles.includes(user.role)) {
     return <Navigate to="/unauthorized" />;
@@ -49,28 +44,32 @@ function ProtectedRoute({ children, allowedRoles }) {
 function AppRoutes() {
   const { user } = useAuth();
 
+  // Pull restaurant info from the user object stored in localStorage
+  // user object comes from your /api/auth/login response — check what fields it returns
+  const restaurantId   = user?.restaurant_id   || user?.restaurantId   || null;
+  const restaurantName = user?.restaurant_name || user?.restaurantName || 'My Restaurant';
+
   return (
     <Routes>
 
-      {/* ── Public routes ── */}
-      <Route path="/login" element={<LoginPage />} />
+      {/* ── Public ── */}
+      <Route path="/login"   element={<LoginPage />} />
+      <Route path="/checkin" element={<WalkInForm />} />
 
-      {/* Customer walk-in form — no auth required, accessed via QR code */}
-      <Route path="/checkin" element={<WalkInForm />} />   {/* ← ADDED */}
+      {/* ── Owner ── */}
+      <Route
+        path="/dashboard/owner"
+        element={
+          <ProtectedRoute allowedRoles={['owner']}>
+            <OwnerDashboard
+              restaurantId={restaurantId}
+              restaurantName={restaurantName}
+            />
+          </ProtectedRoute>
+        }
+      />
 
-      {/* ── Protected routes ── */}
-      import OwnerDashboard from "./pages/dashboard/OwnerDashboard";
-
-// Inside your routes, protected by role check:
-    <Route path="/dashboard/owner" element={
-        <ProtectedRoute role="owner">
-          <OwnerDashboard
-          restaurantId={user.restaurant_id}
-          restaurantName={user.restaurant_name}
-          />
-  </ProtectedRoute>
-} />
-
+      {/* ── Manager ── */}
       <Route
         path="/dashboard/manager"
         element={
@@ -80,6 +79,7 @@ function AppRoutes() {
         }
       />
 
+      {/* ── Kitchen ── */}
       <Route
         path="/dashboard/kitchen"
         element={
@@ -89,6 +89,7 @@ function AppRoutes() {
         }
       />
 
+      {/* ── Menu ── */}
       <Route
         path="/dashboard/menu"
         element={
@@ -98,7 +99,7 @@ function AppRoutes() {
         }
       />
 
-      {/* ── Redirects ── */}
+      {/* ── Default redirect ── */}
       <Route
         path="/"
         element={<Navigate to={user ? `/dashboard/${user.role}` : '/login'} />}
