@@ -197,7 +197,6 @@ export default function ManagerPortal() {
 
   // ─── complete / free table ─────────────────────────────────────────────────
   const completeToken = async (token) => {
-    if (!window.confirm(`Mark Token ${token.id} (Table ${token.table_number}) as done and free the table?`)) return;
     try {
       await apiClient.put(`/api/tokens/${token.id}/complete`);
       showToast(`Table ${token.table_number} is now free`);
@@ -248,17 +247,34 @@ export default function ManagerPortal() {
     }
   };
 
-  const updateTableStatus = async (tableId, status) => {
+  const updateTableStatus = async (tableId, status, tableNumber) => {
     try {
+      console.log(`[updateTableStatus] tableId=${tableId} status=${status}`);
       await apiClient.put(`/api/tables/${tableId}/status`, { status });
+      // Also complete any stale active orders on this table
+      try {
+        const ordersRes = await apiClient.get('/api/orders');
+        const allOrders = ordersRes.data.orders || [];
+        const stale = allOrders.filter(o =>
+          o.table_id === tableId && ['pending','confirmed','in_progress'].includes(o.status)
+        );
+        for (const o of stale) {
+          await apiClient.put(`/api/orders/${o.id}/status`, { status: 'completed' });
+          console.log(`[updateTableStatus] Completed stale order ${o.order_number}`);
+        }
+      } catch (cleanupErr) {
+        console.warn('[updateTableStatus] Stale order cleanup failed:', cleanupErr.message);
+      }
       await fetchTables();
+      await fetchOrders();
+      showToast(`✅ Table ${tableNumber || tableId} is now available`);
     } catch (err) {
-      console.error('Failed to update table status:', err);
+      console.error('[updateTableStatus] Failed:', err.message);
+      showToast(`❌ Failed: ${err.message}`);
     }
   };
 
   const cancelOrder = async (orderId, tableId) => {
-    if (!window.confirm('Cancel this order?')) return;
     try {
       await apiClient.delete(`/api/orders/${orderId}`);
       if (tableId) await apiClient.put(`/api/tables/${tableId}/status`, { status: 'available' });
@@ -582,11 +598,7 @@ export default function ManagerPortal() {
 
                     {status === 'occupied' ? (
                       <button
-                        onClick={() => {
-                          if (window.confirm(`Mark Table ${table.table_number} as available?`)) {
-                            updateTableStatus(table.id, 'available');
-                          }
-                        }}
+                        onClick={() => updateTableStatus(table.id, 'available', table.table_number)}
                         className="mt-auto text-xs bg-white bg-opacity-25 hover:bg-opacity-40 border border-white border-opacity-50 px-3 py-1.5 rounded-lg font-semibold transition w-full"
                       >
                         Mark Available
