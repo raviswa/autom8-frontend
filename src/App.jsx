@@ -42,12 +42,23 @@ function ProtectedRoute({ children, allowedRoles }) {
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 function AppRoutes() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
 
-  // Pull restaurant info from the user object stored in localStorage
-  // user object comes from your /api/auth/login response — check what fields it returns
-  const restaurantId   = user?.restaurant_id   || user?.restaurantId   || null;
-  const restaurantName = user?.restaurant_name || user?.restaurantName || 'My Restaurant';
+  // Wait for auth to load before doing anything
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <div className="w-12 h-12 mx-auto mb-4 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Safe access — user may be null on first render
+  const restaurantId   = user?.restaurant_id   ?? user?.restaurantId   ?? null;
+  const restaurantName = user?.restaurant_name ?? user?.restaurantName ?? 'My Restaurant';
 
   return (
     <Routes>
