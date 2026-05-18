@@ -63,33 +63,68 @@ export default function ManagerPortal() {
   };
 
   // ─── fetch all data ────────────────────────────────────────────────────────
-  const fetchData = useCallback(async () => {
+  // Fetch each resource independently so one failure doesn't block others
+  // and to avoid ERR_INSUFFICIENT_RESOURCES from too many parallel requests
+  const fetchTokens = useCallback(async () => {
     try {
-      const [tablesRes, ordersRes, menuRes, tokensRes] = await Promise.all([
-        apiClient.get('/api/tables'),
-        apiClient.get('/api/orders'),
-        apiClient.get('/api/menu-items'),
-        apiClient.get('/api/tokens'),
-      ]);
-      setTables(tablesRes.data.tables    || tablesRes.data  || []);
-      setOrders(ordersRes.data.orders    || ordersRes.data  || []);
-      setMenuItems(menuRes.data.items    || menuRes.data    || []);
-
-      // Handle both { tokens: [...] } and flat array responses
-      const rawTokens = tokensRes.data.tokens || tokensRes.data || [];
-      setTokens(rawTokens);
+      const res = await apiClient.get('/api/tokens');
+      const raw = res.data.tokens || res.data || [];
+      setTokens(raw);
     } catch (err) {
-      console.error('Failed to fetch data:', err);
-    } finally {
-      setLoading(false);
+      console.error('Failed to fetch tokens:', err.message);
     }
   }, [apiClient]);
 
+  const fetchTables = useCallback(async () => {
+    try {
+      const res = await apiClient.get('/api/tables');
+      setTables(res.data.tables || res.data || []);
+    } catch (err) {
+      console.error('Failed to fetch tables:', err.message);
+    }
+  }, [apiClient]);
+
+  const fetchOrders = useCallback(async () => {
+    try {
+      const res = await apiClient.get('/api/orders');
+      setOrders(res.data.orders || res.data || []);
+    } catch (err) {
+      console.error('Failed to fetch orders:', err.message);
+    }
+  }, [apiClient]);
+
+  const fetchMenuItems = useCallback(async () => {
+    try {
+      const res = await apiClient.get('/api/menu-items');
+      setMenuItems(res.data.items || res.data || []);
+    } catch (err) {
+      console.error('Failed to fetch menu items:', err.message);
+    }
+  }, [apiClient]);
+
+  const fetchData = useCallback(async () => {
+    // Sequential fetches — avoids browser connection exhaustion
+    await fetchTables();
+    await fetchOrders();
+    await fetchTokens();
+    await fetchMenuItems();
+    setLoading(false);
+  }, [fetchTables, fetchOrders, fetchTokens, fetchMenuItems]);
+
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval);
-  }, [fetchData]);
+    // Poll every 15s for full refresh — tokens/tables update faster via their own intervals
+    const fullInterval = setInterval(fetchData, 15000);
+    // Tokens and tables poll more frequently (every 8s) since queue changes matter most
+    const quickInterval = setInterval(async () => {
+      await fetchTokens();
+      await fetchTables();
+    }, 8000);
+    return () => {
+      clearInterval(fullInterval);
+      clearInterval(quickInterval);
+    };
+  }, [fetchData, fetchTokens, fetchTables]);
 
   // ─── derived helpers ───────────────────────────────────────────────────────
   const getTableStatus = (table) => {
@@ -150,7 +185,8 @@ export default function ManagerPortal() {
       });
       showToast(`✅ Token ${token.id} → Table ${table.table_number} · WhatsApp sent`);
       setAssignTableSel(prev => { const n = {...prev}; delete n[token.id]; return n; });
-      fetchData();
+      await fetchTokens();
+      await fetchTables();
     } catch (err) {
       console.error('Failed to assign table:', err);
       showToast('❌ Failed to assign table — check backend logs');
@@ -165,7 +201,8 @@ export default function ManagerPortal() {
     try {
       await apiClient.put(`/api/tokens/${token.id}/complete`);
       showToast(`Table ${token.table_number} is now free`);
-      fetchData();
+      await fetchTokens();
+      await fetchTables();
     } catch (err) {
       console.error('Failed to complete token:', err);
       showToast('❌ Failed to complete token');
@@ -176,7 +213,7 @@ export default function ManagerPortal() {
   const dismissToken = async (tokenId) => {
     try {
       await apiClient.delete(`/api/tokens/${tokenId}`);
-      fetchData();
+      await fetchTokens();
     } catch (err) {
       console.error('Failed to dismiss token:', err);
     }
@@ -201,7 +238,8 @@ export default function ManagerPortal() {
     setSelectedTable(null);
     try {
       await apiClient.post('/api/orders', { table_id: tableId, items, notes: '' });
-      fetchData();
+      await fetchOrders();
+      await fetchTables();
     } catch (err) {
       console.error('Failed to create order:', err);
       alert('Error creating order: ' + err.message);
@@ -213,7 +251,7 @@ export default function ManagerPortal() {
   const updateTableStatus = async (tableId, status) => {
     try {
       await apiClient.put(`/api/tables/${tableId}/status`, { status });
-      fetchData();
+      await fetchTables();
     } catch (err) {
       console.error('Failed to update table status:', err);
     }
