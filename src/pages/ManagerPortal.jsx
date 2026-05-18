@@ -1,21 +1,11 @@
 // ============================================================================
-// AUTOM8 FRONTEND - MANAGER PORTAL (UPDATED)
+// AUTOM8 FRONTEND - MANAGER PORTAL
 // src/pages/ManagerPortal.jsx
-//
-// Changes from original:
-//   + Walk-in Queue section with token cards
-//   + Token → Table assignment with dropdown (capacity-filtered)
-//   + WhatsApp notification fires on assign (via backend)
-//   + Tables show assigned token number when occupied
-//   + "Complete & Free Table" button on seated tokens
-//   + Takeaway queue section (separate)
-//   + Stats bar: waiting / seated / takeaway / free tables
-//   + All existing order management preserved unchanged
 // ============================================================================
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 
 // ─── Status colours (tables) ─────────────────────────────────────────────────
 const TABLE_COLOURS = {
@@ -27,16 +17,28 @@ const TABLE_COLOURS = {
 
 // ─── Token status pill colours ───────────────────────────────────────────────
 const TOKEN_PILL = {
-  waiting:  'bg-orange-100 text-orange-700',
-  seated:   'bg-green-100  text-green-700',
-  takeaway: 'bg-blue-100   text-blue-700',
-  completed:'bg-gray-100   text-gray-500',
+  waiting:   'bg-orange-100 text-orange-700',
+  seated:    'bg-green-100  text-green-700',
+  takeaway:  'bg-blue-100   text-blue-700',
+  completed: 'bg-gray-100   text-gray-500',
 };
+
+// ─── Safe date formatter ──────────────────────────────────────────────────────
+function safeFormat(dateVal, fmt) {
+  if (!dateVal) return '—';
+  try {
+    const d = typeof dateVal === 'string' ? parseISO(dateVal) : new Date(dateVal);
+    if (isNaN(d.getTime())) return '—';
+    return format(d, fmt);
+  } catch {
+    return '—';
+  }
+}
 
 export default function ManagerPortal() {
   const { user, apiClient, logout } = useAuth();
 
-  // ── existing state ──────────────────────────────────────────────────────────
+  // ── existing state ─────────────────────────────────────────────────────────
   const [tables,        setTables]        = useState([]);
   const [orders,        setOrders]        = useState([]);
   const [menuItems,     setMenuItems]     = useState([]);
@@ -47,11 +49,11 @@ export default function ManagerPortal() {
   const [isSubmitting,  setIsSubmitting]  = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
 
-  // ── new token/queue state ───────────────────────────────────────────────────
+  // ── token/queue state ──────────────────────────────────────────────────────
   const [tokens,         setTokens]         = useState([]);
-  const [assigningToken, setAssigningToken] = useState(null);   // token.id being assigned
-  const [assignTableSel, setAssignTableSel] = useState({});     // { [tokenId]: tableId }
-  const [activeTab,      setActiveTab]      = useState('queue'); // 'queue' | 'tables' | 'orders'
+  const [assigningToken, setAssigningToken] = useState(null);
+  const [assignTableSel, setAssignTableSel] = useState({});
+  const [activeTab,      setActiveTab]      = useState('queue');
   const [toastMsg,       setToastMsg]       = useState('');
 
   // ─── toast helper ──────────────────────────────────────────────────────────
@@ -69,10 +71,13 @@ export default function ManagerPortal() {
         apiClient.get('/api/menu-items'),
         apiClient.get('/api/tokens'),
       ]);
-      setTables(tablesRes.data.tables    || []);
-      setOrders(ordersRes.data.orders    || []);
-      setMenuItems(menuRes.data.items    || []);
-      setTokens(tokensRes.data.tokens    || []);
+      setTables(tablesRes.data.tables    || tablesRes.data  || []);
+      setOrders(ordersRes.data.orders    || ordersRes.data  || []);
+      setMenuItems(menuRes.data.items    || menuRes.data    || []);
+
+      // Handle both { tokens: [...] } and flat array responses
+      const rawTokens = tokensRes.data.tokens || tokensRes.data || [];
+      setTokens(rawTokens);
     } catch (err) {
       console.error('Failed to fetch data:', err);
     } finally {
@@ -89,31 +94,49 @@ export default function ManagerPortal() {
   // ─── derived helpers ───────────────────────────────────────────────────────
   const getTableStatus = (table) => {
     const order = orders.find(o => o.table_id === table.id && o.status !== 'completed');
-    // Also check if a token is seated at this table
     const token = tokens.find(t => t.table_id === table.id && t.status === 'seated');
     return {
-      status: order ? 'occupied' : token ? 'occupied' : table.status,
+      status: order ? 'occupied' : token ? 'occupied' : (table.status || 'available'),
       order,
       token,
     };
   };
 
-  // Tables that are available AND have enough capacity for pax
   const availableTablesFor = (pax) =>
     tables.filter(t => {
       const { status } = getTableStatus(t);
       return status === 'available' && (t.capacity == null || t.capacity >= pax);
     });
 
-  const waitingTokens  = tokens.filter(t => t.status === 'waiting');
-  const seatedTokens   = tokens.filter(t => t.status === 'seated');
-  const takeawayTokens = tokens.filter(t => t.status === 'takeaway');
-  const freeTablesCount = tables.filter(t => getTableStatus(t).status === 'available').length;
+  // Normalise token fields — backend may use different field names
+  const normaliseToken = (t) => ({
+    ...t,
+    // id: prefer id, fall back to token_id or token_number
+    id:           t.id || t.token_id || t.token_number || '?',
+    // status: map 'dinein' type to waiting if no explicit status
+    status:       t.status || (t.type === 'takeaway' ? 'takeaway' : 'waiting'),
+    // name
+    name:         t.name || t.customer_name || 'Guest',
+    // pax
+    pax:          t.pax || t.party_size || 1,
+    // arrived_at: try multiple field names
+    arrived_at:   t.arrived_at || t.created_at || t.inserted_at || new Date().toISOString(),
+    // phone
+    phone:        t.phone || t.customer_phone || null,
+    // table fields
+    table_id:     t.table_id || null,
+    table_number: t.table_number || null,
+  });
+
+  const normalisedTokens = tokens.map(normaliseToken);
+  const waitingTokens    = normalisedTokens.filter(t => t.status === 'waiting');
+  const seatedTokens     = normalisedTokens.filter(t => t.status === 'seated');
+  const takeawayTokens   = normalisedTokens.filter(t => t.status === 'takeaway');
+  const freeTablesCount  = tables.filter(t => getTableStatus(t).status === 'available').length;
 
   // ─── assign table to token ─────────────────────────────────────────────────
   const assignTable = async (token) => {
     const tableId = assignTableSel[token.id];
-    console.log('tableId:', tableId, 'assignTableSel:', assignTableSel);
     if (!tableId) { showToast('Please select a table first'); return; }
 
     const table = tables.find(t => String(t.id) === String(tableId));
@@ -126,12 +149,11 @@ export default function ManagerPortal() {
         table_number: table.table_number,
       });
       showToast(`✅ Token ${token.id} → Table ${table.table_number} · WhatsApp sent`);
-      // Clear selection for this token
       setAssignTableSel(prev => { const n = {...prev}; delete n[token.id]; return n; });
       fetchData();
     } catch (err) {
       console.error('Failed to assign table:', err);
-      showToast('❌ Failed to assign table');
+      showToast('❌ Failed to assign table — check backend logs');
     } finally {
       setAssigningToken(null);
     }
@@ -146,6 +168,7 @@ export default function ManagerPortal() {
       fetchData();
     } catch (err) {
       console.error('Failed to complete token:', err);
+      showToast('❌ Failed to complete token');
     }
   };
 
@@ -159,7 +182,7 @@ export default function ManagerPortal() {
     }
   };
 
-  // ─── existing order helpers (unchanged) ───────────────────────────────────
+  // ─── existing order helpers ────────────────────────────────────────────────
   const createOrder = async () => {
     if (!selectedTable || selectedItems.length === 0) {
       alert('Please select a table and items');
@@ -241,7 +264,7 @@ export default function ManagerPortal() {
         </div>
       )}
 
-      {/* ── Header (unchanged) ────────────────────────────────────────────── */}
+      {/* ── Header ────────────────────────────────────────────────────────── */}
       <div className="bg-white shadow-lg">
         <div className="max-w-7xl mx-auto px-6 py-6">
           <div className="flex justify-between items-center">
@@ -284,10 +307,10 @@ export default function ManagerPortal() {
         {/* ── Stats bar ─────────────────────────────────────────────────────── */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           {[
-            { label: 'Waiting',      value: waitingTokens.length,  colour: 'bg-orange-50 border-orange-200 text-orange-700' },
-            { label: 'Seated',       value: seatedTokens.length,   colour: 'bg-green-50  border-green-200  text-green-700'  },
-            { label: 'Takeaway',     value: takeawayTokens.length, colour: 'bg-blue-50   border-blue-200   text-blue-700'   },
-            { label: 'Tables Free',  value: freeTablesCount,       colour: 'bg-gray-50   border-gray-200   text-gray-700'   },
+            { label: 'Waiting',     value: waitingTokens.length,  colour: 'bg-orange-50 border-orange-200 text-orange-700' },
+            { label: 'Seated',      value: seatedTokens.length,   colour: 'bg-green-50  border-green-200  text-green-700'  },
+            { label: 'Takeaway',    value: takeawayTokens.length, colour: 'bg-blue-50   border-blue-200   text-blue-700'   },
+            { label: 'Tables Free', value: freeTablesCount,       colour: 'bg-gray-50   border-gray-200   text-gray-700'   },
           ].map(s => (
             <div key={s.label} className={`rounded-xl border px-5 py-4 ${s.colour}`}>
               <p className="text-3xl font-bold">{s.value}</p>
@@ -295,6 +318,14 @@ export default function ManagerPortal() {
             </div>
           ))}
         </div>
+
+        {/* ── Debug panel: show raw token count so we can diagnose ─────────── */}
+        {normalisedTokens.length === 0 && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6 text-sm text-yellow-800">
+            ⚠️ No tokens loaded. Check that <code>/api/tokens</code> returns data and the backend is running.
+            <button onClick={fetchData} className="ml-3 underline font-semibold">Retry</button>
+          </div>
+        )}
 
         {/* ── Tab bar ───────────────────────────────────────────────────────── */}
         <div className="flex gap-2 mb-6 bg-white rounded-xl p-1.5 shadow-sm w-fit">
@@ -347,7 +378,7 @@ export default function ManagerPortal() {
 
                           {/* Token circle */}
                           <div className="w-14 h-14 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-lg font-bold flex-shrink-0">
-                            {token.id.replace('T-', '')}
+                            {String(token.id).replace('T-', '')}
                           </div>
 
                           {/* Info */}
@@ -359,7 +390,7 @@ export default function ManagerPortal() {
                               </span>
                             </div>
                             <p className="text-gray-600 text-sm mt-0.5">
-                              {token.name} · {token.pax} {token.pax === 1 ? 'person' : 'people'} · Arrived {format(new Date(token.arrived_at), 'HH:mm')}
+                              {token.name} · {token.pax} {token.pax === 1 ? 'person' : 'people'} · Arrived {safeFormat(token.arrived_at, 'HH:mm')}
                             </p>
                             {token.phone && (
                               <p className="text-gray-400 text-xs mt-0.5">📱 +{token.phone}</p>
@@ -369,10 +400,7 @@ export default function ManagerPortal() {
                             <div className="flex items-center gap-2 mt-3 flex-wrap">
                               <select
                                 value={assignTableSel[token.id] || ''}
-                                onChange={e => {
-                                  const val = e.target.value;
-                                  setAssignTableSel(prev => ({ ...prev, [token.id]: val }));
-                                }}
+                                onChange={e => setAssignTableSel(prev => ({ ...prev, [token.id]: e.target.value }))}
                                 disabled={avail.length === 0}
                                 className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:opacity-50"
                               >
@@ -427,7 +455,7 @@ export default function ManagerPortal() {
                     <div key={token.id} className="bg-white rounded-xl shadow-sm p-5 border border-green-100 flex items-center justify-between gap-4">
                       <div className="flex items-center gap-4">
                         <div className="w-12 h-12 rounded-full bg-green-100 text-green-700 flex items-center justify-center font-bold">
-                          {token.id.replace('T-', '')}
+                          {String(token.id).replace('T-', '')}
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
@@ -460,14 +488,14 @@ export default function ManagerPortal() {
                     <div key={token.id} className="bg-white rounded-xl shadow-sm p-5 border border-blue-100 flex items-center justify-between gap-4">
                       <div className="flex items-center gap-4">
                         <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
-                          {token.id.replace('T-', '')}
+                          {String(token.id).replace('T-', '')}
                         </div>
                         <div>
                           <span className="font-bold text-gray-900">{token.id}</span>
                           <span className={`ml-2 text-xs font-semibold px-2 py-0.5 rounded-full ${TOKEN_PILL.takeaway}`}>
                             Takeaway
                           </span>
-                          <p className="text-gray-500 text-sm">{token.name} · {format(new Date(token.arrived_at), 'HH:mm')}</p>
+                          <p className="text-gray-500 text-sm">{token.name} · {safeFormat(token.arrived_at, 'HH:mm')}</p>
                         </div>
                       </div>
                       <button
@@ -503,7 +531,6 @@ export default function ManagerPortal() {
                     <p className="text-2xl mb-3">🪑</p>
                     <p className="capitalize text-sm mb-2">{status}</p>
 
-                    {/* Show token number if a walk-in is seated here */}
                     {token && (
                       <p className="text-xs opacity-90 bg-black bg-opacity-20 px-2 py-1 rounded mb-1">
                         Token: {token.id}
@@ -538,8 +565,6 @@ export default function ManagerPortal() {
                 );
               })}
             </div>
-
-            {/* Legend */}
             <div className="flex gap-4 mt-6 flex-wrap">
               {Object.entries({ available: 'Available', occupied: 'Occupied', reserved: 'Reserved', dirty: 'Needs cleaning' }).map(([k, v]) => (
                 <div key={k} className="flex items-center gap-2 text-sm text-gray-600">
@@ -552,7 +577,7 @@ export default function ManagerPortal() {
         )}
 
         {/* ════════════════════════════════════════════════════════════════════
-            TAB: ORDERS (identical to original)
+            TAB: ORDERS
         ════════════════════════════════════════════════════════════════════ */}
         {activeTab === 'orders' && (
           <div>
@@ -568,7 +593,7 @@ export default function ManagerPortal() {
                         <div>
                           <h3 className="text-lg font-bold text-gray-900">Order #{order.order_number?.slice(-4)}</h3>
                           <p className="text-gray-600 text-sm mt-1">Table {table?.table_number || 'N/A'} · {table?.section}</p>
-                          <p className="text-gray-500 text-xs mt-2">{format(new Date(order.created_at), 'HH:mm:ss')}</p>
+                          <p className="text-gray-500 text-xs mt-2">{safeFormat(order.created_at, 'HH:mm:ss')}</p>
                         </div>
                         <div>
                           <p className="text-sm font-semibold text-gray-700 mb-2">Items</p>
@@ -588,7 +613,7 @@ export default function ManagerPortal() {
                         </div>
                         <div>
                           <p className="text-sm font-semibold text-gray-700 mb-2">Total</p>
-                          <p className="text-2xl font-bold text-blue-600">${order.total_amount?.toFixed(2)}</p>
+                          <p className="text-2xl font-bold text-blue-600">₹{order.total_amount?.toFixed(2)}</p>
                           <p className="text-xs text-gray-500 mt-1">Status: <span className="font-semibold capitalize">{order.status}</span></p>
                         </div>
                         <div className="flex flex-col gap-2">
@@ -617,7 +642,7 @@ export default function ManagerPortal() {
 
       </div>
 
-      {/* ── Order Detail Modal (unchanged) ─────────────────────────────────── */}
+      {/* ── Order Detail Modal ─────────────────────────────────────────────── */}
       {selectedOrder && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-2xl max-w-lg w-full">
@@ -629,7 +654,7 @@ export default function ManagerPortal() {
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div><p className="text-gray-500">Table</p><p className="font-semibold">{tables.find(t => t.id === selectedOrder.table_id)?.table_number || 'N/A'}</p></div>
                 <div><p className="text-gray-500">Status</p><p className="font-semibold capitalize">{selectedOrder.status}</p></div>
-                <div><p className="text-gray-500">Time</p><p className="font-semibold">{format(new Date(selectedOrder.created_at), 'HH:mm:ss')}</p></div>
+                <div><p className="text-gray-500">Time</p><p className="font-semibold">{safeFormat(selectedOrder.created_at, 'HH:mm:ss')}</p></div>
                 <div><p className="text-gray-500">Payment</p><p className="font-semibold capitalize">{selectedOrder.payment_status || 'Unpaid'}</p></div>
               </div>
               <div>
@@ -651,7 +676,7 @@ export default function ManagerPortal() {
               <div className="border-t pt-4 flex justify-between items-center">
                 <div>
                   <p className="text-gray-500 text-sm">Total</p>
-                  <p className="text-2xl font-bold text-blue-600">${selectedOrder.total_amount?.toFixed(2)}</p>
+                  <p className="text-2xl font-bold text-blue-600">₹{selectedOrder.total_amount?.toFixed(2)}</p>
                 </div>
                 <div className="flex gap-2">
                   <button onClick={() => { cancelOrder(selectedOrder.id, selectedOrder.table_id); setSelectedOrder(null); }} className="bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg text-sm">Cancel Order</button>
@@ -665,7 +690,7 @@ export default function ManagerPortal() {
         </div>
       )}
 
-      {/* ── New Order Modal (unchanged) ─────────────────────────────────────── */}
+      {/* ── New Order Modal ─────────────────────────────────────────────────── */}
       {showNewOrder && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-2xl max-w-2xl w-full max-h-96 overflow-y-auto">
@@ -693,7 +718,7 @@ export default function ManagerPortal() {
                     }`}
                   >
                     <p className="font-semibold text-gray-900">{item.name}</p>
-                    <p className="text-blue-600 font-bold">${item.price.toFixed(2)}</p>
+                    <p className="text-blue-600 font-bold">₹{item.price?.toFixed(2)}</p>
                   </button>
                 ))}
               </div>
