@@ -3,7 +3,6 @@ import { supabase } from "../contexts/AuthContext";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const HEAT_COLORS = ["#E6F1FB", "#85B7EB", "#378ADD", "#185FA5", "#0C447C"];
-
 const TABLE_COLORS = {
   occupied: { bg: "#1D9E75", text: "#085041" },
   waiting:  { bg: "#BA7517", text: "#633806" },
@@ -301,8 +300,8 @@ function useKpiData(restaurantId, start, end) {
     if (!restaurantId) return;
     (async () => {
       const [{ data: orders }, { data: tokens }] = await Promise.all([
-        .from("orders").select("total, pax").eq("restaurant_id", restaurantId).eq("status","completed").gte("created_at", start.toISOString()).lte("created_at", end.toISOString()),
-        .from("walk_in_tokens").select("created_at, seated_at").eq("restaurant_id", restaurantId).gte("created_at", start.toISOString()).lte("created_at", end.toISOString()),
+        supabase.from("orders").select("total, pax").eq("restaurant_id", restaurantId).eq("status","completed").gte("created_at", start.toISOString()).lte("created_at", end.toISOString()),
+        supabase.from("walk_in_tokens").select("created_at, seated_at").eq("restaurant_id", restaurantId).gte("created_at", start.toISOString()).lte("created_at", end.toISOString()),
       ]);
       const totalRevenue = (orders??[]).reduce((s,o)=>s+(o.total??0),0);
       const totalOrders  = (orders??[]).length;
@@ -319,7 +318,7 @@ function useChartData(restaurantId, start, end, preset) {
   useEffect(() => {
     if (!restaurantId) return;
     (async () => {
-      const { data: orders } = await .from("orders").select("total, pax, created_at").eq("restaurant_id", restaurantId).eq("status","completed").gte("created_at", start.toISOString()).lte("created_at", end.toISOString());
+      const { data: orders } = await supabase.from("orders").select("total, pax, created_at").eq("restaurant_id", restaurantId).eq("status","completed").gte("created_at", start.toISOString()).lte("created_at", end.toISOString());
       if (!orders) return;
       const byLabel = {};
       orders.forEach(o => {
@@ -340,7 +339,7 @@ function useMenuItems(restaurantId, start, end) {
   useEffect(() => {
     if (!restaurantId) return;
     (async () => {
-      const { data } = await .from("order_items").select("quantity, unit_price, menu_items(name)").eq("restaurant_id", restaurantId).gte("created_at", start.toISOString()).lte("created_at", end.toISOString());
+      const { data } = await supabase.from("order_items").select("quantity, unit_price, menu_items(name)").eq("restaurant_id", restaurantId).gte("created_at", start.toISOString()).lte("created_at", end.toISOString());
       if (!data) return;
       const map={};
       data.forEach(r=>{ const n=r.menu_items?.name??"Unknown"; if(!map[n])map[n]={name:n,qty:0,revenue:0}; map[n].qty+=r.quantity??1; map[n].revenue+=(r.quantity??1)*(r.unit_price??0); });
@@ -354,13 +353,13 @@ function useTables(restaurantId) {
   const [tables, setTables] = useState([]);
   const fetch = useCallback(async () => {
     if (!restaurantId) return;
-    const { data } = await .from("tables").select("id, label, status, current_pax").eq("restaurant_id", restaurantId).order("label");
+    const { data } = await supabase.from("tables").select("id, label, status, current_pax").eq("restaurant_id", restaurantId).order("label");
     if (data) setTables(data);
   }, [restaurantId]);
   useEffect(() => {
     fetch();
-    const ch = .channel(`tables-${restaurantId}`).on("postgres_changes",{ event:"*", schema:"public", table:"tables", filter:`restaurant_id=eq.${restaurantId}` }, fetch).subscribe();
-    return () => .removeChannel(ch);
+    const ch = supabase.channel(`tables-${restaurantId}`).on("postgres_changes",{ event:"*", schema:"public", table:"tables", filter:`restaurant_id=eq.${restaurantId}` }, fetch).subscribe();
+    return () => supabase.removeChannel(ch);
   }, [restaurantId, fetch]);
   return tables;
 }
@@ -370,14 +369,14 @@ function useKotStats(restaurantId) {
   const fetch = useCallback(async () => {
     if (!restaurantId) return;
     const today = new Date(); today.setHours(0,0,0,0);
-    const { data } = await .from("kot_tickets").select("status, created_at, served_at").eq("restaurant_id", restaurantId).gte("created_at", today.toISOString());
+    const { data } = await supabase.from("kot_tickets").select("status, created_at, served_at").eq("restaurant_id", restaurantId).gte("created_at", today.toISOString());
     if (!data) return;
     const times = data.filter(k=>k.served_at).map(k=>(new Date(k.served_at)-new Date(k.created_at))/60000);
     setStats({ open:data.filter(k=>k.status==="open").length, inProgress:data.filter(k=>k.status==="in_progress").length, served:data.filter(k=>k.status==="served").length, avgTime:times.length?Math.round(times.reduce((s,v)=>s+v,0)/times.length):null, delayed:times.filter(t=>t>20).length, fastestItem:null, slowestItem:null });
   }, [restaurantId]);
   useEffect(() => {
     fetch();
-    const ch = .channel(`kot-${restaurantId}`).on("postgres_changes",{ event:"*", schema:"public", table:"kot_tickets", filter:`restaurant_id=eq.${restaurantId}` }, fetch).subscribe();
+    const ch = supabase.channel(`kot-${restaurantId}`).on("postgres_changes",{ event:"*", schema:"public", table:"kot_tickets", filter:`restaurant_id=eq.${restaurantId}` }, fetch).subscribe();
     return () => supabase.removeChannel(ch);
   }, [restaurantId, fetch]);
   return stats;
