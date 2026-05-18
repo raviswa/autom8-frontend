@@ -1,6 +1,17 @@
 // ============================================================================
 // AUTOM8 FRONTEND - MANAGER PORTAL
 // src/pages/ManagerPortal.jsx
+//
+// FIX LOG (this patch)
+// --------------------
+//  Fix A  — "Mark Available" confirm dialog replaced with React state modal
+//            (browser window.confirm() is non-blocking in some embeddings and
+//             swallowed entirely inside iframes / Railway preview panes)
+//  Fix B  — updateTableStatus now also completes any seated walk-in tokens on
+//            the table via PUT /api/tokens/:id/complete so the queue clears too
+//  Fix C  — Removed inner apiClient.get('/api/orders') from updateTableStatus;
+//            stale-order cleanup delegated entirely to the backend which already
+//            handles it in PUT /api/tables/:id/status handler
 // ============================================================================
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -56,15 +67,17 @@ export default function ManagerPortal() {
   const [activeTab,      setActiveTab]      = useState('queue');
   const [toastMsg,       setToastMsg]       = useState('');
 
+  // Fix A: React-state confirm modal instead of window.confirm()
+  const [confirmModal, setConfirmModal] = useState(null);
+  // confirmModal shape: { message: string, onConfirm: fn }
+
   // ─── toast helper ──────────────────────────────────────────────────────────
   const showToast = (msg) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(''), 3000);
   };
 
-  // ─── fetch all data ────────────────────────────────────────────────────────
-  // Fetch each resource independently so one failure doesn't block others
-  // and to avoid ERR_INSUFFICIENT_RESOURCES from too many parallel requests
+  // ─── fetch helpers ─────────────────────────────────────────────────────────
   const fetchTokens = useCallback(async () => {
     try {
       const res = await apiClient.get('/api/tokens');
@@ -103,7 +116,6 @@ export default function ManagerPortal() {
   }, [apiClient]);
 
   const fetchData = useCallback(async () => {
-    // Sequential fetches — avoids browser connection exhaustion
     await fetchTables();
     await fetchOrders();
     await fetchTokens();
@@ -113,9 +125,7 @@ export default function ManagerPortal() {
 
   useEffect(() => {
     fetchData();
-    // Poll every 15s for full refresh — tokens/tables update faster via their own intervals
-    const fullInterval = setInterval(fetchData, 15000);
-    // Tokens and tables poll more frequently (every 8s) since queue changes matter most
+    const fullInterval  = setInterval(fetchData, 15000);
     const quickInterval = setInterval(async () => {
       await fetchTokens();
       await fetchTables();
@@ -143,22 +153,14 @@ export default function ManagerPortal() {
       return status === 'available' && (t.capacity == null || t.capacity >= pax);
     });
 
-  // Normalise token fields — backend may use different field names
   const normaliseToken = (t) => ({
     ...t,
-    // id: prefer id, fall back to token_id or token_number
     id:           t.id || t.token_id || t.token_number || '?',
-    // status: map 'dinein' type to waiting if no explicit status
     status:       t.status || (t.type === 'takeaway' ? 'takeaway' : 'waiting'),
-    // name
     name:         t.name || t.customer_name || 'Guest',
-    // pax
     pax:          t.pax || t.party_size || 1,
-    // arrived_at: try multiple field names
     arrived_at:   t.arrived_at || t.created_at || t.inserted_at || new Date().toISOString(),
-    // phone
     phone:        t.phone || t.customer_phone || null,
-    // table fields
     table_id:     t.table_id || null,
     table_number: t.table_number || null,
   });
@@ -218,10 +220,51 @@ export default function ManagerPortal() {
     }
   };
 
+  // ─── mark table available ──────────────────────────────────────────────────
+  // Fix A: uses React confirm modal instead of window.confirm()
+  // Fix B: also completes any seated token on this table
+  // Fix C: removed inner fetchOrders() stale-order cleanup — backend owns that
+  const updateTableStatus = (tableId, status, tableNumber) => {
+    setConfirmModal({
+      message: `Mark Table ${tableNumber || tableId} as available?`,
+      onConfirm: async () => {
+        setConfirmModal(null);
+        try {
+          console.log(`[updateTableStatus] tableId=${tableId} status=${status}`);
+
+          // Fix B: complete any seated walk-in token on this table first
+          // This clears the queue and lets the backend free the table too.
+          const seatedOnThisTable = normalisedTokens.filter(
+            t => t.table_id === tableId && t.status === 'seated'
+          );
+          for (const tok of seatedOnThisTable) {
+            try {
+              await apiClient.put(`/api/tokens/${tok.id}/complete`);
+              console.log(`[updateTableStatus] Completed token ${tok.id} on table ${tableNumber}`);
+            } catch (tokErr) {
+              console.warn(`[updateTableStatus] Could not complete token ${tok.id}:`, tokErr.message);
+            }
+          }
+
+          // Fix C: just update the table status — backend handles stale orders
+          await apiClient.put(`/api/tables/${tableId}/status`, { status });
+
+          await fetchTables();
+          await fetchTokens();
+          await fetchOrders();
+          showToast(`✅ Table ${tableNumber || tableId} is now available`);
+        } catch (err) {
+          console.error('[updateTableStatus] Failed:', err.message);
+          showToast(`❌ Failed: ${err.message}`);
+        }
+      },
+    });
+  };
+
   // ─── existing order helpers ────────────────────────────────────────────────
   const createOrder = async () => {
     if (!selectedTable || selectedItems.length === 0) {
-      alert('Please select a table and items');
+      showToast('Please select a table and items');
       return;
     }
     if (isSubmitting) return;
@@ -241,36 +284,9 @@ export default function ManagerPortal() {
       await fetchTables();
     } catch (err) {
       console.error('Failed to create order:', err);
-      alert('Error creating order: ' + err.message);
+      showToast('Error creating order: ' + err.message);
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  const updateTableStatus = async (tableId, status, tableNumber) => {
-    try {
-      console.log(`[updateTableStatus] tableId=${tableId} status=${status}`);
-      await apiClient.put(`/api/tables/${tableId}/status`, { status });
-      // Also complete any stale active orders on this table
-      try {
-        const ordersRes = await apiClient.get('/api/orders');
-        const allOrders = ordersRes.data.orders || [];
-        const stale = allOrders.filter(o =>
-          o.table_id === tableId && ['pending','confirmed','in_progress'].includes(o.status)
-        );
-        for (const o of stale) {
-          await apiClient.put(`/api/orders/${o.id}/status`, { status: 'completed' });
-          console.log(`[updateTableStatus] Completed stale order ${o.order_number}`);
-        }
-      } catch (cleanupErr) {
-        console.warn('[updateTableStatus] Stale order cleanup failed:', cleanupErr.message);
-      }
-      await fetchTables();
-      await fetchOrders();
-      showToast(`✅ Table ${tableNumber || tableId} is now available`);
-    } catch (err) {
-      console.error('[updateTableStatus] Failed:', err.message);
-      showToast(`❌ Failed: ${err.message}`);
     }
   };
 
@@ -281,7 +297,7 @@ export default function ManagerPortal() {
       fetchData();
     } catch (err) {
       console.error('Failed to cancel order:', err);
-      alert('Error cancelling order: ' + err.message);
+      showToast('Error cancelling order: ' + err.message);
     }
   };
 
@@ -291,7 +307,7 @@ export default function ManagerPortal() {
       fetchData();
     } catch (err) {
       console.error('Failed to update order:', err);
-      alert('Error updating order: ' + err.message);
+      showToast('Error updating order: ' + err.message);
     }
   };
 
@@ -315,6 +331,29 @@ export default function ManagerPortal() {
       {toastMsg && (
         <div className="fixed bottom-6 right-6 z-50 bg-gray-900 text-white text-sm font-medium px-5 py-3 rounded-xl shadow-xl">
           {toastMsg}
+        </div>
+      )}
+
+      {/* ── Fix A: React Confirm Modal (replaces window.confirm) ───────────── */}
+      {confirmModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full p-6">
+            <p className="text-gray-800 text-base font-medium mb-6">{confirmModal.message}</p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setConfirmModal(null)}
+                className="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold text-sm transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmModal.onConfirm}
+                className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white font-semibold text-sm transition"
+              >
+                OK
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -373,7 +412,7 @@ export default function ManagerPortal() {
           ))}
         </div>
 
-        {/* ── Debug panel: show raw token count so we can diagnose ─────────── */}
+        {/* ── Debug panel ───────────────────────────────────────────────────── */}
         {normalisedTokens.length === 0 && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6 text-sm text-yellow-800">
             ⚠️ No tokens loaded. Check that <code>/api/tokens</code> returns data and the backend is running.
