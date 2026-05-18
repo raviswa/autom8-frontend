@@ -402,7 +402,7 @@ function useCancelStats(restaurantId, start, end) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-export default function OwnerDashboard({ restaurantId, restaurantName }) {
+export default function OwnerDashboard({ restaurantId, restaurantName,onLogout  }) {
   const [preset,      setPreset]      = useState("today");
   const [customStart, setCustomStart] = useState(null);
   const [customEnd,   setCustomEnd]   = useState(null);
