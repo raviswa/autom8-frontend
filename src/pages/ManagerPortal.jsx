@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useSubscription, FEATURES } from '../contexts/SubscriptionContext';
 import { format, parseISO } from 'date-fns';
 
 // ─── Status colours (tables) ─────────────────────────────────────────────────
@@ -42,6 +43,7 @@ const ACTIVE_ORDER_STATUSES = ['pending', 'confirmed', 'in_progress'];
 
 export default function ManagerPortal() {
   const { user, apiClient, logout } = useAuth();
+  const { hasFeature, hasAnyOf } = useSubscription();
 
   // ── core state ─────────────────────────────────────────────────────────────
   const [tables,        setTables]        = useState([]);
@@ -418,6 +420,7 @@ export default function ManagerPortal() {
             </div>
             <div className="flex items-center gap-3">
               <span className="text-sm text-gray-600">👤 {user?.full_name || user?.email}</span>
+              {hasAnyOf(FEATURES.DINE_IN, FEATURES.TAKEAWAY, FEATURES.DELIVERY) && (
               <button
                 onClick={() => { setShowNewOrder(true); setActiveTab('orders'); }}
                 className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition flex items-center"
@@ -427,6 +430,7 @@ export default function ManagerPortal() {
                 </svg>
                 New Order
               </button>
+              )}
               <button
                 onClick={logout}
                 className="bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-5 rounded-lg transition flex items-center"
@@ -461,7 +465,7 @@ export default function ManagerPortal() {
         {/* ── Tab bar ───────────────────────────────────────────────────────── */}
         <div className="flex gap-2 mb-6 bg-white rounded-xl p-1.5 shadow-sm w-fit">
           {[
-            { key: 'queue',  label: `Queue${waitingTokens.length ? ` (${waitingTokens.length})` : ''}` },
+            ...(hasFeature(FEATURES.TOKEN_MANAGEMENT) ? [{ key: 'queue', label: `Queue${waitingTokens.length ? ` (${waitingTokens.length})` : ''}` }] : []),
             { key: 'tables', label: 'Tables' },
             { key: 'orders', label: 'Active Orders' },
           ].map(tab => (
