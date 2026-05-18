@@ -297,7 +297,7 @@ function CancellationVoids({ stats }) {
 function useKpiData(restaurantId, start, end) {
   const [data, setData] = useState(null);
   useEffect(() => {
-    if (!restaurantId) return;
+    if (!restaurantId || restaurantId === 'null' || restaurantId === 'undefined') return;
     (async () => {
       const [{ data: orders }, { data: tokens }] = await Promise.all([
         supabase.from("orders").select("total, pax").eq("restaurant_id", restaurantId).eq("status","completed").gte("created_at", start.toISOString()).lte("created_at", end.toISOString()),
@@ -316,7 +316,7 @@ function useKpiData(restaurantId, start, end) {
 function useChartData(restaurantId, start, end, preset) {
   const [data, setData] = useState(null);
   useEffect(() => {
-    if (!restaurantId) return;
+    if (!restaurantId || restaurantId === 'null' || restaurantId === 'undefined') return;
     (async () => {
       const { data: orders } = await supabase.from("orders").select("total, pax, created_at").eq("restaurant_id", restaurantId).eq("status","completed").gte("created_at", start.toISOString()).lte("created_at", end.toISOString());
       if (!orders) return;
@@ -337,7 +337,7 @@ function useChartData(restaurantId, start, end, preset) {
 function useMenuItems(restaurantId, start, end) {
   const [items, setItems] = useState([]);
   useEffect(() => {
-    if (!restaurantId) return;
+    if (!restaurantId || restaurantId === 'null' || restaurantId === 'undefined') return;
     (async () => {
       const { data } = await supabase.from("order_items").select("quantity, unit_price, menu_items(name)").eq("restaurant_id", restaurantId).gte("created_at", start.toISOString()).lte("created_at", end.toISOString());
       if (!data) return;
@@ -352,7 +352,7 @@ function useMenuItems(restaurantId, start, end) {
 function useTables(restaurantId) {
   const [tables, setTables] = useState([]);
   const fetch = useCallback(async () => {
-    if (!restaurantId) return;
+    if (!restaurantId || restaurantId === 'null' || restaurantId === 'undefined') return;
     const { data } = await supabase.from("tables").select("id, label, status, current_pax").eq("restaurant_id", restaurantId).order("label");
     if (data) setTables(data);
   }, [restaurantId]);
@@ -367,7 +367,7 @@ function useTables(restaurantId) {
 function useKotStats(restaurantId) {
   const [stats, setStats] = useState(null);
   const fetch = useCallback(async () => {
-    if (!restaurantId) return;
+    if (!restaurantId || restaurantId === 'null' || restaurantId === 'undefined') return;
     const today = new Date(); today.setHours(0,0,0,0);
     const { data } = await supabase.from("kot_tickets").select("status, created_at, served_at").eq("restaurant_id", restaurantId).gte("created_at", today.toISOString());
     if (!data) return;
@@ -385,7 +385,7 @@ function useKotStats(restaurantId) {
 function useCancelStats(restaurantId, start, end) {
   const [stats, setStats] = useState(null);
   useEffect(() => {
-    if (!restaurantId) return;
+    if (!restaurantId || restaurantId === 'null' || restaurantId === 'undefined') return;
     (async () => {
       const [{ data: cancelled }, { data: voided }] = await Promise.all([
         supabase.from("orders").select("total").eq("restaurant_id", restaurantId).eq("status","cancelled").gte("created_at", start.toISOString()).lte("created_at", end.toISOString()),
