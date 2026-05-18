@@ -444,26 +444,29 @@ export default function OwnerDashboard({ restaurantId, restaurantName }) {
       <div style={{ maxWidth:1100, margin:"0 auto" }}>
 
         {/* Header */}
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16, flexWrap:"wrap", gap:12 }}>
-          <div>
-            <h1 style={{ fontSize:18, fontWeight:500, color:"#111", margin:0 }}>Owner dashboard</h1>
-            <p style={{ fontSize:13, color:"#888", margin:"2px 0 0" }}>{restaurantName} · {new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}</p>
-          </div>
-          <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
-            <div style={{ display:"flex", gap:4 }}>
-              {PRESETS.map(p => (
-                <button key={p.key} style={btnStyle(preset===p.key&&!customStart)} onClick={()=>{ setPreset(p.key); setCustomStart(null); setCustomEnd(null); setShowCal(false); }}>
-                  {p.label}
-                </button>
-              ))}
-            </div>
-            <div style={{ width:1, height:18, background:"#E0E0DC" }} />
-            <button style={{ ...btnStyle(!!customStart), display:"flex", alignItems:"center", gap:5 }} onClick={()=>setShowCal(v=>!v)}>
-              📅 {customStart ? `${fmtDate(customStart)} – ${fmtDate(customEnd)}` : "Custom"}
-            </button>
-          </div>
-        </div>
-
+<div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16, flexWrap:"wrap", gap:12 }}>
+  <div>
+    <h1 style={{ fontSize:18, fontWeight:500, color:"#111", margin:0 }}>Owner dashboard</h1>
+    <p style={{ fontSize:13, color:"#888", margin:"2px 0 0" }}>{restaurantName} · {new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}</p>
+  </div>
+  <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+    <div style={{ display:"flex", gap:4 }}>
+      {PRESETS.map(p => (
+        <button key={p.key} style={btnStyle(preset===p.key&&!customStart)} onClick={()=>{ setPreset(p.key); setCustomStart(null); setCustomEnd(null); setShowCal(false); }}>
+          {p.label}
+        </button>
+      ))}
+    </div>
+    <div style={{ width:1, height:18, background:"#E0E0DC" }} />
+    <button style={{ ...btnStyle(!!customStart), display:"flex", alignItems:"center", gap:5 }} onClick={()=>setShowCal(v=>!v)}>
+      📅 {customStart ? `${fmtDate(customStart)} – ${fmtDate(customEnd)}` : "Custom"}
+    </button>
+    <div style={{ width:1, height:18, background:"#E0E0DC" }} />
+    <button onClick={onLogout} style={{ fontSize:12, padding:"4px 12px", borderRadius:8, border:"0.5px solid #FCEBEB", background:"#FFF5F5", color:"#A32D2D", cursor:"pointer" }}>
+      Logout
+    </button>
+  </div>
+</div>
         {/* Custom date picker */}
         {showCal && (
           <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12, padding:12, background:"#fff", border:"0.5px solid #E8E8E5", borderRadius:12, flexWrap:"wrap" }}>
