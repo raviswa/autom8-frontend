@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import { supabase } from "../contexts/AuthContext";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const HEAT_COLORS = ["#E6F1FB", "#85B7EB", "#378ADD", "#185FA5", "#0C447C"];
