@@ -79,6 +79,8 @@ const restaurantName = user?.restaurant_name ?? user?.restaurantName ?? 'Hotel M
               restaurantId={restaurantId}
               restaurantName={restaurantName}
               onLogout={logout}
+              apiClient={apiClient}
+              onLogout={logout}
             />
           </ProtectedRoute>
         }
