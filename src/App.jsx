@@ -19,7 +19,7 @@ import FeatureWall    from './pages/FeatureWall';
 
 // ── Protected Route ───────────────────────────────────────────────────────────
 function ProtectedRoute({ children, allowedRoles }) {
-  const { user, loading } = useAuth();
+  const { user, loading,apiClient } = useAuth();
   if (loading) return <Spinner />;
   if (!user) return <Navigate to="/login" />;
   if (allowedRoles && !allowedRoles.includes(user.role)) return <Navigate to="/unauthorized" />;
@@ -48,7 +48,7 @@ function Spinner() {
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 function AppRoutes() {
-  const { user, loading, logout } = useAuth();
+  const { user, loading, logout,apiClient } = useAuth();
   const { hasFeature, hasAnyOf }  = useSubscription();
   if (loading) return <Spinner />;
 
