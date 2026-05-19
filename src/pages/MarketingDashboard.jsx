@@ -1,3 +1,9 @@
+//=============================================================
+//=======MARKETING DASHBOARD - CAMPAIGN ANALYTICS==============
+//=============================================================
+
+
+
 import { useEffect, useState, useCallback, useMemo } from "react";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -104,7 +110,7 @@ function AISegmentSuggester({ apiClient, onSegmentSelected, onMessageDrafted }) 
           value={goal}
           onChange={e => setGoal(e.target.value)}
           onKeyDown={e => e.key === "Enter" && suggest()}
-          placeholder='e.g. "Bring back customers who haven\'t visited in 2 weeks"'
+          placeholder="e.g. Bring back customers who have not visited in 2 weeks"
           style={{ flex: 1, fontSize: 12, padding: "8px 12px", borderRadius: 8, border: "0.5px solid #C5DDF6", background: "#fff", outline: "none" }}
         />
         <Btn onClick={suggest} disabled={loading || !goal.trim()}>
