@@ -413,27 +413,30 @@ function WABAStatus({ restaurantId, apiClient }) {
   );
 }
 
-// ─── WhatsApp Orders — now fetches from backend API (chat DB) ─────────────────
+// ─── WhatsApp Orders ──────────────────────────────────────────────────────────
 
-function useWhatsAppOrders(restaurantId, apiClient) {
+function useWhatsAppOrders(restaurantId, apiClient, start, end) {
   const [orders, setOrders]   = useState([]);
   const [loading, setLoading] = useState(true);
 
   const fetchOrders = useCallback(async () => {
     if (!restaurantId || !apiClient) return;
     try {
-      const res = await apiClient.get('/api/whatsapp-orders');
+      const params = new URLSearchParams({
+        start: start.toISOString(),
+        end:   end.toISOString(),
+      });
+      const res = await apiClient.get(`/api/whatsapp-orders?${params}`);
       setOrders(res.data.orders || []);
     } catch (err) {
       console.error('Failed to fetch WhatsApp orders:', err.message);
       setOrders([]);
     }
     setLoading(false);
-  }, [restaurantId, apiClient]);
+  }, [restaurantId, apiClient, start, end]);
 
   useEffect(() => {
     fetchOrders();
-    // Refresh every 30 seconds
     const interval = setInterval(fetchOrders, 30000);
     return () => clearInterval(interval);
   }, [fetchOrders]);
@@ -441,8 +444,8 @@ function useWhatsAppOrders(restaurantId, apiClient) {
   return { orders, loading };
 }
 
-function WhatsAppOrders({ restaurantId, apiClient }) {
-  const { orders, loading } = useWhatsAppOrders(restaurantId, apiClient);
+function WhatsAppOrders({ restaurantId, apiClient, start, end }) {
+  const { orders, loading } = useWhatsAppOrders(restaurantId, apiClient, start, end);
   const [expanded, setExpanded] = useState(null);
 
   const total   = orders.length;
@@ -463,7 +466,9 @@ function WhatsAppOrders({ restaurantId, apiClient }) {
             {total} total
           </span>
         </div>
-        <span style={{ fontSize:11, color:"#aaa" }}>last 50 orders</span>
+        <span style={{ fontSize:11, color:"#aaa" }}>
+          {fmtDate(start)} – {fmtDate(end)}
+        </span>
       </div>
 
       {/* Summary strip */}
@@ -485,7 +490,7 @@ function WhatsAppOrders({ restaurantId, apiClient }) {
         <div style={{ fontSize:12, color:"#aaa", padding:"16px 0", textAlign:"center" }}>Loading orders…</div>
       ) : orders.length === 0 ? (
         <div style={{ fontSize:12, color:"#aaa", padding:"24px 0", textAlign:"center", background:"#F7F7F5", borderRadius:8 }}>
-          No WhatsApp orders yet.<br />
+          No WhatsApp orders for this period.<br />
           <span style={{ fontSize:11 }}>Send <strong>"Hi"</strong> to +91 9500996033 to place a test order.</span>
         </div>
       ) : (
@@ -507,7 +512,7 @@ function WhatsAppOrders({ restaurantId, apiClient }) {
                     padding:"10px 12px", cursor:"pointer", gap:8, flexWrap:"wrap",
                   }}
                 >
-                  {/* Left: customer name + phone + order ref */}
+                  {/* Left: customer */}
                   <div style={{ display:"flex", alignItems:"center", gap:8, minWidth:0 }}>
                     <span style={{ fontSize:11, color:"#1D9E75", fontWeight:600 }}>📲</span>
                     <div>
@@ -527,7 +532,9 @@ function WhatsAppOrders({ restaurantId, apiClient }) {
                       <div style={{ fontSize:10, color:"#aaa", fontFamily:"monospace" }}>
                         {order.order_number} · {fmtDateTime(order.created_at)}
                         {order.service_type && (
-                          <span style={{ marginLeft:6, textTransform:"capitalize" }}>· {order.service_type.replace("_", " ")}</span>
+                          <span style={{ marginLeft:6, textTransform:"capitalize" }}>
+                            · {order.service_type.replace(/_/g, " ")}
+                          </span>
                         )}
                       </div>
                     </div>
@@ -544,7 +551,7 @@ function WhatsAppOrders({ restaurantId, apiClient }) {
                     }
                   </div>
 
-                  {/* Right: total + status + chevron */}
+                  {/* Right */}
                   <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
                     <span style={{ fontSize:13, fontWeight:600, color:"#111" }}>
                       {fmtINRFull(order.total_amount)}
@@ -612,7 +619,7 @@ function WhatsAppOrders({ restaurantId, apiClient }) {
                       </span>
                       {order.service_type && (
                         <span style={{ fontSize:10, padding:"2px 8px", borderRadius:20, background:"#F7F7F5", color:"#5F5E5A", fontWeight:600, textTransform:"capitalize" }}>
-                          {order.service_type.replace("_", " ")}
+                          {order.service_type.replace(/_/g, " ")}
                         </span>
                       )}
                     </div>
@@ -828,17 +835,14 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
           {row2.map((m,i) => <MetricCard key={i} {...m} />)}
         </div>
 
-        {/* ── WhatsApp Business Section ────────────────────────────────── */}
+        {/* ── WhatsApp Business Section ── */}
         <div style={{ marginBottom:12 }}>
-          <div style={{
-            fontSize:11, fontWeight:600, color:"#aaa", letterSpacing:0.8,
-            textTransform:"uppercase", marginBottom:8,
-          }}>
+          <div style={{ fontSize:11, fontWeight:600, color:"#aaa", letterSpacing:0.8, textTransform:"uppercase", marginBottom:8 }}>
             WhatsApp Business
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(2,minmax(0,1fr))", gap:12 }}>
             <WABAStatus restaurantId={restaurantId} apiClient={apiClient} />
-            <WhatsAppOrders restaurantId={restaurantId} apiClient={apiClient} />
+            <WhatsAppOrders restaurantId={restaurantId} apiClient={apiClient} start={start} end={end} />
           </div>
         </div>
 
