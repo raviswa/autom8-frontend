@@ -329,30 +329,30 @@ function CancellationVoids({ stats }) {
 
 // ─── WhatsApp Widgets ─────────────────────────────────────────────────────────
 
-function WABAStatus({ restaurantId }) {
+function WABAStatus({ restaurantId, apiClient }) {
   const [info, setInfo]       = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!restaurantId) return;
+    if (!restaurantId || !apiClient) return;
     (async () => {
-      const { data, error } = await supabase
-        .from("restaurants")
-        .select("name, waba_id, whatsapp_phone_number, whatsapp_display_name")
-        .eq("id", restaurantId)
-        .single();
-      if (!error && data) {
-        setInfo({
-          name:         data.name,
-          waba_id:      data.waba_id,
-          phone:        data.whatsapp_phone_number,
-          display_name: data.whatsapp_display_name,
-        });
+      try {
+        const res = await apiClient.get(`/api/restaurants/${restaurantId}/waba`);
+        if (res.data) {
+          setInfo({
+            name:         res.data.name,
+            waba_id:      res.data.waba_id,
+            phone:        res.data.whatsapp_phone_number,
+            display_name: res.data.whatsapp_display_name,
+          });
+        }
+      } catch (err) {
+        console.error('Failed to fetch WABA status:', err.message);
       }
       setLoading(false);
     })();
-  }, [restaurantId]);
-
+  }, [restaurantId, apiClient]);
+  
   const connected = !loading && info?.waba_id;
 
   return (
@@ -792,7 +792,7 @@ function useCancelStats(restaurantId, start, end) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-export default function OwnerDashboard({ restaurantId, restaurantName, onLogout }) {
+export default function OwnerDashboard({ restaurantId, restaurantName, onLogout, apiClient  }) {
   const [preset,      setPreset]      = useState("today");
   const [customStart, setCustomStart] = useState(null);
   const [customEnd,   setCustomEnd]   = useState(null);
@@ -892,7 +892,7 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout 
             WhatsApp Business
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(2,minmax(0,1fr))", gap:12 }}>
-            <WABAStatus restaurantId={restaurantId} />
+            <WABAStatus restaurantId={restaurantId} apiClient={apiClient} />
             <WhatsAppOrders restaurantId={restaurantId} />
           </div>
         </div>
