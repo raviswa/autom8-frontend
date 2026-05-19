@@ -37,6 +37,13 @@ export function AuthProvider({ children }) {
           const userData = JSON.parse(localStorage.getItem('userData'));
           setUser(userData);
           apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+
+          // Restore Supabase session on page reload so RLS works for direct queries
+          await supabase.auth.setSession({
+            access_token:  token,
+            refresh_token: refreshTokenValue,
+          });
+
         } catch (err) {
           localStorage.removeItem('authToken');
           localStorage.removeItem('userData');
@@ -69,6 +76,12 @@ export function AuthProvider({ children }) {
             apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
             originalRequest.headers['Authorization'] = `Bearer ${token}`;
 
+            // Refresh Supabase session too
+            await supabase.auth.setSession({
+              access_token:  token,
+              refresh_token: newRefreshToken,
+            });
+
             return apiClient(originalRequest);
           } catch (refreshErr) {
             // Refresh failed — clear and redirect to login
@@ -76,6 +89,7 @@ export function AuthProvider({ children }) {
             localStorage.removeItem('userData');
             localStorage.removeItem('refreshToken');
             delete apiClient.defaults.headers.common['Authorization'];
+            await supabase.auth.signOut();
             setUser(null);
             return Promise.reject(refreshErr);
           }
@@ -91,17 +105,23 @@ export function AuthProvider({ children }) {
     setError(null);
     try {
       const response = await apiClient.post('/api/auth/login', { email, password });
-      
+
       const { user: userData, token, refreshToken } = response.data;
-      
+
       // Store tokens
       localStorage.setItem('authToken', token);
       localStorage.setItem('refreshToken', refreshToken);
       localStorage.setItem('userData', JSON.stringify(userData));
-      
+
       // Set axios header
       apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      
+
+      // Inject Supabase session so RLS works for direct queries
+      await supabase.auth.setSession({
+        access_token:  token,
+        refresh_token: refreshToken,
+      });
+
       setUser(userData);
       return userData;
     } catch (err) {
@@ -156,10 +176,13 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('authToken');
     localStorage.removeItem('userData');
     localStorage.removeItem('refreshToken');
-    
+
     // Clear axios header
     delete apiClient.defaults.headers.common['Authorization'];
-    
+
+    // Clear Supabase session
+    await supabase.auth.signOut();
+
     setUser(null);
     setError(null);
   }, []);
@@ -174,11 +197,17 @@ export function AuthProvider({ children }) {
       });
 
       const { token, refreshToken: newRefreshToken } = response.data;
-      
+
       localStorage.setItem('authToken', token);
       localStorage.setItem('refreshToken', newRefreshToken);
       apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      
+
+      // Refresh Supabase session too
+      await supabase.auth.setSession({
+        access_token:  token,
+        refresh_token: newRefreshToken,
+      });
+
       return token;
     } catch (err) {
       // Refresh failed, logout user
