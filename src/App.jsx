@@ -1,32 +1,32 @@
 // ============================================================================
 // AUTOM8 FRONTEND — MAIN APP
-// Routes are feature-gated: a page only exists if the restaurant subscribes.
 // ============================================================================
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider, useAuth }                           from './contexts/AuthContext';
-import { WebSocketProvider }                               from './contexts/WebSocketContext';
-import { SubscriptionProvider, useSubscription, FEATURES } from './contexts/SubscriptionContext';
+import { AuthProvider, useAuth }                            from './contexts/AuthContext';
+import { WebSocketProvider }                                from './contexts/WebSocketContext';
+import { SubscriptionProvider, useSubscription, FEATURES }  from './contexts/SubscriptionContext';
 
-import LoginPage      from './pages/LoginPage';
-import OwnerDashboard from './pages/OwnerDashboard';
-import ManagerPortal  from './pages/ManagerPortal';
-import KDSScreen      from './pages/KDSScreen';
-import NotFound       from './pages/NotFound';
-import MenuPage       from './pages/MenuPage';
-import WalkInForm     from './pages/WalkInForm';
-import FeatureWall    from './pages/FeatureWall';
+import LoginPage          from './pages/LoginPage';
+import OwnerDashboard     from './pages/OwnerDashboard';
+import MarketingDashboard from './pages/MarketingDashboard';
+import ManagerPortal      from './pages/ManagerPortal';
+import KDSScreen          from './pages/KDSScreen';
+import NotFound           from './pages/NotFound';
+import MenuPage           from './pages/MenuPage';
+import WalkInForm         from './pages/WalkInForm';
+import FeatureWall        from './pages/FeatureWall';
 
 // ── Protected Route ───────────────────────────────────────────────────────────
 function ProtectedRoute({ children, allowedRoles }) {
-  const { user, loading,apiClient } = useAuth();
+  const { user, loading } = useAuth();
   if (loading) return <Spinner />;
   if (!user) return <Navigate to="/login" />;
   if (allowedRoles && !allowedRoles.includes(user.role)) return <Navigate to="/unauthorized" />;
   return children;
 }
 
-// ── Feature-gated route — shows FeatureWall if not subscribed ─────────────────
+// ── Feature-gated route ───────────────────────────────────────────────────────
 function FeatureRoute({ feature, children }) {
   const { hasFeature, loading } = useSubscription();
   if (loading) return <Spinner />;
@@ -34,7 +34,7 @@ function FeatureRoute({ feature, children }) {
   return children;
 }
 
-// ── Spinner ──────────────────────────────────────────────────────────────────
+// ── Spinner ───────────────────────────────────────────────────────────────────
 function Spinner() {
   return (
     <div className="flex items-center justify-center h-screen">
@@ -48,19 +48,32 @@ function Spinner() {
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 function AppRoutes() {
-  const { user, loading, logout,apiClient } = useAuth();
-  const { hasFeature, hasAnyOf }  = useSubscription();
+  const { user, loading, logout, apiClient } = useAuth();
+  const { hasFeature, hasAnyOf }             = useSubscription();
   if (loading) return <Spinner />;
 
-const restaurantId   = user?.restaurant_id ?? user?.restaurantId ?? '46fb9b9e-431a-43c9-9edb-d316b0fef216';
-const restaurantName = user?.restaurant_name ?? user?.restaurantName ?? 'Hotel Munafe';
+  const restaurantId   = user?.restaurant_id ?? user?.restaurantId ?? '46fb9b9e-431a-43c9-9edb-d316b0fef216';
+  const restaurantName = user?.restaurant_name ?? user?.restaurantName ?? 'Hotel Munafe';
+
+  // Default redirect target per role
+  const defaultRoute = () => {
+    if (!user) return '/login';
+    const roleMap = {
+      owner:         '/dashboard/owner',
+      manager:       '/dashboard/manager',
+      kitchen_staff: '/dashboard/kitchen',
+      marketing:     '/dashboard/marketing',
+    };
+    return roleMap[user.role] ?? `/dashboard/${user.role}`;
+  };
+
   return (
     <Routes>
 
       {/* ── Public ── */}
-      <Route path="/login"   element={<LoginPage />} />
+      <Route path="/login" element={<LoginPage />} />
 
-      {/* Walk-in form: only accessible if TOKEN_MANAGEMENT is subscribed */}
+      {/* Walk-in form */}
       <Route
         path="/checkin"
         element={
@@ -70,7 +83,7 @@ const restaurantName = user?.restaurant_name ?? user?.restaurantName ?? 'Hotel M
         }
       />
 
-      {/* ── Owner dashboard: always available to owners ── */}
+      {/* ── Owner dashboard ── */}
       <Route
         path="/dashboard/owner"
         element={
@@ -80,13 +93,27 @@ const restaurantName = user?.restaurant_name ?? user?.restaurantName ?? 'Hotel M
               restaurantName={restaurantName}
               onLogout={logout}
               apiClient={apiClient}
-              onLogout={logout}
             />
           </ProtectedRoute>
         }
       />
 
-      {/* ── Manager portal: needs at least token or any order feature ── */}
+      {/* ── Marketing / CRM dashboard ── */}
+      <Route
+        path="/dashboard/marketing"
+        element={
+          <ProtectedRoute allowedRoles={['marketing', 'owner']}>
+            <MarketingDashboard
+              restaurantId={restaurantId}
+              restaurantName={restaurantName}
+              onLogout={logout}
+              apiClient={apiClient}
+            />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* ── Manager portal ── */}
       <Route
         path="/dashboard/manager"
         element={
@@ -96,7 +123,7 @@ const restaurantName = user?.restaurant_name ?? user?.restaurantName ?? 'Hotel M
         }
       />
 
-      {/* ── KDS: only if any ordering channel is subscribed ── */}
+      {/* ── KDS ── */}
       <Route
         path="/dashboard/kitchen"
         element={
@@ -109,7 +136,7 @@ const restaurantName = user?.restaurant_name ?? user?.restaurantName ?? 'Hotel M
         }
       />
 
-      {/* ── Menu management: only if any ordering channel is subscribed ── */}
+      {/* ── Menu management ── */}
       <Route
         path="/dashboard/menu"
         element={
@@ -123,10 +150,7 @@ const restaurantName = user?.restaurant_name ?? user?.restaurantName ?? 'Hotel M
       />
 
       {/* ── Default redirect ── */}
-      <Route
-        path="/"
-        element={<Navigate to={user ? `/dashboard/${user.role === 'kitchen_staff' ? 'kitchen' : user.role}` : '/login'} />}
-      />
+      <Route path="/" element={<Navigate to={defaultRoute()} />} />
 
       <Route path="*" element={<NotFound />} />
     </Routes>
