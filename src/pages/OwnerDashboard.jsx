@@ -352,7 +352,7 @@ function WABAStatus({ restaurantId, apiClient }) {
       setLoading(false);
     })();
   }, [restaurantId, apiClient]);
-  
+
   const connected = !loading && info?.waba_id;
 
   return (
@@ -413,84 +413,36 @@ function WABAStatus({ restaurantId, apiClient }) {
   );
 }
 
-function useWhatsAppOrders(restaurantId) {
+// ─── WhatsApp Orders — now fetches from backend API (chat DB) ─────────────────
+
+function useWhatsAppOrders(restaurantId, apiClient) {
   const [orders, setOrders]   = useState([]);
   const [loading, setLoading] = useState(true);
 
   const fetchOrders = useCallback(async () => {
-    if (!restaurantId) return;
-
-    const { data: rawOrders } = await supabase
-      .from("orders")
-      .select("id, order_number, status, payment_status, total_amount, subtotal, tax, discount, created_at, notes")
-      .eq("restaurant_id", restaurantId)
-      .eq("source", "whatsapp")
-      .order("created_at", { ascending: false })
-      .limit(50);
-
-    if (!rawOrders?.length) { setOrders([]); setLoading(false); return; }
-
-    const orderIds = rawOrders.map(o => o.id);
-    const { data: items } = await supabase
-      .from("order_items")
-      .select("order_id, quantity, unit_price, special_instructions, menu_items(name)")
-      .in("order_id", orderIds);
-
-    // Fetch walk_in_tokens (takeaway/whatsapp) in the time window for customer name + phone
-    const oldest = rawOrders[rawOrders.length - 1]?.created_at;
-    const newest = rawOrders[0]?.created_at;
-    const { data: tokens } = await supabase
-      .from("walk_in_tokens")
-      .select("id, name, phone, arrived_at, type")
-      .eq("restaurant_id", restaurantId)
-      .gte("arrived_at", oldest)
-      .lte("arrived_at", newest)
-      .in("type", ["takeaway", "whatsapp"]);
-
-    // Match order to closest token within 3 minutes
-    function findCustomer(orderCreatedAt) {
-      if (!tokens?.length) return null;
-      const orderTs = new Date(orderCreatedAt).getTime();
-      let best = null, bestDiff = Infinity;
-      tokens.forEach(t => {
-        const diff = Math.abs(new Date(t.arrived_at).getTime() - orderTs);
-        if (diff < bestDiff && diff <= 3 * 60 * 1000) { best = t; bestDiff = diff; }
-      });
-      return best;
+    if (!restaurantId || !apiClient) return;
+    try {
+      const res = await apiClient.get('/api/whatsapp-orders');
+      setOrders(res.data.orders || []);
+    } catch (err) {
+      console.error('Failed to fetch WhatsApp orders:', err.message);
+      setOrders([]);
     }
-
-    const itemsByOrder = {};
-    (items ?? []).forEach(it => {
-      if (!itemsByOrder[it.order_id]) itemsByOrder[it.order_id] = [];
-      itemsByOrder[it.order_id].push(it);
-    });
-
-    setOrders(rawOrders.map(o => {
-      const customer = findCustomer(o.created_at);
-      return {
-        ...o,
-        items:          itemsByOrder[o.id] ?? [],
-        customer_name:  customer?.name  ?? null,
-        customer_phone: customer?.phone ?? null,
-      };
-    }));
     setLoading(false);
-  }, [restaurantId]);
+  }, [restaurantId, apiClient]);
 
   useEffect(() => {
     fetchOrders();
-    const ch = supabase
-      .channel(`wa-orders-${restaurantId}`)
-      .on("postgres_changes", { event:"*", schema:"public", table:"orders", filter:`restaurant_id=eq.${restaurantId}` }, fetchOrders)
-      .subscribe();
-    return () => supabase.removeChannel(ch);
-  }, [restaurantId, fetchOrders]);
+    // Refresh every 30 seconds
+    const interval = setInterval(fetchOrders, 30000);
+    return () => clearInterval(interval);
+  }, [fetchOrders]);
 
   return { orders, loading };
 }
 
-function WhatsAppOrders({ restaurantId }) {
-  const { orders, loading } = useWhatsAppOrders(restaurantId);
+function WhatsAppOrders({ restaurantId, apiClient }) {
+  const { orders, loading } = useWhatsAppOrders(restaurantId, apiClient);
   const [expanded, setExpanded] = useState(null);
 
   const total   = orders.length;
@@ -574,6 +526,9 @@ function WhatsAppOrders({ restaurantId }) {
                       </div>
                       <div style={{ fontSize:10, color:"#aaa", fontFamily:"monospace" }}>
                         {order.order_number} · {fmtDateTime(order.created_at)}
+                        {order.service_type && (
+                          <span style={{ marginLeft:6, textTransform:"capitalize" }}>· {order.service_type.replace("_", " ")}</span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -583,8 +538,8 @@ function WhatsAppOrders({ restaurantId }) {
                     flex:1, fontSize:11, color:"#666",
                     overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", minWidth:0,
                   }}>
-                    {order.items.length > 0
-                      ? order.items.map(it => `${it.menu_items?.name ?? "Item"} ×${it.quantity}`).join(", ")
+                    {order.items && order.items.length > 0
+                      ? order.items.map(it => `${it.name ?? "Item"} ×${it.quantity}`).join(", ")
                       : "—"
                     }
                   </div>
@@ -606,53 +561,41 @@ function WhatsAppOrders({ restaurantId }) {
                 {/* Expanded detail */}
                 {isOpen && (
                   <div style={{ borderTop:"0.5px solid #E8EEF6", padding:"12px 14px", background:"#fff" }}>
-                    <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12, marginBottom:10 }}>
-                      <thead>
-                        <tr style={{ borderBottom:"0.5px solid #F0F0EE" }}>
-                          <th style={{ textAlign:"left",   color:"#aaa", fontWeight:400, fontSize:10, paddingBottom:6 }}>Item</th>
-                          <th style={{ textAlign:"center", color:"#aaa", fontWeight:400, fontSize:10, paddingBottom:6 }}>Qty</th>
-                          <th style={{ textAlign:"right",  color:"#aaa", fontWeight:400, fontSize:10, paddingBottom:6 }}>Price</th>
-                          <th style={{ textAlign:"right",  color:"#aaa", fontWeight:400, fontSize:10, paddingBottom:6 }}>Subtotal</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {order.items.map((it, i) => (
-                          <tr key={i} style={{ borderBottom:"0.5px solid #F7F7F5" }}>
-                            <td style={{ padding:"5px 0", color:"#333" }}>
-                              {it.menu_items?.name ?? "Unknown item"}
-                              {it.special_instructions && (
-                                <div style={{ fontSize:10, color:"#aaa" }}>{it.special_instructions}</div>
-                              )}
-                            </td>
-                            <td style={{ padding:"5px 0", textAlign:"center", color:"#666" }}>{it.quantity}</td>
-                            <td style={{ padding:"5px 0", textAlign:"right", color:"#666" }}>{fmtINRFull(it.unit_price)}</td>
-                            <td style={{ padding:"5px 0", textAlign:"right", fontWeight:500, color:"#111" }}>
-                              {fmtINRFull((it.quantity ?? 1) * parseFloat(it.unit_price ?? 0))}
-                            </td>
+                    {order.items && order.items.length > 0 ? (
+                      <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12, marginBottom:10 }}>
+                        <thead>
+                          <tr style={{ borderBottom:"0.5px solid #F0F0EE" }}>
+                            <th style={{ textAlign:"left",   color:"#aaa", fontWeight:400, fontSize:10, paddingBottom:6 }}>Item</th>
+                            <th style={{ textAlign:"center", color:"#aaa", fontWeight:400, fontSize:10, paddingBottom:6 }}>Qty</th>
+                            <th style={{ textAlign:"right",  color:"#aaa", fontWeight:400, fontSize:10, paddingBottom:6 }}>Price</th>
+                            <th style={{ textAlign:"right",  color:"#aaa", fontWeight:400, fontSize:10, paddingBottom:6 }}>Subtotal</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {order.items.map((it, i) => (
+                            <tr key={i} style={{ borderBottom:"0.5px solid #F7F7F5" }}>
+                              <td style={{ padding:"5px 0", color:"#333" }}>{it.name ?? "Unknown item"}</td>
+                              <td style={{ padding:"5px 0", textAlign:"center", color:"#666" }}>{it.quantity}</td>
+                              <td style={{ padding:"5px 0", textAlign:"right", color:"#666" }}>{fmtINRFull(it.price)}</td>
+                              <td style={{ padding:"5px 0", textAlign:"right", fontWeight:500, color:"#111" }}>
+                                {fmtINRFull((it.quantity ?? 1) * parseFloat(it.price ?? 0))}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <div style={{ fontSize:12, color:"#aaa", marginBottom:10 }}>No item details available.</div>
+                    )}
 
-                    {/* Totals */}
-                    <div style={{ display:"flex", flexDirection:"column", gap:3, borderTop:"0.5px solid #F0F0EE", paddingTop:8, fontSize:12 }}>
-                      {[
-                        { label:"Subtotal", value: fmtINRFull(order.subtotal) },
-                        { label:"Tax",      value: fmtINRFull(order.tax) },
-                        { label:"Discount", value: fmtINRFull(order.discount ?? 0) },
-                      ].map(({ label, value }) => (
-                        <div key={label} style={{ display:"flex", justifyContent:"space-between", color:"#888" }}>
-                          <span>{label}</span><span>{value}</span>
-                        </div>
-                      ))}
-                      <div style={{
-                        display:"flex", justifyContent:"space-between",
-                        fontWeight:600, color:"#111", fontSize:13,
-                        borderTop:"0.5px solid #E8E8E5", paddingTop:6, marginTop:3,
-                      }}>
-                        <span>Total</span>
-                        <span>{fmtINRFull(order.total_amount)}</span>
-                      </div>
+                    {/* Total */}
+                    <div style={{
+                      display:"flex", justifyContent:"space-between",
+                      fontWeight:600, color:"#111", fontSize:13,
+                      borderTop:"0.5px solid #E8E8E5", paddingTop:8,
+                    }}>
+                      <span>Total</span>
+                      <span>{fmtINRFull(order.total_amount)}</span>
                     </div>
 
                     {/* Badges */}
@@ -667,8 +610,10 @@ function WhatsAppOrders({ restaurantId }) {
                       <span style={{ fontSize:10, padding:"2px 8px", borderRadius:20, background:"#F0F7FF", color:"#185FA5", fontWeight:600 }}>
                         via WhatsApp
                       </span>
-                      {order.notes && (
-                        <span style={{ fontSize:11, color:"#888" }}>Note: {order.notes}</span>
+                      {order.service_type && (
+                        <span style={{ fontSize:10, padding:"2px 8px", borderRadius:20, background:"#F7F7F5", color:"#5F5E5A", fontWeight:600, textTransform:"capitalize" }}>
+                          {order.service_type.replace("_", " ")}
+                        </span>
                       )}
                     </div>
                   </div>
@@ -792,7 +737,7 @@ function useCancelStats(restaurantId, start, end) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-export default function OwnerDashboard({ restaurantId, restaurantName, onLogout, apiClient  }) {
+export default function OwnerDashboard({ restaurantId, restaurantName, onLogout, apiClient }) {
   const [preset,      setPreset]      = useState("today");
   const [customStart, setCustomStart] = useState(null);
   const [customEnd,   setCustomEnd]   = useState(null);
@@ -893,10 +838,9 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(2,minmax(0,1fr))", gap:12 }}>
             <WABAStatus restaurantId={restaurantId} apiClient={apiClient} />
-            <WhatsAppOrders restaurantId={restaurantId} />
+            <WhatsAppOrders restaurantId={restaurantId} apiClient={apiClient} />
           </div>
         </div>
-        {/* ──────────────────────────────────────────────────────────────── */}
 
         {/* Revenue chart */}
         {chartData && <RevenueChart {...chartData} />}
