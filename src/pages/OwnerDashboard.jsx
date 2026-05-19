@@ -1,4 +1,8 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+// ─── Owner's Portal ────────────────────────────────────────────────────────────────
+
+
+
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { supabase } from "../contexts/AuthContext";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -367,7 +371,6 @@ function WABAStatus({ restaurantId, apiClient }) {
           {loading ? "Checking…" : connected ? "● Connected" : "○ Not configured"}
         </span>
       </div>
-
       {loading ? (
         <div style={{ fontSize:12, color:"#aaa", padding:"8px 0" }}>Loading…</div>
       ) : connected ? (
@@ -380,16 +383,14 @@ function WABAStatus({ restaurantId, apiClient }) {
           ].map(({ label, value }) => (
             <div key={label} style={{ background:"#F7F7F5", borderRadius:8, padding:"8px 10px" }}>
               <div style={{ fontSize:10, color:"#aaa", marginBottom:2 }}>{label}</div>
-              <div style={{ fontSize:12, fontWeight:500, color:"#111", wordBreak:"break-all", lineHeight:1.4 }}>
-                {value}
-              </div>
+              <div style={{ fontSize:12, fontWeight:500, color:"#111", wordBreak:"break-all", lineHeight:1.4 }}>{value}</div>
             </div>
           ))}
         </div>
       ) : (
         <div>
           <div style={{ fontSize:12, color:"#888", lineHeight:1.6, marginBottom:12 }}>
-            No WhatsApp Business Account is linked yet. Connect your WABA to start receiving orders via WhatsApp.
+            No WhatsApp Business Account is linked yet.
           </div>
           <div style={{ background:"#F7F7F5", borderRadius:8, padding:"10px 12px", fontSize:11, color:"#5F5E5A", lineHeight:1.6 }}>
             <strong style={{ display:"block", marginBottom:4, color:"#111" }}>To connect:</strong>
@@ -400,12 +401,7 @@ function WABAStatus({ restaurantId, apiClient }) {
           </div>
         </div>
       )}
-
-      <div style={{
-        marginTop:12, padding:"8px 10px", borderRadius:8,
-        background:"#F0F7FF", border:"0.5px solid #C5DDF6",
-        fontSize:11, color:"#185FA5", display:"flex", alignItems:"center", gap:6,
-      }}>
+      <div style={{ marginTop:12, padding:"8px 10px", borderRadius:8, background:"#F0F7FF", border:"0.5px solid #C5DDF6", fontSize:11, color:"#185FA5", display:"flex", alignItems:"center", gap:6 }}>
         <span>📲</span>
         <span>Test ordering bot: send <strong>"Hi"</strong> to <strong>+91 9500996033</strong></span>
       </div>
@@ -416,8 +412,9 @@ function WABAStatus({ restaurantId, apiClient }) {
 // ─── WhatsApp Orders ──────────────────────────────────────────────────────────
 
 function useWhatsAppOrders(restaurantId, apiClient, start, end) {
-  const [orders, setOrders]   = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [orders, setOrders]         = useState([]);
+  const [loading, setLoading]       = useState(true);
+  const [hasFetched, setHasFetched] = useState(false);
 
   const fetchOrders = useCallback(async () => {
     if (!restaurantId || !apiClient) return;
@@ -430,12 +427,15 @@ function useWhatsAppOrders(restaurantId, apiClient, start, end) {
       setOrders(res.data.orders || []);
     } catch (err) {
       console.error('Failed to fetch WhatsApp orders:', err.message);
-      setOrders([]);
+    } finally {
+      setLoading(false);
+      setHasFetched(true);
     }
-    setLoading(false);
   }, [restaurantId, apiClient, start, end]);
 
   useEffect(() => {
+    // Only show loading spinner on first fetch, not on background refreshes
+    if (!hasFetched) setLoading(true);
     fetchOrders();
     const interval = setInterval(fetchOrders, 30000);
     return () => clearInterval(interval);
@@ -459,10 +459,7 @@ function WhatsAppOrders({ restaurantId, apiClient, start, end }) {
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
         <div>
           <span style={{ fontSize:14, fontWeight:500, color:"#111" }}>WhatsApp orders</span>
-          <span style={{
-            marginLeft:8, fontSize:11, padding:"1px 7px", borderRadius:20,
-            background:"#E8F5E9", color:"#2E7D32", fontWeight:600,
-          }}>
+          <span style={{ marginLeft:8, fontSize:11, padding:"1px 7px", borderRadius:20, background:"#E8F5E9", color:"#2E7D32", fontWeight:600 }}>
             {total} total
           </span>
         </div>
@@ -512,7 +509,6 @@ function WhatsAppOrders({ restaurantId, apiClient, start, end }) {
                     padding:"10px 12px", cursor:"pointer", gap:8, flexWrap:"wrap",
                   }}
                 >
-                  {/* Left: customer */}
                   <div style={{ display:"flex", alignItems:"center", gap:8, minWidth:0 }}>
                     <span style={{ fontSize:11, color:"#1D9E75", fontWeight:600 }}>📲</span>
                     <div>
@@ -521,10 +517,7 @@ function WhatsAppOrders({ restaurantId, apiClient, start, end }) {
                           {order.customer_name ?? "Unknown customer"}
                         </span>
                         {order.customer_phone && (
-                          <span style={{
-                            fontSize:10, color:"#1D9E75", fontFamily:"monospace",
-                            background:"#F0FBF6", padding:"1px 6px", borderRadius:4,
-                          }}>
+                          <span style={{ fontSize:10, color:"#1D9E75", fontFamily:"monospace", background:"#F0FBF6", padding:"1px 6px", borderRadius:4 }}>
                             +{order.customer_phone}
                           </span>
                         )}
@@ -540,28 +533,17 @@ function WhatsAppOrders({ restaurantId, apiClient, start, end }) {
                     </div>
                   </div>
 
-                  {/* Middle: items summary */}
-                  <div style={{
-                    flex:1, fontSize:11, color:"#666",
-                    overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", minWidth:0,
-                  }}>
+                  <div style={{ flex:1, fontSize:11, color:"#666", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", minWidth:0 }}>
                     {order.items && order.items.length > 0
                       ? order.items.map(it => `${it.name ?? "Item"} ×${it.quantity}`).join(", ")
                       : "—"
                     }
                   </div>
 
-                  {/* Right */}
                   <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
-                    <span style={{ fontSize:13, fontWeight:600, color:"#111" }}>
-                      {fmtINRFull(order.total_amount)}
-                    </span>
+                    <span style={{ fontSize:13, fontWeight:600, color:"#111" }}>{fmtINRFull(order.total_amount)}</span>
                     <StatusPill status={order.status} />
-                    <span style={{
-                      fontSize:10, color:"#aaa",
-                      transform: isOpen ? "rotate(180deg)" : "none",
-                      transition:"transform 0.2s", display:"inline-block",
-                    }}>▼</span>
+                    <span style={{ fontSize:10, color:"#aaa", transform: isOpen ? "rotate(180deg)" : "none", transition:"transform 0.2s", display:"inline-block" }}>▼</span>
                   </div>
                 </div>
 
@@ -595,17 +577,11 @@ function WhatsAppOrders({ restaurantId, apiClient, start, end }) {
                       <div style={{ fontSize:12, color:"#aaa", marginBottom:10 }}>No item details available.</div>
                     )}
 
-                    {/* Total */}
-                    <div style={{
-                      display:"flex", justifyContent:"space-between",
-                      fontWeight:600, color:"#111", fontSize:13,
-                      borderTop:"0.5px solid #E8E8E5", paddingTop:8,
-                    }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", fontWeight:600, color:"#111", fontSize:13, borderTop:"0.5px solid #E8E8E5", paddingTop:8 }}>
                       <span>Total</span>
                       <span>{fmtINRFull(order.total_amount)}</span>
                     </div>
 
-                    {/* Badges */}
                     <div style={{ marginTop:10, display:"flex", gap:8, flexWrap:"wrap" }}>
                       <span style={{
                         fontSize:10, padding:"2px 8px", borderRadius:20, fontWeight:600, textTransform:"uppercase",
@@ -750,7 +726,13 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
   const [customEnd,   setCustomEnd]   = useState(null);
   const [showCal,     setShowCal]     = useState(false);
 
-  const { start, end } = (customStart && customEnd) ? { start:customStart, end:customEnd } : getRange(preset);
+  // useMemo prevents new Date objects on every render — stops the flicker cascade
+  const { start, end } = useMemo(
+    () => (customStart && customEnd)
+      ? { start: customStart, end: customEnd }
+      : getRange(preset),
+    [preset, customStart, customEnd]
+  );
 
   const kpi         = useKpiData(restaurantId, start, end);
   const chartData   = useChartData(restaurantId, start, end, preset);
@@ -770,10 +752,10 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
     { icon:"👥", label:"Total covers",    value: kpi?.totalCovers ?? "—",                neutral:true, sub:"vs prior" },
   ];
   const row2 = [
-    { icon:"🔄", label:"Table turns",     value:"3.2×",                                                badge:12,  sub:"vs prior" },
-    { icon:"⏱",  label:"Avg dining time", value: kpi?.avgDining ? `${kpi.avgDining} min` : "—",        sub:"Benchmark: 90 min" },
-    { icon:"🎟",  label:"Tokens issued",  value: kpi?.tokensIssued ?? "—",                             badge:18,  sub:"vs prior" },
-    { icon:"⏳", label:"Avg wait time",   value: kpi?.avgWait ? `${kpi.avgWait} min` : "—",            badge:-22, sub:"vs prior" },
+    { icon:"🔄", label:"Table turns",     value:"3.2×",                                             badge:12,  sub:"vs prior" },
+    { icon:"⏱",  label:"Avg dining time", value: kpi?.avgDining ? `${kpi.avgDining} min` : "—",     sub:"Benchmark: 90 min" },
+    { icon:"🎟",  label:"Tokens issued",  value: kpi?.tokensIssued ?? "—",                          badge:18,  sub:"vs prior" },
+    { icon:"⏳", label:"Avg wait time",   value: kpi?.avgWait ? `${kpi.avgWait} min` : "—",         badge:-22, sub:"vs prior" },
   ];
 
   const btnStyle = (active) => ({
@@ -835,7 +817,7 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
           {row2.map((m,i) => <MetricCard key={i} {...m} />)}
         </div>
 
-        {/* ── WhatsApp Business Section ── */}
+        {/* WhatsApp Business Section */}
         <div style={{ marginBottom:12 }}>
           <div style={{ fontSize:11, fontWeight:600, color:"#aaa", letterSpacing:0.8, textTransform:"uppercase", marginBottom:8 }}>
             WhatsApp Business
