@@ -45,12 +45,27 @@ function fmtINR(n) {
   return "₹" + Math.round(n);
 }
 
+function fmtINRFull(n) {
+  if (!n) return "₹0.00";
+  return "₹" + Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 function fmtDate(d) {
   if (!d) return "";
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-// ─── Chart.js loaded from CDN — zero npm installs needed ─────────────────────
+function fmtDateTime(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const today = new Date();
+  const isToday = d.toDateString() === today.toDateString();
+  const time = d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+  if (isToday) return `Today ${time}`;
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " " + time;
+}
+
+// ─── Chart.js loaded from CDN ─────────────────────────────────────────────────
 let _chartJsLoaded = false;
 let _chartJsCbs = [];
 function loadChartJs(cb) {
@@ -64,7 +79,7 @@ function loadChartJs(cb) {
   document.head.appendChild(s);
 }
 
-// ─── Components ───────────────────────────────────────────────────────────────
+// ─── Shared UI Components ─────────────────────────────────────────────────────
 
 function Badge({ val, neutral }) {
   if (neutral) return <span style={{ display:"inline-block", fontSize:11, fontWeight:500, padding:"1px 7px", borderRadius:6, background:"#F1EFE8", color:"#5F5E5A" }}>→ 0%</span>;
@@ -85,6 +100,56 @@ function MetricCard({ icon, label, value, sub, badge, neutral }) {
     </div>
   );
 }
+
+function StatusPill({ status }) {
+  const map = {
+    pending:   { bg: "#FFF3E0", color: "#BA7517", label: "Pending" },
+    confirmed: { bg: "#E8F5E9", color: "#2E7D32", label: "Confirmed" },
+    completed: { bg: "#E3F2FD", color: "#1565C0", label: "Completed" },
+    cancelled: { bg: "#FFEBEE", color: "#C62828", label: "Cancelled" },
+  };
+  const s = map[status] ?? { bg: "#F1EFE8", color: "#5F5E5A", label: status };
+  return (
+    <span style={{
+      fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 20,
+      background: s.bg, color: s.color, letterSpacing: 0.3, textTransform: "uppercase",
+    }}>
+      {s.label}
+    </span>
+  );
+}
+
+function StatCard({ title, sub, children }) {
+  return (
+    <div style={{ background:"#fff", border:"0.5px solid #E8E8E5", borderRadius:12, padding:"16px 20px" }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+        <span style={{ fontSize:14, fontWeight:500, color:"#111" }}>{title}</span>
+        <span style={{ fontSize:11, color:"#aaa" }}>{sub}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function MiniStat({ label, value, color }) {
+  return (
+    <div style={{ background:"#F7F7F5", borderRadius:10, padding:"8px 10px", textAlign:"center", flex:1 }}>
+      <div style={{ fontSize:11, color:"#888", marginBottom:2 }}>{label}</div>
+      <div style={{ fontSize:20, fontWeight:500, color: color ?? "#111" }}>{value}</div>
+    </div>
+  );
+}
+
+function KRow({ label, value, danger, warn }) {
+  return (
+    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"7px 0", borderBottom:"0.5px solid #F7F7F5", fontSize:12 }}>
+      <span style={{ color:"#888" }}>{label}</span>
+      <span style={{ fontWeight:500, color: danger ? "#A32D2D" : warn ? "#BA7517" : "#111" }}>{value}</span>
+    </div>
+  );
+}
+
+// ─── Dashboard Widgets ────────────────────────────────────────────────────────
 
 function RevenueChart({ labels, revenue, orders, covers }) {
   const canvasRef = useRef(null);
@@ -231,36 +296,6 @@ function TableOccupancy({ tables }) {
   );
 }
 
-function StatCard({ title, sub, children }) {
-  return (
-    <div style={{ background:"#fff", border:"0.5px solid #E8E8E5", borderRadius:12, padding:"16px 20px" }}>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
-        <span style={{ fontSize:14, fontWeight:500, color:"#111" }}>{title}</span>
-        <span style={{ fontSize:11, color:"#aaa" }}>{sub}</span>
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function MiniStat({ label, value, color }) {
-  return (
-    <div style={{ background:"#F7F7F5", borderRadius:10, padding:"8px 10px", textAlign:"center", flex:1 }}>
-      <div style={{ fontSize:11, color:"#888", marginBottom:2 }}>{label}</div>
-      <div style={{ fontSize:20, fontWeight:500, color: color ?? "#111" }}>{value}</div>
-    </div>
-  );
-}
-
-function KRow({ label, value, danger, warn }) {
-  return (
-    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"7px 0", borderBottom:"0.5px solid #F7F7F5", fontSize:12 }}>
-      <span style={{ color:"#888" }}>{label}</span>
-      <span style={{ fontWeight:500, color: danger ? "#A32D2D" : warn ? "#BA7517" : "#111" }}>{value}</span>
-    </div>
-  );
-}
-
 function KotStatus({ stats }) {
   return (
     <StatCard title="KOT status" sub="kitchen orders today">
@@ -292,7 +327,362 @@ function CancellationVoids({ stats }) {
   );
 }
 
-// ─── Data hooks ───────────────────────────────────────────────────────────────
+// ─── WhatsApp Widgets ─────────────────────────────────────────────────────────
+
+function WABAStatus({ restaurantId }) {
+  const [info, setInfo]       = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!restaurantId) return;
+    (async () => {
+      const { data, error } = await supabase
+        .from("restaurants")
+        .select("name, waba_id, whatsapp_phone_number, whatsapp_display_name")
+        .eq("id", restaurantId)
+        .single();
+      if (!error && data) {
+        setInfo({
+          name:         data.name,
+          waba_id:      data.waba_id,
+          phone:        data.whatsapp_phone_number,
+          display_name: data.whatsapp_display_name,
+        });
+      }
+      setLoading(false);
+    })();
+  }, [restaurantId]);
+
+  const connected = !loading && info?.waba_id;
+
+  return (
+    <div style={{ background:"#fff", border:"0.5px solid #E8E8E5", borderRadius:12, padding:"16px 20px" }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+        <span style={{ fontSize:14, fontWeight:500, color:"#111" }}>WhatsApp Business</span>
+        <span style={{
+          fontSize:11, fontWeight:600, padding:"2px 10px", borderRadius:20,
+          background: connected ? "#E8F5E9" : "#FFF3E0",
+          color:      connected ? "#2E7D32" : "#BA7517",
+        }}>
+          {loading ? "Checking…" : connected ? "● Connected" : "○ Not configured"}
+        </span>
+      </div>
+
+      {loading ? (
+        <div style={{ fontSize:12, color:"#aaa", padding:"8px 0" }}>Loading…</div>
+      ) : connected ? (
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+          {[
+            { label:"Business name",  value: info.display_name ?? info.name ?? "—" },
+            { label:"Phone number",   value: info.phone ? `+${info.phone}` : "—" },
+            { label:"WABA ID",        value: info.waba_id ?? "—" },
+            { label:"API permission", value: "whatsapp_business_messaging" },
+          ].map(({ label, value }) => (
+            <div key={label} style={{ background:"#F7F7F5", borderRadius:8, padding:"8px 10px" }}>
+              <div style={{ fontSize:10, color:"#aaa", marginBottom:2 }}>{label}</div>
+              <div style={{ fontSize:12, fontWeight:500, color:"#111", wordBreak:"break-all", lineHeight:1.4 }}>
+                {value}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div>
+          <div style={{ fontSize:12, color:"#888", lineHeight:1.6, marginBottom:12 }}>
+            No WhatsApp Business Account is linked yet. Connect your WABA to start receiving orders via WhatsApp.
+          </div>
+          <div style={{ background:"#F7F7F5", borderRadius:8, padding:"10px 12px", fontSize:11, color:"#5F5E5A", lineHeight:1.6 }}>
+            <strong style={{ display:"block", marginBottom:4, color:"#111" }}>To connect:</strong>
+            1. Go to <strong>Integrations</strong> in the sidebar<br />
+            2. Select <strong>WhatsApp Business</strong><br />
+            3. Follow the Meta Embedded Signup flow<br />
+            4. Your WABA details will appear here once linked
+          </div>
+        </div>
+      )}
+
+      <div style={{
+        marginTop:12, padding:"8px 10px", borderRadius:8,
+        background:"#F0F7FF", border:"0.5px solid #C5DDF6",
+        fontSize:11, color:"#185FA5", display:"flex", alignItems:"center", gap:6,
+      }}>
+        <span>📲</span>
+        <span>Test ordering bot: send <strong>"Hi"</strong> to <strong>+91 9500996033</strong></span>
+      </div>
+    </div>
+  );
+}
+
+function useWhatsAppOrders(restaurantId) {
+  const [orders, setOrders]   = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchOrders = useCallback(async () => {
+    if (!restaurantId) return;
+
+    const { data: rawOrders } = await supabase
+      .from("orders")
+      .select("id, order_number, status, payment_status, total_amount, subtotal, tax, discount, created_at, notes")
+      .eq("restaurant_id", restaurantId)
+      .eq("source", "whatsapp")
+      .order("created_at", { ascending: false })
+      .limit(50);
+
+    if (!rawOrders?.length) { setOrders([]); setLoading(false); return; }
+
+    const orderIds = rawOrders.map(o => o.id);
+    const { data: items } = await supabase
+      .from("order_items")
+      .select("order_id, quantity, unit_price, special_instructions, menu_items(name)")
+      .in("order_id", orderIds);
+
+    // Fetch walk_in_tokens (takeaway/whatsapp) in the time window for customer name + phone
+    const oldest = rawOrders[rawOrders.length - 1]?.created_at;
+    const newest = rawOrders[0]?.created_at;
+    const { data: tokens } = await supabase
+      .from("walk_in_tokens")
+      .select("id, name, phone, arrived_at, type")
+      .eq("restaurant_id", restaurantId)
+      .gte("arrived_at", oldest)
+      .lte("arrived_at", newest)
+      .in("type", ["takeaway", "whatsapp"]);
+
+    // Match order to closest token within 3 minutes
+    function findCustomer(orderCreatedAt) {
+      if (!tokens?.length) return null;
+      const orderTs = new Date(orderCreatedAt).getTime();
+      let best = null, bestDiff = Infinity;
+      tokens.forEach(t => {
+        const diff = Math.abs(new Date(t.arrived_at).getTime() - orderTs);
+        if (diff < bestDiff && diff <= 3 * 60 * 1000) { best = t; bestDiff = diff; }
+      });
+      return best;
+    }
+
+    const itemsByOrder = {};
+    (items ?? []).forEach(it => {
+      if (!itemsByOrder[it.order_id]) itemsByOrder[it.order_id] = [];
+      itemsByOrder[it.order_id].push(it);
+    });
+
+    setOrders(rawOrders.map(o => {
+      const customer = findCustomer(o.created_at);
+      return {
+        ...o,
+        items:          itemsByOrder[o.id] ?? [],
+        customer_name:  customer?.name  ?? null,
+        customer_phone: customer?.phone ?? null,
+      };
+    }));
+    setLoading(false);
+  }, [restaurantId]);
+
+  useEffect(() => {
+    fetchOrders();
+    const ch = supabase
+      .channel(`wa-orders-${restaurantId}`)
+      .on("postgres_changes", { event:"*", schema:"public", table:"orders", filter:`restaurant_id=eq.${restaurantId}` }, fetchOrders)
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [restaurantId, fetchOrders]);
+
+  return { orders, loading };
+}
+
+function WhatsAppOrders({ restaurantId }) {
+  const { orders, loading } = useWhatsAppOrders(restaurantId);
+  const [expanded, setExpanded] = useState(null);
+
+  const total   = orders.length;
+  const pending = orders.filter(o => o.status === "pending").length;
+  const revenue = orders
+    .filter(o => o.status !== "cancelled")
+    .reduce((s, o) => s + parseFloat(o.total_amount ?? 0), 0);
+
+  return (
+    <div style={{ background:"#fff", border:"0.5px solid #E8E8E5", borderRadius:12, padding:"16px 20px" }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+        <div>
+          <span style={{ fontSize:14, fontWeight:500, color:"#111" }}>WhatsApp orders</span>
+          <span style={{
+            marginLeft:8, fontSize:11, padding:"1px 7px", borderRadius:20,
+            background:"#E8F5E9", color:"#2E7D32", fontWeight:600,
+          }}>
+            {total} total
+          </span>
+        </div>
+        <span style={{ fontSize:11, color:"#aaa" }}>last 50 orders</span>
+      </div>
+
+      {/* Summary strip */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:14 }}>
+        {[
+          { label:"All orders", value: total,              color:"#111" },
+          { label:"Pending",    value: pending,             color: pending > 0 ? "#BA7517" : "#111" },
+          { label:"Revenue",    value: fmtINRFull(revenue), color:"#1D9E75" },
+        ].map(({ label, value, color }) => (
+          <div key={label} style={{ background:"#F7F7F5", borderRadius:8, padding:"8px 10px", textAlign:"center" }}>
+            <div style={{ fontSize:10, color:"#aaa", marginBottom:2 }}>{label}</div>
+            <div style={{ fontSize:16, fontWeight:500, color }}>{value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Orders list */}
+      {loading ? (
+        <div style={{ fontSize:12, color:"#aaa", padding:"16px 0", textAlign:"center" }}>Loading orders…</div>
+      ) : orders.length === 0 ? (
+        <div style={{ fontSize:12, color:"#aaa", padding:"24px 0", textAlign:"center", background:"#F7F7F5", borderRadius:8 }}>
+          No WhatsApp orders yet.<br />
+          <span style={{ fontSize:11 }}>Send <strong>"Hi"</strong> to +91 9500996033 to place a test order.</span>
+        </div>
+      ) : (
+        <div style={{ display:"flex", flexDirection:"column", gap:8, maxHeight:420, overflowY:"auto" }}>
+          {orders.map(order => {
+            const isOpen = expanded === order.id;
+            return (
+              <div key={order.id} style={{
+                border:`0.5px solid ${isOpen ? "#C5DDF6" : "#F0F0EE"}`,
+                borderRadius:10, overflow:"hidden",
+                background: isOpen ? "#F8FBFF" : "#FAFAF9",
+                transition:"border-color 0.15s",
+              }}>
+                {/* Collapsed row */}
+                <div
+                  onClick={() => setExpanded(isOpen ? null : order.id)}
+                  style={{
+                    display:"flex", alignItems:"center", justifyContent:"space-between",
+                    padding:"10px 12px", cursor:"pointer", gap:8, flexWrap:"wrap",
+                  }}
+                >
+                  {/* Left: customer name + phone + order ref */}
+                  <div style={{ display:"flex", alignItems:"center", gap:8, minWidth:0 }}>
+                    <span style={{ fontSize:11, color:"#1D9E75", fontWeight:600 }}>📲</span>
+                    <div>
+                      <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+                        <span style={{ fontSize:12, fontWeight:600, color:"#111" }}>
+                          {order.customer_name ?? "Unknown customer"}
+                        </span>
+                        {order.customer_phone && (
+                          <span style={{
+                            fontSize:10, color:"#1D9E75", fontFamily:"monospace",
+                            background:"#F0FBF6", padding:"1px 6px", borderRadius:4,
+                          }}>
+                            +{order.customer_phone}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize:10, color:"#aaa", fontFamily:"monospace" }}>
+                        {order.order_number} · {fmtDateTime(order.created_at)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Middle: items summary */}
+                  <div style={{
+                    flex:1, fontSize:11, color:"#666",
+                    overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", minWidth:0,
+                  }}>
+                    {order.items.length > 0
+                      ? order.items.map(it => `${it.menu_items?.name ?? "Item"} ×${it.quantity}`).join(", ")
+                      : "—"
+                    }
+                  </div>
+
+                  {/* Right: total + status + chevron */}
+                  <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+                    <span style={{ fontSize:13, fontWeight:600, color:"#111" }}>
+                      {fmtINRFull(order.total_amount)}
+                    </span>
+                    <StatusPill status={order.status} />
+                    <span style={{
+                      fontSize:10, color:"#aaa",
+                      transform: isOpen ? "rotate(180deg)" : "none",
+                      transition:"transform 0.2s", display:"inline-block",
+                    }}>▼</span>
+                  </div>
+                </div>
+
+                {/* Expanded detail */}
+                {isOpen && (
+                  <div style={{ borderTop:"0.5px solid #E8EEF6", padding:"12px 14px", background:"#fff" }}>
+                    <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12, marginBottom:10 }}>
+                      <thead>
+                        <tr style={{ borderBottom:"0.5px solid #F0F0EE" }}>
+                          <th style={{ textAlign:"left",   color:"#aaa", fontWeight:400, fontSize:10, paddingBottom:6 }}>Item</th>
+                          <th style={{ textAlign:"center", color:"#aaa", fontWeight:400, fontSize:10, paddingBottom:6 }}>Qty</th>
+                          <th style={{ textAlign:"right",  color:"#aaa", fontWeight:400, fontSize:10, paddingBottom:6 }}>Price</th>
+                          <th style={{ textAlign:"right",  color:"#aaa", fontWeight:400, fontSize:10, paddingBottom:6 }}>Subtotal</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {order.items.map((it, i) => (
+                          <tr key={i} style={{ borderBottom:"0.5px solid #F7F7F5" }}>
+                            <td style={{ padding:"5px 0", color:"#333" }}>
+                              {it.menu_items?.name ?? "Unknown item"}
+                              {it.special_instructions && (
+                                <div style={{ fontSize:10, color:"#aaa" }}>{it.special_instructions}</div>
+                              )}
+                            </td>
+                            <td style={{ padding:"5px 0", textAlign:"center", color:"#666" }}>{it.quantity}</td>
+                            <td style={{ padding:"5px 0", textAlign:"right", color:"#666" }}>{fmtINRFull(it.unit_price)}</td>
+                            <td style={{ padding:"5px 0", textAlign:"right", fontWeight:500, color:"#111" }}>
+                              {fmtINRFull((it.quantity ?? 1) * parseFloat(it.unit_price ?? 0))}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+
+                    {/* Totals */}
+                    <div style={{ display:"flex", flexDirection:"column", gap:3, borderTop:"0.5px solid #F0F0EE", paddingTop:8, fontSize:12 }}>
+                      {[
+                        { label:"Subtotal", value: fmtINRFull(order.subtotal) },
+                        { label:"Tax",      value: fmtINRFull(order.tax) },
+                        { label:"Discount", value: fmtINRFull(order.discount ?? 0) },
+                      ].map(({ label, value }) => (
+                        <div key={label} style={{ display:"flex", justifyContent:"space-between", color:"#888" }}>
+                          <span>{label}</span><span>{value}</span>
+                        </div>
+                      ))}
+                      <div style={{
+                        display:"flex", justifyContent:"space-between",
+                        fontWeight:600, color:"#111", fontSize:13,
+                        borderTop:"0.5px solid #E8E8E5", paddingTop:6, marginTop:3,
+                      }}>
+                        <span>Total</span>
+                        <span>{fmtINRFull(order.total_amount)}</span>
+                      </div>
+                    </div>
+
+                    {/* Badges */}
+                    <div style={{ marginTop:10, display:"flex", gap:8, flexWrap:"wrap" }}>
+                      <span style={{
+                        fontSize:10, padding:"2px 8px", borderRadius:20, fontWeight:600, textTransform:"uppercase",
+                        background: order.payment_status === "paid" ? "#E8F5E9" : "#FFF3E0",
+                        color:      order.payment_status === "paid" ? "#2E7D32" : "#BA7517",
+                      }}>
+                        {order.payment_status ?? "unpaid"}
+                      </span>
+                      <span style={{ fontSize:10, padding:"2px 8px", borderRadius:20, background:"#F0F7FF", color:"#185FA5", fontWeight:600 }}>
+                        via WhatsApp
+                      </span>
+                      {order.notes && (
+                        <span style={{ fontSize:11, color:"#888" }}>Note: {order.notes}</span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Data Hooks ───────────────────────────────────────────────────────────────
 
 function useKpiData(restaurantId, start, end) {
   const [data, setData] = useState(null);
@@ -402,7 +792,7 @@ function useCancelStats(restaurantId, start, end) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-export default function OwnerDashboard({ restaurantId, restaurantName,onLogout  }) {
+export default function OwnerDashboard({ restaurantId, restaurantName, onLogout }) {
   const [preset,      setPreset]      = useState("today");
   const [customStart, setCustomStart] = useState(null);
   const [customEnd,   setCustomEnd]   = useState(null);
@@ -417,7 +807,9 @@ export default function OwnerDashboard({ restaurantId, restaurantName,onLogout  
   const kotStats    = useKotStats(restaurantId);
   const cancelStats = useCancelStats(restaurantId, start, end);
 
-  const rangeLabel = (customStart&&customEnd) ? `Custom · ${fmtDate(customStart)} – ${fmtDate(customEnd)}` : { today:"Today", yesterday:"Yesterday", "7d":"Last 7 days", "30d":"Last 30 days" }[preset];
+  const rangeLabel = (customStart&&customEnd)
+    ? `Custom · ${fmtDate(customStart)} – ${fmtDate(customEnd)}`
+    : { today:"Today", yesterday:"Yesterday", "7d":"Last 7 days", "30d":"Last 30 days" }[preset];
 
   const row1 = [
     { icon:"₹",  label:"Total revenue",  value: kpi ? fmtINR(kpi.totalRevenue) : "—", badge:12,  sub:"vs prior" },
@@ -426,17 +818,17 @@ export default function OwnerDashboard({ restaurantId, restaurantName,onLogout  
     { icon:"👥", label:"Total covers",    value: kpi?.totalCovers ?? "—",                neutral:true, sub:"vs prior" },
   ];
   const row2 = [
-    { icon:"🔄", label:"Table turns",    value:"3.2×",                                               badge:12,  sub:"vs prior" },
-    { icon:"⏱",  label:"Avg dining time",value: kpi?.avgDining ? `${kpi.avgDining} min` : "—",       sub:"Benchmark: 90 min" },
-    { icon:"🎟",  label:"Tokens issued",  value: kpi?.tokensIssued ?? "—",                            badge:18,  sub:"vs prior" },
-    { icon:"⏳", label:"Avg wait time",  value: kpi?.avgWait ? `${kpi.avgWait} min` : "—",           badge:-22, sub:"vs prior" },
+    { icon:"🔄", label:"Table turns",     value:"3.2×",                                                badge:12,  sub:"vs prior" },
+    { icon:"⏱",  label:"Avg dining time", value: kpi?.avgDining ? `${kpi.avgDining} min` : "—",        sub:"Benchmark: 90 min" },
+    { icon:"🎟",  label:"Tokens issued",  value: kpi?.tokensIssued ?? "—",                             badge:18,  sub:"vs prior" },
+    { icon:"⏳", label:"Avg wait time",   value: kpi?.avgWait ? `${kpi.avgWait} min` : "—",            badge:-22, sub:"vs prior" },
   ];
 
   const btnStyle = (active) => ({
     fontSize:12, padding:"4px 10px", borderRadius:8, border:"0.5px solid", cursor:"pointer",
-    background: active ? "#F0F0EE" : "transparent",
-    color:      active ? "#111"    : "#888",
-    borderColor:active ? "#C8C8C4" : "#E0E0DC",
+    background:  active ? "#F0F0EE" : "transparent",
+    color:       active ? "#111"    : "#888",
+    borderColor: active ? "#C8C8C4" : "#E0E0DC",
   });
 
   return (
@@ -444,29 +836,32 @@ export default function OwnerDashboard({ restaurantId, restaurantName,onLogout  
       <div style={{ maxWidth:1100, margin:"0 auto" }}>
 
         {/* Header */}
-<div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16, flexWrap:"wrap", gap:12 }}>
-  <div>
-    <h1 style={{ fontSize:18, fontWeight:500, color:"#111", margin:0 }}>Owner dashboard</h1>
-    <p style={{ fontSize:13, color:"#888", margin:"2px 0 0" }}>{restaurantName} · {new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}</p>
-  </div>
-  <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
-    <div style={{ display:"flex", gap:4 }}>
-      {PRESETS.map(p => (
-        <button key={p.key} style={btnStyle(preset===p.key&&!customStart)} onClick={()=>{ setPreset(p.key); setCustomStart(null); setCustomEnd(null); setShowCal(false); }}>
-          {p.label}
-        </button>
-      ))}
-    </div>
-    <div style={{ width:1, height:18, background:"#E0E0DC" }} />
-    <button style={{ ...btnStyle(!!customStart), display:"flex", alignItems:"center", gap:5 }} onClick={()=>setShowCal(v=>!v)}>
-      📅 {customStart ? `${fmtDate(customStart)} – ${fmtDate(customEnd)}` : "Custom"}
-    </button>
-    <div style={{ width:1, height:18, background:"#E0E0DC" }} />
-    <button onClick={onLogout} style={{ fontSize:12, padding:"4px 12px", borderRadius:8, border:"0.5px solid #FCEBEB", background:"#FFF5F5", color:"#A32D2D", cursor:"pointer" }}>
-      Logout
-    </button>
-  </div>
-</div>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16, flexWrap:"wrap", gap:12 }}>
+          <div>
+            <h1 style={{ fontSize:18, fontWeight:500, color:"#111", margin:0 }}>Owner dashboard</h1>
+            <p style={{ fontSize:13, color:"#888", margin:"2px 0 0" }}>
+              {restaurantName} · {new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}
+            </p>
+          </div>
+          <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+            <div style={{ display:"flex", gap:4 }}>
+              {PRESETS.map(p => (
+                <button key={p.key} style={btnStyle(preset===p.key&&!customStart)} onClick={()=>{ setPreset(p.key); setCustomStart(null); setCustomEnd(null); setShowCal(false); }}>
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            <div style={{ width:1, height:18, background:"#E0E0DC" }} />
+            <button style={{ ...btnStyle(!!customStart), display:"flex", alignItems:"center", gap:5 }} onClick={()=>setShowCal(v=>!v)}>
+              📅 {customStart ? `${fmtDate(customStart)} – ${fmtDate(customEnd)}` : "Custom"}
+            </button>
+            <div style={{ width:1, height:18, background:"#E0E0DC" }} />
+            <button onClick={onLogout} style={{ fontSize:12, padding:"4px 12px", borderRadius:8, border:"0.5px solid #FCEBEB", background:"#FFF5F5", color:"#A32D2D", cursor:"pointer" }}>
+              Logout
+            </button>
+          </div>
+        </div>
+
         {/* Custom date picker */}
         {showCal && (
           <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12, padding:12, background:"#fff", border:"0.5px solid #E8E8E5", borderRadius:12, flexWrap:"wrap" }}>
@@ -488,7 +883,22 @@ export default function OwnerDashboard({ restaurantId, restaurantName,onLogout  
           {row2.map((m,i) => <MetricCard key={i} {...m} />)}
         </div>
 
-        {/* Revenue + heatmap */}
+        {/* ── WhatsApp Business Section ────────────────────────────────── */}
+        <div style={{ marginBottom:12 }}>
+          <div style={{
+            fontSize:11, fontWeight:600, color:"#aaa", letterSpacing:0.8,
+            textTransform:"uppercase", marginBottom:8,
+          }}>
+            WhatsApp Business
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(2,minmax(0,1fr))", gap:12 }}>
+            <WABAStatus restaurantId={restaurantId} />
+            <WhatsAppOrders restaurantId={restaurantId} />
+          </div>
+        </div>
+        {/* ──────────────────────────────────────────────────────────────── */}
+
+        {/* Revenue chart */}
         {chartData && <RevenueChart {...chartData} />}
 
         {/* Menu + Tables */}
