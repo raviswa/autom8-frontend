@@ -52,9 +52,8 @@ function AppRoutes() {
   const { hasFeature, hasAnyOf }  = useSubscription();
   if (loading) return <Spinner />;
 
-  const restaurantId   = user?.restaurant_id   ?? user?.restaurantId   ?? null;
-  const restaurantName = user?.restaurant_name ?? user?.restaurantName ?? 'My Restaurant';
-
+const restaurantId   = user?.restaurant_id ?? user?.restaurantId ?? '46fb9b9e-431a-43c9-9edb-d316b0fef216';
+const restaurantName = user?.restaurant_name ?? user?.restaurantName ?? 'Hotel Munafe';
   return (
     <Routes>
 
