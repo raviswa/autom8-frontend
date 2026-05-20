@@ -392,231 +392,418 @@ function BroadcastComposer({ apiClient, selectedSegment, draftMessage, segmentCo
   );
 }
 
-// ─── Template Create Drawer ───────────────────────────────────────────────────
-const HEADER_TYPES = ["NONE", "TEXT", "IMAGE", "VIDEO", "DOCUMENT"];
-const LANGUAGES    = [
+// ─── Template Modal Constants ─────────────────────────────────────────────────
+const LANGUAGES = [
   { code: "en",    label: "English" },
   { code: "en_US", label: "English (US)" },
   { code: "ta",    label: "Tamil" },
   { code: "hi",    label: "Hindi" },
 ];
 
-function TemplateCreateDrawer({ apiClient, onClose, onCreated }) {
+// Restaurant-specific variables (replaces Botbiz's eCommerce system fields)
+const RESTAURANT_VARIABLES = [
+  { label: "Customer name",   insert: "{{name}}",       preview: "Ravi" },
+  { label: "Restaurant name", insert: "{{restaurant}}", preview: "Hotel Munafe" },
+  { label: "Date",            insert: "{{date}}",       preview: "20 May 2026" },
+  { label: "Token number",    insert: "{{token}}",      preview: "T-042" },
+  { label: "Order number",    insert: "{{order}}",      preview: "ORD-001" },
+];
+
+const BUTTON_TYPES = {
+  QUICK_REPLY:  { label: "Quick reply",      icon: "↩",  group: "Quick reply buttons" },
+  URL:          { label: "Visit website",    icon: "🔗", group: "Call to action buttons", note: "2 max" },
+  PHONE_NUMBER: { label: "Call phone number",icon: "📞", group: "Call to action buttons", note: "1 max" },
+  COPY_CODE:    { label: "Copy offer code",  icon: "🎟",  group: "Call to action buttons", note: "1 max" },
+};
+
+// ─── Template Create Modal ────────────────────────────────────────────────────
+function TemplateCreateModal({ apiClient, onClose, onCreated }) {
   const [form, setForm] = useState({
-    name:        "",
-    category:    "MARKETING",
-    language:    "en",
-    headerType:  "NONE",
-    headerText:  "",
-    body:        "",
-    footer:      "",
-    buttons:     [],
+    name:       "",
+    category:   "MARKETING",
+    language:   "en",
+    headerType: "NONE",
+    headerText: "",
+    mediaFile:  null,
+    mediaPreviewUrl: null,
+    body:       "",
+    footer:     "",
+    buttons:    [],
   });
-  const [saving,   setSaving]   = useState(false);
-  const [error,    setError]    = useState(null);
-  const [success,  setSuccess]  = useState(false);
+  const [saving,        setSaving]        = useState(false);
+  const [uploading,     setUploading]     = useState(false);
+  const [error,         setError]         = useState(null);
+  const [success,       setSuccess]       = useState(false);
+  const [showVarMenu,   setShowVarMenu]   = useState(false);
+  const [showBtnMenu,   setShowBtnMenu]   = useState(false);
+  const [aiRewriting,   setAiRewriting]   = useState(false);
+  const bodyRef = useRef(null);
 
   const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
 
-  const addButton = () => {
-    if (form.buttons.length >= 3) return;
-    setForm(f => ({ ...f, buttons: [...f.buttons, { type: "QUICK_REPLY", text: "" }] }));
+  // ── Insert variable at cursor position ──
+  const insertVariable = (token) => {
+    const el = bodyRef.current;
+    if (!el) { set("body", form.body + token); setShowVarMenu(false); return; }
+    const start = el.selectionStart, end = el.selectionEnd;
+    const newVal = form.body.slice(0, start) + token + form.body.slice(end);
+    set("body", newVal);
+    setShowVarMenu(false);
+    setTimeout(() => { el.focus(); el.setSelectionRange(start + token.length, start + token.length); }, 0);
   };
-  const updateButton = (i, key, val) => {
-    const btns = [...form.buttons];
-    btns[i] = { ...btns[i], [key]: val };
+
+  // ── Add button ──
+  const addButton = (type) => {
+    setShowBtnMenu(false);
+    const counts = form.buttons.reduce((acc, b) => { acc[b.type] = (acc[b.type] || 0) + 1; return acc; }, {});
+    if (type === "URL"          && (counts.URL || 0) >= 2) return;
+    if (type === "PHONE_NUMBER" && (counts.PHONE_NUMBER || 0) >= 1) return;
+    if (type === "COPY_CODE"    && (counts.COPY_CODE || 0) >= 1) return;
+    if (form.buttons.length >= 3) return;
+    setForm(f => ({ ...f, buttons: [...f.buttons, { type, text: "", url: "", phone_number: "", code: "" }] }));
+  };
+  const updateBtn = (i, key, val) => {
+    const btns = [...form.buttons]; btns[i] = { ...btns[i], [key]: val };
     setForm(f => ({ ...f, buttons: btns }));
   };
-  const removeButton = (i) => setForm(f => ({ ...f, buttons: f.buttons.filter((_, idx) => idx !== i) }));
+  const removeBtn = (i) => setForm(f => ({ ...f, buttons: f.buttons.filter((_, idx) => idx !== i) }));
 
-  // Live phone preview — render {{1}} style vars as highlighted spans
-  const previewBody = form.body.replace(/\{\{(\d+)\}\}/g, (_, n) => `[var${n}]`);
+  // ── Media upload ──
+  const handleMediaSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const previewUrl = URL.createObjectURL(file);
+    setForm(f => ({ ...f, mediaFile: file, mediaPreviewUrl: previewUrl }));
+  };
 
+  // ── AI rewrite ──
+  const aiRewrite = async () => {
+    if (!form.body.trim()) return;
+    setAiRewriting(true);
+    try {
+      const res = await apiClient.post("/api/marketing/ai-rewrite", {
+        text:     form.body,
+        category: form.category,
+      });
+      set("body", res.data.rewritten);
+    } catch (err) {
+      console.error("AI rewrite failed:", err.message);
+    }
+    setAiRewriting(false);
+  };
+
+  // ── Live preview helpers ──
+  const previewText = (text) => {
+    if (!text) return "";
+    return text
+      .replace(/\{\{name\}\}/gi,       RESTAURANT_VARIABLES[0].preview)
+      .replace(/\{\{restaurant\}\}/gi,  RESTAURANT_VARIABLES[1].preview)
+      .replace(/\{\{date\}\}/gi,        RESTAURANT_VARIABLES[2].preview)
+      .replace(/\{\{token\}\}/gi,       RESTAURANT_VARIABLES[3].preview)
+      .replace(/\{\{order\}\}/gi,       RESTAURANT_VARIABLES[4].preview)
+      .replace(/\*([^*]+)\*/g,          (_, t) => t)   // bold (strip markers for simplicity)
+      .replace(/_([^_]+)_/g,            (_, t) => t);  // italic
+  };
+
+  // ── Submit ──
   const submit = async () => {
-    if (!form.name.trim())  { setError("Template name is required"); return; }
-    if (!form.body.trim())  { setError("Message body is required"); return; }
+    if (!form.name.trim()) { setError("Template name is required"); return; }
+    if (!form.body.trim()) { setError("Message body is required"); return; }
     if (!/^[a-z0-9_]+$/.test(form.name)) { setError("Name must be lowercase letters, numbers and underscores only"); return; }
 
     setSaving(true); setError(null);
     try {
+      let mediaHandle = null;
+
+      // Upload media if selected
+      if (form.mediaFile && ["IMAGE","VIDEO","DOCUMENT"].includes(form.headerType)) {
+        setUploading(true);
+        const formData = new FormData();
+        formData.append("file", form.mediaFile);
+        formData.append("type", form.headerType.toLowerCase());
+        try {
+          const uploadRes = await apiClient.post("/api/marketing/media/upload", formData, {
+            headers: { "Content-Type": "multipart/form-data" },
+          });
+          mediaHandle = uploadRes.data.handle;
+        } catch (uploadErr) {
+          console.warn("Media upload failed, submitting without media handle:", uploadErr.message);
+        }
+        setUploading(false);
+      }
+
+      const components = [
+        ...(form.headerType !== "NONE" ? [{
+          type:   "HEADER",
+          format: form.headerType,
+          ...(form.headerType === "TEXT" ? { text: form.headerText } : {}),
+          ...(mediaHandle ? { example: { header_handle: [mediaHandle] } } : {}),
+        }] : []),
+        {
+          type: "BODY",
+          text: form.body,
+          // Extract variable positions for Meta's example object
+          ...(form.body.match(/\{\{[^}]+\}\}/g) ? {
+            example: {
+              body_text: [
+                (form.body.match(/\{\{[^}]+\}\}/g) || []).map(v =>
+                  RESTAURANT_VARIABLES.find(r => r.insert === v)?.preview || "sample"
+                )
+              ]
+            }
+          } : {}),
+        },
+        ...(form.footer.trim() ? [{ type: "FOOTER", text: form.footer }] : []),
+        ...(form.buttons.filter(b => b.text).length > 0 ? [{
+          type: "BUTTONS",
+          buttons: form.buttons.filter(b => b.text).map(b => ({
+            type: b.type,
+            text: b.text,
+            ...(b.type === "URL"          ? { url: b.url } : {}),
+            ...(b.type === "PHONE_NUMBER" ? { phone_number: b.phone_number } : {}),
+            ...(b.type === "COPY_CODE"    ? { example: [b.code || "OFFER10"] } : {}),
+          })),
+        }] : []),
+      ];
+
       await apiClient.post("/api/marketing/templates/create", {
-        name:     form.name,
-        category: form.category,
-        language: form.language,
-        components: [
-          ...(form.headerType !== "NONE" ? [{
-            type:   "HEADER",
-            format: form.headerType,
-            ...(form.headerType === "TEXT" ? { text: form.headerText } : {}),
-          }] : []),
-          { type: "BODY", text: form.body },
-          ...(form.footer.trim() ? [{ type: "FOOTER", text: form.footer }] : []),
-          ...(form.buttons.length > 0 ? [{
-            type:    "BUTTONS",
-            buttons: form.buttons.filter(b => b.text.trim()),
-          }] : []),
-        ],
+        name:       form.name,
+        category:   form.category,
+        language:   form.language,
+        components,
       });
+
       setSuccess(true);
-      setTimeout(() => { onCreated(); onClose(); }, 1800);
+      setTimeout(() => { onCreated(); onClose(); }, 2000);
     } catch (err) {
       setError(err.response?.data?.error || err.message);
     }
     setSaving(false);
   };
 
-  const inputStyle = {
-    width: "100%", fontSize: 12, padding: "8px 10px",
-    borderRadius: 8, border: "0.5px solid #E0E0DC",
-    boxSizing: "border-box", background: "#fff",
-  };
-  const labelStyle = { fontSize: 11, color: "#888", marginBottom: 5, display: "block" };
+  const inputStyle = { width: "100%", fontSize: 12, padding: "8px 10px", borderRadius: 6, border: "0.5px solid #ddd", boxSizing: "border-box", background: "#fff", outline: "none" };
+  const labelStyle = { fontSize: 11, fontWeight: 500, color: "#555", marginBottom: 5, display: "block" };
 
   return (
     <>
       {/* Backdrop */}
-      <div
-        onClick={onClose}
-        style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: 100, backdropFilter: "blur(2px)" }}
-      />
-      {/* Drawer */}
-      <div style={{
-        position: "fixed", top: 0, right: 0, bottom: 0, width: 880,
-        background: "#F7F7F5", zIndex: 101, display: "flex", flexDirection: "column",
-        boxShadow: "-4px 0 24px rgba(0,0,0,0.12)",
-        animation: "slideIn 0.2s ease-out",
-      }}>
-        <style>{`
-          @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
-          @keyframes spin    { to { transform: rotate(360deg); } }
-        `}</style>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 200, backdropFilter: "blur(3px)" }} />
 
-        {/* Drawer header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 24px", background: "#fff", borderBottom: "0.5px solid #E8E8E5" }}>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 500, color: "#111" }}>Create message template</div>
-            <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>Submitted to Meta for approval · usually 24–48 hours</div>
-          </div>
-          <button onClick={onClose} style={{ fontSize: 18, background: "none", border: "none", cursor: "pointer", color: "#888", lineHeight: 1 }}>✕</button>
+      {/* Modal — matches Botbiz layout exactly */}
+      <div style={{
+        position: "fixed", top: "50%", left: "50%",
+        transform: "translate(-50%,-50%)",
+        width: "min(1200px, 95vw)", maxHeight: "92vh",
+        background: "#fff", borderRadius: 16,
+        boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
+        zIndex: 201, display: "flex", flexDirection: "column",
+        overflow: "hidden",
+      }}>
+        {/* Modal header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 24px", borderBottom: "1px solid #f0f0f0" }}>
+          <span style={{ fontSize: 16, fontWeight: 600, color: "#111" }}>Message Template</span>
+          <button onClick={onClose} style={{ fontSize: 20, background: "none", border: "none", cursor: "pointer", color: "#888", lineHeight: 1, padding: "0 4px" }}>✕</button>
         </div>
 
-        {/* Two-column layout: form + preview */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", flex: 1, overflow: "hidden" }}>
+        {/* Body: form + phone preview side by side */}
+        <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
 
-          {/* Form */}
-          <div style={{ overflowY: "auto", padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* ── Left: Form ── */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "24px 28px", display: "flex", flexDirection: "column", gap: 20 }}>
 
             {success && (
-              <div style={{ background: "#E8F5E9", border: "0.5px solid #A5D6A7", borderRadius: 10, padding: "14px 16px", textAlign: "center" }}>
-                <div style={{ fontSize: 20, marginBottom: 6 }}>✅</div>
-                <div style={{ fontSize: 13, fontWeight: 500, color: "#2E7D32" }}>Template submitted!</div>
-                <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>Meta will review and approve within 24–48 hours.</div>
+              <div style={{ background: "#E8F5E9", border: "1px solid #A5D6A7", borderRadius: 10, padding: "16px", textAlign: "center" }}>
+                <div style={{ fontSize: 24, marginBottom: 6 }}>✅</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "#2E7D32" }}>Template submitted for approval!</div>
+                <div style={{ fontSize: 12, color: "#555", marginTop: 4 }}>Meta typically approves within 24–48 hours.</div>
               </div>
             )}
 
-            {/* Name + Category row */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            {/* Row 1: Template name + Locale */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
               <div>
-                <label style={labelStyle}>Template name <span style={{ color: "#aaa" }}>(lowercase, underscores)</span></label>
+                <label style={labelStyle}>TEMPLATE NAME *</label>
                 <input
                   value={form.name}
                   onChange={e => set("name", e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))}
-                  placeholder="e.g. welcome_back_offer"
+                  placeholder="Put a name to track it later"
                   style={inputStyle}
                 />
+                <div style={{ fontSize: 10, color: "#aaa", marginTop: 3 }}>Lowercase letters, numbers, underscores only</div>
               </div>
               <div>
-                <label style={labelStyle}>Category</label>
-                <div style={{ display: "flex", gap: 6 }}>
-                  {["MARKETING", "UTILITY"].map(cat => (
-                    <button
-                      key={cat}
-                      onClick={() => set("category", cat)}
-                      style={{
-                        flex: 1, fontSize: 12, padding: "8px", borderRadius: 8, cursor: "pointer", fontWeight: form.category === cat ? 600 : 400,
-                        border: `0.5px solid ${form.category === cat ? "#378ADD" : "#E0E0DC"}`,
-                        background: form.category === cat ? "#F0F7FF" : "#fff",
-                        color: form.category === cat ? "#185FA5" : "#888",
-                      }}
-                    >
-                      {cat === "MARKETING" ? "📢 Marketing" : "🔔 Utility"}
+                <label style={labelStyle}>LOCALE *</label>
+                <select value={form.language} onChange={e => set("language", e.target.value)} style={{ ...inputStyle, appearance: "auto" }}>
+                  {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
+                </select>
+              </div>
+            </div>
+
+            {/* Row 2: Category + Header type */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+              <div>
+                <label style={labelStyle}>TEMPLATE CATEGORY *</label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {["UTILITY", "MARKETING"].map(cat => (
+                    <button key={cat} onClick={() => set("category", cat)} style={{
+                      flex: 1, fontSize: 12, padding: "8px", borderRadius: 8, cursor: "pointer",
+                      border: `1.5px solid ${form.category === cat ? "#5B4BFA" : "#ddd"}`,
+                      background: form.category === cat ? "#5B4BFA" : "#fff",
+                      color: form.category === cat ? "#fff" : "#666",
+                      fontWeight: form.category === cat ? 600 : 400,
+                    }}>
+                      {cat.charAt(0) + cat.slice(1).toLowerCase()}
                     </button>
                   ))}
                 </div>
               </div>
-            </div>
-
-            {/* Language */}
-            <div>
-              <label style={labelStyle}>Language</label>
-              <select value={form.language} onChange={e => set("language", e.target.value)} style={inputStyle}>
-                {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
-              </select>
-            </div>
-
-            {/* Header */}
-            <div>
-              <label style={labelStyle}>Header type <span style={{ color: "#aaa" }}>(optional)</span></label>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {HEADER_TYPES.map(ht => (
-                  <button
-                    key={ht}
-                    onClick={() => set("headerType", ht)}
-                    style={{
-                      fontSize: 11, padding: "5px 10px", borderRadius: 8, cursor: "pointer", fontWeight: form.headerType === ht ? 600 : 400,
-                      border: `0.5px solid ${form.headerType === ht ? "#378ADD" : "#E0E0DC"}`,
-                      background: form.headerType === ht ? "#F0F7FF" : "#fff",
-                      color: form.headerType === ht ? "#185FA5" : "#888",
-                    }}
+              <div>
+                <label style={labelStyle}>HEADER TYPE *</label>
+                <div style={{ position: "relative" }}>
+                  <select
+                    value={form.headerType}
+                    onChange={e => { set("headerType", e.target.value); set("mediaFile", null); set("mediaPreviewUrl", null); }}
+                    style={{ ...inputStyle, appearance: "auto" }}
                   >
-                    {{ NONE: "No header", TEXT: "📝 Text", IMAGE: "🖼 Image", VIDEO: "🎬 Video", DOCUMENT: "📄 Document" }[ht]}
-                  </button>
-                ))}
-              </div>
-              {form.headerType === "TEXT" && (
-                <input
-                  value={form.headerText}
-                  onChange={e => set("headerText", e.target.value)}
-                  placeholder="Header text (60 chars max)"
-                  maxLength={60}
-                  style={{ ...inputStyle, marginTop: 8 }}
-                />
-              )}
-              {["IMAGE", "VIDEO", "DOCUMENT"].includes(form.headerType) && (
-                <div style={{ marginTop: 8, fontSize: 11, color: "#888", background: "#F7F7F5", padding: "8px 10px", borderRadius: 8 }}>
-                  {form.headerType === "IMAGE" && "📎 An image will be required when sending this template."}
-                  {form.headerType === "VIDEO" && "📎 A video will be required when sending this template."}
-                  {form.headerType === "DOCUMENT" && "📎 A document will be required when sending this template."}
+                    <option value="NONE">No Header</option>
+                    <option value="TEXT">Text</option>
+                    <option value="IMAGE">Image</option>
+                    <option value="VIDEO">Video</option>
+                    <option value="DOCUMENT">Document</option>
+                  </select>
                 </div>
-              )}
+              </div>
             </div>
 
-            {/* Body */}
+            {/* Header content area */}
+            {form.headerType === "TEXT" && (
+              <div>
+                <label style={labelStyle}>HEADER TEXT</label>
+                <input value={form.headerText} onChange={e => set("headerText", e.target.value)} placeholder="Header text (60 chars max)" maxLength={60} style={inputStyle} />
+              </div>
+            )}
+            {["IMAGE","VIDEO","DOCUMENT"].includes(form.headerType) && (
+              <div>
+                <label style={labelStyle}>{form.headerType} UPLOAD</label>
+                <div
+                  onClick={() => document.getElementById("media-upload-input").click()}
+                  style={{
+                    border: "2px dashed #ddd", borderRadius: 10, padding: "24px",
+                    textAlign: "center", cursor: "pointer", background: "#fafafa",
+                    transition: "border-color 0.2s",
+                  }}
+                >
+                  {form.mediaPreviewUrl ? (
+                    <div>
+                      {form.headerType === "IMAGE" && (
+                        <img src={form.mediaPreviewUrl} alt="preview" style={{ maxHeight: 120, maxWidth: "100%", borderRadius: 8, marginBottom: 8 }} />
+                      )}
+                      {form.headerType === "VIDEO" && (
+                        <video src={form.mediaPreviewUrl} style={{ maxHeight: 120, maxWidth: "100%", borderRadius: 8, marginBottom: 8 }} controls />
+                      )}
+                      {form.headerType === "DOCUMENT" && (
+                        <div style={{ fontSize: 32, marginBottom: 8 }}>📄</div>
+                      )}
+                      <div style={{ fontSize: 11, color: "#666" }}>{form.mediaFile?.name}</div>
+                      <div style={{ fontSize: 10, color: "#aaa", marginTop: 4 }}>Click to change</div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{ fontSize: 32, marginBottom: 8 }}>
+                        {form.headerType === "IMAGE" ? "🖼" : form.headerType === "VIDEO" ? "🎬" : "📄"}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>
+                        Click to upload {form.headerType.toLowerCase()}
+                      </div>
+                      <div style={{ fontSize: 10, color: "#aaa" }}>
+                        {form.headerType === "IMAGE" ? "JPG, PNG up to 5MB" : form.headerType === "VIDEO" ? "MP4 up to 16MB" : "PDF up to 100MB"}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <input
+                  id="media-upload-input"
+                  type="file"
+                  style={{ display: "none" }}
+                  accept={form.headerType === "IMAGE" ? "image/*" : form.headerType === "VIDEO" ? "video/*" : ".pdf,.doc,.docx"}
+                  onChange={handleMediaSelect}
+                />
+              </div>
+            )}
+
+            {/* Message body */}
             <div>
-              <label style={labelStyle}>
-                Message body <span style={{ color: "#aaa" }}>(use {"{{1}}"}, {"{{2}}"} for variables)</span>
-              </label>
-              <textarea
-                value={form.body}
-                onChange={e => set("body", e.target.value)}
-                rows={5}
-                maxLength={1024}
-                placeholder={"Hi {{1}}, we missed you at Hotel Munafe! Come back this week for a special treat. 🍽️"}
-                style={{ ...inputStyle, resize: "vertical", lineHeight: 1.6 }}
-              />
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#aaa", marginTop: 3 }}>
-                <span>Use {"{{1}}"} for name, {"{{2}}"} for other variables</span>
-                <span>{form.body.length} / 1024</span>
+              <label style={labelStyle}>MESSAGE BODY (1024) *</label>
+
+              {/* Toolbar — matches Botbiz exactly */}
+              <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+
+                {/* Variables dropdown */}
+                <div style={{ position: "relative" }}>
+                  <button
+                    onClick={() => { setShowVarMenu(v => !v); setShowBtnMenu(false); }}
+                    style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, border: "1px solid #ddd", background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}
+                  >
+                    📋 Variables ▾
+                  </button>
+                  {showVarMenu && (
+                    <div style={{ position: "absolute", top: "110%", left: 0, background: "#fff", border: "1px solid #eee", borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.12)", zIndex: 10, minWidth: 180, overflow: "hidden" }}>
+                      {RESTAURANT_VARIABLES.map(v => (
+                        <div key={v.insert} onClick={() => insertVariable(v.insert)}
+                          style={{ padding: "9px 14px", fontSize: 12, cursor: "pointer", color: "#333", borderBottom: "0.5px solid #f5f5f5" }}
+                          onMouseEnter={e => e.target.style.background = "#f5f5f5"}
+                          onMouseLeave={e => e.target.style.background = ""}
+                        >
+                          {v.label}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Name shortcut */}
+                <button
+                  onClick={() => insertVariable("{{name}}")}
+                  style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, border: "1px solid #ddd", background: "#fff", cursor: "pointer", color: "#5B4BFA", fontWeight: 500 }}
+                >
+                  👤 Name
+                </button>
+
+                {/* AI Re-write */}
+                <button
+                  onClick={aiRewrite}
+                  disabled={aiRewriting || !form.body.trim()}
+                  style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, border: "1px solid #ddd", background: aiRewriting ? "#f0f0f0" : "#fff", cursor: "pointer", color: "#0891b2", display: "flex", alignItems: "center", gap: 4, opacity: (!form.body.trim()) ? 0.4 : 1 }}
+                >
+                  {aiRewriting ? <><Spinner size={12} /> Rewriting…</> : "🤖 AI Re-write"}
+                </button>
+              </div>
+
+              <div style={{ position: "relative" }}>
+                <textarea
+                  ref={bodyRef}
+                  value={form.body}
+                  onChange={e => set("body", e.target.value)}
+                  rows={6}
+                  maxLength={1024}
+                  placeholder="Type # for custom fields and name. Use *bold* or _italic_ for formatting."
+                  style={{ ...inputStyle, resize: "vertical", lineHeight: 1.6, paddingRight: 36 }}
+                />
+                {/* Emoji button placeholder */}
+                <button style={{ position: "absolute", right: 8, bottom: 32, fontSize: 16, background: "none", border: "none", cursor: "pointer", opacity: 0.5 }}>😊</button>
+                <div style={{ display: "flex", justifyContent: "flex-end", fontSize: 10, color: "#aaa", marginTop: 3 }}>
+                  Characters: {form.body.length} / 1024
+                </div>
               </div>
             </div>
 
             {/* Footer */}
             <div>
-              <label style={labelStyle}>Footer text <span style={{ color: "#aaa" }}>(optional, 60 chars max)</span></label>
+              <label style={labelStyle}>FOOTER TEXT <span style={{ color: "#aaa", fontWeight: 400 }}>(optional)</span></label>
               <input
                 value={form.footer}
                 onChange={e => set("footer", e.target.value)}
-                placeholder="e.g. Reply STOP to unsubscribe"
+                placeholder="Provide text for footer (60)"
                 maxLength={60}
                 style={inputStyle}
               />
@@ -624,116 +811,187 @@ function TemplateCreateDrawer({ apiClient, onClose, onCreated }) {
 
             {/* Buttons */}
             <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <label style={{ ...labelStyle, marginBottom: 0 }}>Buttons <span style={{ color: "#aaa" }}>(optional, max 3)</span></label>
-                {form.buttons.length < 3 && (
-                  <button onClick={addButton} style={{ fontSize: 11, color: "#378ADD", background: "none", border: "none", cursor: "pointer" }}>+ Add button</button>
-                )}
-              </div>
               {form.buttons.map((btn, i) => (
-                <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
-                  <select
-                    value={btn.type}
-                    onChange={e => updateButton(i, "type", e.target.value)}
-                    style={{ ...inputStyle, width: 140, flex: "none" }}
-                  >
-                    <option value="QUICK_REPLY">Quick reply</option>
-                    <option value="URL">URL</option>
-                    <option value="PHONE_NUMBER">Phone</option>
-                  </select>
-                  <input
-                    value={btn.text}
-                    onChange={e => updateButton(i, "text", e.target.value)}
-                    placeholder={btn.type === "URL" ? "Button label" : btn.type === "PHONE_NUMBER" ? "Button label" : "Reply text"}
-                    style={{ ...inputStyle, flex: 1 }}
-                  />
+                <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "flex-start", background: "#f9f9f9", borderRadius: 8, padding: "10px 12px" }}>
+                  <div style={{ flex: "none" }}>
+                    <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>TYPE</div>
+                    <div style={{ fontSize: 11, fontWeight: 500, color: "#333" }}>
+                      {BUTTON_TYPES[btn.type]?.icon} {BUTTON_TYPES[btn.type]?.label}
+                    </div>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>BUTTON TEXT</div>
+                    <input value={btn.text} onChange={e => updateBtn(i, "text", e.target.value)} placeholder="Button label" style={{ ...inputStyle, padding: "6px 8px" }} />
+                  </div>
                   {btn.type === "URL" && (
-                    <input
-                      value={btn.url || ""}
-                      onChange={e => updateButton(i, "url", e.target.value)}
-                      placeholder="https://..."
-                      style={{ ...inputStyle, flex: 1 }}
-                    />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>URL</div>
+                      <input value={btn.url} onChange={e => updateBtn(i, "url", e.target.value)} placeholder="https://..." style={{ ...inputStyle, padding: "6px 8px" }} />
+                    </div>
                   )}
                   {btn.type === "PHONE_NUMBER" && (
-                    <input
-                      value={btn.phone_number || ""}
-                      onChange={e => updateButton(i, "phone_number", e.target.value)}
-                      placeholder="+91..."
-                      style={{ ...inputStyle, flex: 1 }}
-                    />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>PHONE</div>
+                      <input value={btn.phone_number} onChange={e => updateBtn(i, "phone_number", e.target.value)} placeholder="+91 9500996033" style={{ ...inputStyle, padding: "6px 8px" }} />
+                    </div>
                   )}
-                  <button onClick={() => removeButton(i)} style={{ fontSize: 14, color: "#A32D2D", background: "none", border: "none", cursor: "pointer", flexShrink: 0 }}>✕</button>
+                  {btn.type === "COPY_CODE" && (
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>OFFER CODE</div>
+                      <input value={btn.code} onChange={e => updateBtn(i, "code", e.target.value)} placeholder="MUNAFE10" style={{ ...inputStyle, padding: "6px 8px" }} />
+                    </div>
+                  )}
+                  <button onClick={() => removeBtn(i)} style={{ fontSize: 16, color: "#ccc", background: "none", border: "none", cursor: "pointer", paddingTop: 18 }}>✕</button>
                 </div>
               ))}
+
+              {/* Add button dropdown — matches Botbiz */}
+              <div style={{ position: "relative" }}>
+                <button
+                  onClick={() => { setShowBtnMenu(v => !v); setShowVarMenu(false); }}
+                  style={{ fontSize: 12, padding: "8px 16px", borderRadius: 8, border: "1px solid #ddd", background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}
+                >
+                  + Add button
+                </button>
+                {showBtnMenu && (
+                  <div style={{ position: "absolute", top: "110%", left: 0, background: "#fff", border: "1px solid #eee", borderRadius: 10, boxShadow: "0 4px 20px rgba(0,0,0,0.12)", zIndex: 10, minWidth: 260, overflow: "hidden" }}>
+                    <div style={{ padding: "8px 14px 4px", fontSize: 10, fontWeight: 600, color: "#aaa", textTransform: "uppercase", letterSpacing: 0.8 }}>Quick reply buttons</div>
+                    <div onClick={() => addButton("QUICK_REPLY")} style={{ padding: "9px 14px", fontSize: 12, cursor: "pointer", color: "#333", borderBottom: "0.5px solid #f5f5f5" }}
+                      onMouseEnter={e => e.currentTarget.style.background = "#f5f5f5"} onMouseLeave={e => e.currentTarget.style.background = ""}>
+                      ↩ Custom
+                    </div>
+                    <div style={{ padding: "8px 14px 4px", fontSize: 10, fontWeight: 600, color: "#aaa", textTransform: "uppercase", letterSpacing: 0.8 }}>Call to action buttons</div>
+                    {[
+                      { type: "URL",          label: "Visit website",     note: "2 buttons maximum" },
+                      { type: "PHONE_NUMBER", label: "Call phone number", note: "1 button maximum" },
+                      { type: "COPY_CODE",    label: "Copy offer code",   note: "1 button maximum" },
+                    ].map(b => (
+                      <div key={b.type} onClick={() => addButton(b.type)}
+                        style={{ padding: "9px 14px", fontSize: 12, cursor: "pointer", color: "#333", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "0.5px solid #f5f5f5" }}
+                        onMouseEnter={e => e.currentTarget.style.background = "#f5f5f5"} onMouseLeave={e => e.currentTarget.style.background = ""}>
+                        <span>{b.label}</span>
+                        <span style={{ fontSize: 10, color: "#aaa" }}>{b.note}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             {error && (
-              <div style={{ fontSize: 12, color: "#A32D2D", background: "#FFEBEE", padding: "8px 10px", borderRadius: 8 }}>{error}</div>
+              <div style={{ fontSize: 12, color: "#A32D2D", background: "#FFEBEE", padding: "10px 12px", borderRadius: 8 }}>{error}</div>
             )}
 
+            {/* Footer actions */}
             <div style={{ display: "flex", gap: 10, paddingBottom: 8 }}>
-              <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
-              <Btn onClick={submit} disabled={saving || success} style={{ flex: 1, padding: "10px" }}>
-                {saving ? <><Spinner size={14} /> &nbsp;Submitting…</> : "📤 Submit for approval"}
+              <Btn variant="secondary" onClick={onClose} style={{ minWidth: 80 }}>Cancel</Btn>
+              <Btn onClick={submit} disabled={saving || success} style={{ flex: 1, padding: "10px", fontSize: 13 }}>
+                {uploading ? <><Spinner size={14} /> &nbsp;Uploading media…</> :
+                 saving    ? <><Spinner size={14} /> &nbsp;Submitting…</> :
+                 "💾 Save"}
               </Btn>
             </div>
           </div>
 
-          {/* Phone preview */}
-          <div style={{ background: "#E8E8E5", padding: "20px 16px", overflowY: "auto", borderLeft: "0.5px solid #E0E0DC" }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: "#888", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 12 }}>Preview</div>
+          {/* ── Right: Phone preview ── */}
+          <div style={{ width: 340, background: "#f0f0f0", borderLeft: "1px solid #e8e8e8", padding: "24px 20px", overflowY: "auto", display: "flex", flexDirection: "column", alignItems: "center" }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#888", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 16, alignSelf: "flex-start" }}>Preview</div>
+
             {/* Phone frame */}
-            <div style={{ background: "#fff", borderRadius: 20, boxShadow: "0 4px 20px rgba(0,0,0,0.15)", overflow: "hidden" }}>
-              {/* Status bar */}
-              <div style={{ background: "#075E54", padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ width: 32, height: 32, borderRadius: "50%", background: "#25D366", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🏨</div>
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "#fff" }}>Hotel Munafe</div>
-                  <div style={{ fontSize: 10, color: "#B2DFDB" }}>Business account</div>
-                </div>
-              </div>
-              {/* Chat area */}
-              <div style={{ background: "#ECE5DD", minHeight: 300, padding: "12px 10px" }}>
-                <div style={{ background: "#fff", borderRadius: "0 10px 10px 10px", padding: "10px 12px", maxWidth: "85%", boxShadow: "0 1px 2px rgba(0,0,0,0.1)" }}>
-                  {/* Header preview */}
-                  {form.headerType === "TEXT" && form.headerText && (
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#111", marginBottom: 6 }}>{form.headerText}</div>
-                  )}
-                  {form.headerType === "IMAGE" && (
-                    <div style={{ background: "#F0F0EE", borderRadius: 8, height: 80, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 8, fontSize: 24 }}>🖼</div>
-                  )}
-                  {form.headerType === "VIDEO" && (
-                    <div style={{ background: "#F0F0EE", borderRadius: 8, height: 80, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 8, fontSize: 24 }}>▶️</div>
-                  )}
-                  {form.headerType === "DOCUMENT" && (
-                    <div style={{ background: "#F0F0EE", borderRadius: 8, padding: "8px 10px", display: "flex", alignItems: "center", gap: 6, marginBottom: 8, fontSize: 11, color: "#555" }}>📄 Document</div>
-                  )}
-                  {/* Body */}
-                  {form.body ? (
-                    <div style={{ fontSize: 12, color: "#111", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{previewBody}</div>
-                  ) : (
-                    <div style={{ fontSize: 12, color: "#aaa", fontStyle: "italic" }}>Your message body will appear here…</div>
-                  )}
-                  {/* Footer */}
-                  {form.footer && (
-                    <div style={{ fontSize: 10, color: "#888", marginTop: 6, borderTop: "0.5px solid #F0F0EE", paddingTop: 6 }}>{form.footer}</div>
-                  )}
-                  <div style={{ fontSize: 10, color: "#aaa", textAlign: "right", marginTop: 4 }}>
-                    {new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}
+            <div style={{ width: 260, background: "#1a1a2e", borderRadius: 36, padding: "10px 6px", boxShadow: "0 12px 40px rgba(0,0,0,0.3)" }}>
+              {/* Screen */}
+              <div style={{ background: "#fff", borderRadius: 28, overflow: "hidden" }}>
+                {/* Status bar */}
+                <div style={{ background: "#075E54", padding: "12px 14px 10px", display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ color: "#fff", fontSize: 16 }}>←</span>
+                  <div style={{ width: 30, height: 30, borderRadius: "50%", background: "#25D366", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🏨</div>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "#fff", lineHeight: 1.2 }}>Busines...</div>
+                    <div style={{ fontSize: 9, color: "#B2DFDB" }}>online</div>
+                  </div>
+                  <div style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
+                    {["📹","📞","⋮"].map(i => <span key={i} style={{ color: "#fff", fontSize: 12 }}>{i}</span>)}
                   </div>
                 </div>
-                {/* Buttons */}
-                {form.buttons.filter(b => b.text).map((btn, i) => (
-                  <div key={i} style={{ background: "#fff", borderRadius: 10, padding: "8px 12px", marginTop: 4, textAlign: "center", fontSize: 12, color: "#075E54", fontWeight: 500, maxWidth: "85%", boxShadow: "0 1px 2px rgba(0,0,0,0.1)" }}>
-                    {btn.type === "URL" ? "🔗 " : btn.type === "PHONE_NUMBER" ? "📞 " : "↩ "}{btn.text}
+
+                {/* Chat area */}
+                <div style={{ background: "#ECE5DD", minHeight: 320, padding: "10px 8px", position: "relative" }}>
+                  {/* Time stamp background pattern */}
+                  <div style={{ textAlign: "center", marginBottom: 8 }}>
+                    <span style={{ background: "rgba(0,0,0,0.15)", color: "#fff", fontSize: 10, padding: "2px 10px", borderRadius: 10 }}>
+                      {new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                    </span>
                   </div>
-                ))}
+
+                  {/* Message bubble */}
+                  <div style={{ maxWidth: "90%", marginLeft: "auto" }}>
+                    <div style={{ background: "#fff", borderRadius: "10px 0 10px 10px", overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+
+                      {/* Header preview */}
+                      {form.headerType === "TEXT" && form.headerText && (
+                        <div style={{ padding: "10px 12px 0", fontSize: 12, fontWeight: 700, color: "#111", lineHeight: 1.4 }}>
+                          {previewText(form.headerText)}
+                        </div>
+                      )}
+                      {form.headerType === "IMAGE" && (
+                        form.mediaPreviewUrl
+                          ? <img src={form.mediaPreviewUrl} alt="" style={{ width: "100%", maxHeight: 120, objectFit: "cover", display: "block" }} />
+                          : <div style={{ background: "#e0e0e0", height: 100, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28 }}>🖼</div>
+                      )}
+                      {form.headerType === "VIDEO" && (
+                        form.mediaPreviewUrl
+                          ? <video src={form.mediaPreviewUrl} style={{ width: "100%", maxHeight: 100, display: "block" }} />
+                          : <div style={{ background: "#e0e0e0", height: 100, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28 }}>▶️</div>
+                      )}
+                      {form.headerType === "DOCUMENT" && (
+                        <div style={{ background: "#f5f5f5", padding: "10px 12px", display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 20 }}>📄</span>
+                          <span style={{ fontSize: 11, color: "#555" }}>{form.mediaFile?.name || "Document"}</span>
+                        </div>
+                      )}
+
+                      {/* Body */}
+                      <div style={{ padding: "10px 12px 4px" }}>
+                        {form.body ? (
+                          <div style={{ fontSize: 12, color: "#111", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+                            {previewText(form.body)}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 12, color: "#aaa", fontStyle: "italic" }}>Enter message body</div>
+                        )}
+                      </div>
+
+                      {/* Footer */}
+                      {form.footer && (
+                        <div style={{ padding: "0 12px 6px", fontSize: 10, color: "#888" }}>{form.footer}</div>
+                      )}
+
+                      {/* Time */}
+                      <div style={{ padding: "0 12px 8px", fontSize: 9, color: "#aaa", textAlign: "right" }}>
+                        {new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })} ✓✓
+                      </div>
+                    </div>
+
+                    {/* Buttons preview */}
+                    {form.buttons.filter(b => b.text).map((btn, i) => (
+                      <div key={i} style={{
+                        background: "#fff", borderRadius: 8, padding: "8px 12px",
+                        marginTop: 4, textAlign: "center", fontSize: 11,
+                        color: "#075E54", fontWeight: 500,
+                        boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+                        display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                      }}>
+                        {BUTTON_TYPES[btn.type]?.icon} {btn.text || BUTTON_TYPES[btn.type]?.label}
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
+
             {/* Approval note */}
-            <div style={{ marginTop: 12, fontSize: 10, color: "#888", textAlign: "center", lineHeight: 1.6 }}>
-              Templates must be approved by Meta before use. Approval typically takes 24–48 hours.
+            <div style={{ marginTop: 16, fontSize: 10, color: "#888", textAlign: "center", lineHeight: 1.7, maxWidth: 240 }}>
+              Templates are reviewed by Meta before use.<br />Approval takes 24–48 hours.
             </div>
           </div>
         </div>
@@ -744,9 +1002,9 @@ function TemplateCreateDrawer({ apiClient, onClose, onCreated }) {
 
 // ─── Template Viewer ──────────────────────────────────────────────────────────
 function TemplateViewer({ apiClient }) {
-  const [templates,    setTemplates]    = useState([]);
-  const [loading,      setLoading]      = useState(true);
-  const [showDrawer,   setShowDrawer]   = useState(false);
+  const [templates,  setTemplates]  = useState([]);
+  const [loading,    setLoading]    = useState(true);
+  const [showModal,  setShowModal]  = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -760,17 +1018,14 @@ function TemplateViewer({ apiClient }) {
 
   const statusColor = s => s === "APPROVED" ? "#2E7D32" : s === "PENDING" ? "#BA7517" : "#A32D2D";
   const statusBg    = s => s === "APPROVED" ? "#E8F5E9" : s === "PENDING" ? "#FFF3E0" : "#FFEBEE";
-
-  // Group by category
-  const marketing = templates.filter(t => t.category === "MARKETING");
-  const utility   = templates.filter(t => t.category === "UTILITY");
+  const marketing   = templates.filter(t => t.category === "MARKETING");
+  const utility     = templates.filter(t => t.category === "UTILITY");
 
   const TemplateRow = ({ t }) => (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: "#F7F7F5", borderRadius: 8, marginBottom: 6 }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 12, fontWeight: 500, color: "#111", marginBottom: 2 }}>{t.name}</div>
         <div style={{ fontSize: 10, color: "#888" }}>{t.language}</div>
-        {/* Show body preview if available */}
         {t.components?.find(c => c.type === "BODY")?.text && (
           <div style={{ fontSize: 11, color: "#666", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 400 }}>
             {t.components.find(c => c.type === "BODY").text}
@@ -783,11 +1038,11 @@ function TemplateViewer({ apiClient }) {
 
   return (
     <>
-      {showDrawer && (
-        <TemplateCreateDrawer
+      {showModal && (
+        <TemplateCreateModal
           apiClient={apiClient}
-          onClose={() => setShowDrawer(false)}
-          onCreated={() => { setShowDrawer(false); setTimeout(load, 1000); }}
+          onClose={() => setShowModal(false)}
+          onCreated={() => { setShowModal(false); setTimeout(load, 1000); }}
         />
       )}
       <Card>
@@ -798,18 +1053,17 @@ function TemplateViewer({ apiClient }) {
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={load} style={{ fontSize: 11, color: "#378ADD", background: "none", border: "none", cursor: "pointer" }}>↻ Sync</button>
-            <Btn onClick={() => setShowDrawer(true)} style={{ padding: "5px 12px" }}>+ New template</Btn>
+            <Btn onClick={() => setShowModal(true)} style={{ padding: "5px 12px" }}>+ New template</Btn>
           </div>
         </div>
-
         {loading ? (
           <div style={{ display: "flex", justifyContent: "center", padding: "24px 0" }}><Spinner /></div>
         ) : templates.length === 0 ? (
           <div style={{ fontSize: 12, color: "#aaa", textAlign: "center", padding: "32px 0", background: "#F7F7F5", borderRadius: 10 }}>
             <div style={{ fontSize: 28, marginBottom: 10 }}>📋</div>
             <div style={{ fontWeight: 500, marginBottom: 6 }}>No templates yet</div>
-            <div style={{ marginBottom: 16 }}>Create your first template to start sending campaigns outside the 24h window.</div>
-            <Btn onClick={() => setShowDrawer(true)}>+ Create template</Btn>
+            <div style={{ marginBottom: 16 }}>Create your first template to start sending campaigns.</div>
+            <Btn onClick={() => setShowModal(true)}>+ Create template</Btn>
           </div>
         ) : (
           <div>
