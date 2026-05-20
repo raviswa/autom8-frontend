@@ -1,9 +1,3 @@
-//=============================================================
-//=======MARKETING DASHBOARD - CAMPAIGN ANALYTICS==============
-//=============================================================
-
-
-
 import { useEffect, useState, useCallback, useMemo } from "react";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -398,47 +392,443 @@ function BroadcastComposer({ apiClient, selectedSegment, draftMessage, segmentCo
   );
 }
 
+// ─── Template Create Drawer ───────────────────────────────────────────────────
+const HEADER_TYPES = ["NONE", "TEXT", "IMAGE", "VIDEO", "DOCUMENT"];
+const LANGUAGES    = [
+  { code: "en",    label: "English" },
+  { code: "en_US", label: "English (US)" },
+  { code: "ta",    label: "Tamil" },
+  { code: "hi",    label: "Hindi" },
+];
+
+function TemplateCreateDrawer({ apiClient, onClose, onCreated }) {
+  const [form, setForm] = useState({
+    name:        "",
+    category:    "MARKETING",
+    language:    "en",
+    headerType:  "NONE",
+    headerText:  "",
+    body:        "",
+    footer:      "",
+    buttons:     [],
+  });
+  const [saving,   setSaving]   = useState(false);
+  const [error,    setError]    = useState(null);
+  const [success,  setSuccess]  = useState(false);
+
+  const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
+
+  const addButton = () => {
+    if (form.buttons.length >= 3) return;
+    setForm(f => ({ ...f, buttons: [...f.buttons, { type: "QUICK_REPLY", text: "" }] }));
+  };
+  const updateButton = (i, key, val) => {
+    const btns = [...form.buttons];
+    btns[i] = { ...btns[i], [key]: val };
+    setForm(f => ({ ...f, buttons: btns }));
+  };
+  const removeButton = (i) => setForm(f => ({ ...f, buttons: f.buttons.filter((_, idx) => idx !== i) }));
+
+  // Live phone preview — render {{1}} style vars as highlighted spans
+  const previewBody = form.body.replace(/\{\{(\d+)\}\}/g, (_, n) => `[var${n}]`);
+
+  const submit = async () => {
+    if (!form.name.trim())  { setError("Template name is required"); return; }
+    if (!form.body.trim())  { setError("Message body is required"); return; }
+    if (!/^[a-z0-9_]+$/.test(form.name)) { setError("Name must be lowercase letters, numbers and underscores only"); return; }
+
+    setSaving(true); setError(null);
+    try {
+      await apiClient.post("/api/marketing/templates/create", {
+        name:     form.name,
+        category: form.category,
+        language: form.language,
+        components: [
+          ...(form.headerType !== "NONE" ? [{
+            type:   "HEADER",
+            format: form.headerType,
+            ...(form.headerType === "TEXT" ? { text: form.headerText } : {}),
+          }] : []),
+          { type: "BODY", text: form.body },
+          ...(form.footer.trim() ? [{ type: "FOOTER", text: form.footer }] : []),
+          ...(form.buttons.length > 0 ? [{
+            type:    "BUTTONS",
+            buttons: form.buttons.filter(b => b.text.trim()),
+          }] : []),
+        ],
+      });
+      setSuccess(true);
+      setTimeout(() => { onCreated(); onClose(); }, 1800);
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+    }
+    setSaving(false);
+  };
+
+  const inputStyle = {
+    width: "100%", fontSize: 12, padding: "8px 10px",
+    borderRadius: 8, border: "0.5px solid #E0E0DC",
+    boxSizing: "border-box", background: "#fff",
+  };
+  const labelStyle = { fontSize: 11, color: "#888", marginBottom: 5, display: "block" };
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        onClick={onClose}
+        style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: 100, backdropFilter: "blur(2px)" }}
+      />
+      {/* Drawer */}
+      <div style={{
+        position: "fixed", top: 0, right: 0, bottom: 0, width: 880,
+        background: "#F7F7F5", zIndex: 101, display: "flex", flexDirection: "column",
+        boxShadow: "-4px 0 24px rgba(0,0,0,0.12)",
+        animation: "slideIn 0.2s ease-out",
+      }}>
+        <style>{`
+          @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+          @keyframes spin    { to { transform: rotate(360deg); } }
+        `}</style>
+
+        {/* Drawer header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 24px", background: "#fff", borderBottom: "0.5px solid #E8E8E5" }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 500, color: "#111" }}>Create message template</div>
+            <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>Submitted to Meta for approval · usually 24–48 hours</div>
+          </div>
+          <button onClick={onClose} style={{ fontSize: 18, background: "none", border: "none", cursor: "pointer", color: "#888", lineHeight: 1 }}>✕</button>
+        </div>
+
+        {/* Two-column layout: form + preview */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", flex: 1, overflow: "hidden" }}>
+
+          {/* Form */}
+          <div style={{ overflowY: "auto", padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
+
+            {success && (
+              <div style={{ background: "#E8F5E9", border: "0.5px solid #A5D6A7", borderRadius: 10, padding: "14px 16px", textAlign: "center" }}>
+                <div style={{ fontSize: 20, marginBottom: 6 }}>✅</div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: "#2E7D32" }}>Template submitted!</div>
+                <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>Meta will review and approve within 24–48 hours.</div>
+              </div>
+            )}
+
+            {/* Name + Category row */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div>
+                <label style={labelStyle}>Template name <span style={{ color: "#aaa" }}>(lowercase, underscores)</span></label>
+                <input
+                  value={form.name}
+                  onChange={e => set("name", e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))}
+                  placeholder="e.g. welcome_back_offer"
+                  style={inputStyle}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Category</label>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {["MARKETING", "UTILITY"].map(cat => (
+                    <button
+                      key={cat}
+                      onClick={() => set("category", cat)}
+                      style={{
+                        flex: 1, fontSize: 12, padding: "8px", borderRadius: 8, cursor: "pointer", fontWeight: form.category === cat ? 600 : 400,
+                        border: `0.5px solid ${form.category === cat ? "#378ADD" : "#E0E0DC"}`,
+                        background: form.category === cat ? "#F0F7FF" : "#fff",
+                        color: form.category === cat ? "#185FA5" : "#888",
+                      }}
+                    >
+                      {cat === "MARKETING" ? "📢 Marketing" : "🔔 Utility"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Language */}
+            <div>
+              <label style={labelStyle}>Language</label>
+              <select value={form.language} onChange={e => set("language", e.target.value)} style={inputStyle}>
+                {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
+              </select>
+            </div>
+
+            {/* Header */}
+            <div>
+              <label style={labelStyle}>Header type <span style={{ color: "#aaa" }}>(optional)</span></label>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {HEADER_TYPES.map(ht => (
+                  <button
+                    key={ht}
+                    onClick={() => set("headerType", ht)}
+                    style={{
+                      fontSize: 11, padding: "5px 10px", borderRadius: 8, cursor: "pointer", fontWeight: form.headerType === ht ? 600 : 400,
+                      border: `0.5px solid ${form.headerType === ht ? "#378ADD" : "#E0E0DC"}`,
+                      background: form.headerType === ht ? "#F0F7FF" : "#fff",
+                      color: form.headerType === ht ? "#185FA5" : "#888",
+                    }}
+                  >
+                    {{ NONE: "No header", TEXT: "📝 Text", IMAGE: "🖼 Image", VIDEO: "🎬 Video", DOCUMENT: "📄 Document" }[ht]}
+                  </button>
+                ))}
+              </div>
+              {form.headerType === "TEXT" && (
+                <input
+                  value={form.headerText}
+                  onChange={e => set("headerText", e.target.value)}
+                  placeholder="Header text (60 chars max)"
+                  maxLength={60}
+                  style={{ ...inputStyle, marginTop: 8 }}
+                />
+              )}
+              {["IMAGE", "VIDEO", "DOCUMENT"].includes(form.headerType) && (
+                <div style={{ marginTop: 8, fontSize: 11, color: "#888", background: "#F7F7F5", padding: "8px 10px", borderRadius: 8 }}>
+                  {form.headerType === "IMAGE" && "📎 An image will be required when sending this template."}
+                  {form.headerType === "VIDEO" && "📎 A video will be required when sending this template."}
+                  {form.headerType === "DOCUMENT" && "📎 A document will be required when sending this template."}
+                </div>
+              )}
+            </div>
+
+            {/* Body */}
+            <div>
+              <label style={labelStyle}>
+                Message body <span style={{ color: "#aaa" }}>(use {"{{1}}"}, {"{{2}}"} for variables)</span>
+              </label>
+              <textarea
+                value={form.body}
+                onChange={e => set("body", e.target.value)}
+                rows={5}
+                maxLength={1024}
+                placeholder={"Hi {{1}}, we missed you at Hotel Munafe! Come back this week for a special treat. 🍽️"}
+                style={{ ...inputStyle, resize: "vertical", lineHeight: 1.6 }}
+              />
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#aaa", marginTop: 3 }}>
+                <span>Use {"{{1}}"} for name, {"{{2}}"} for other variables</span>
+                <span>{form.body.length} / 1024</span>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div>
+              <label style={labelStyle}>Footer text <span style={{ color: "#aaa" }}>(optional, 60 chars max)</span></label>
+              <input
+                value={form.footer}
+                onChange={e => set("footer", e.target.value)}
+                placeholder="e.g. Reply STOP to unsubscribe"
+                maxLength={60}
+                style={inputStyle}
+              />
+            </div>
+
+            {/* Buttons */}
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <label style={{ ...labelStyle, marginBottom: 0 }}>Buttons <span style={{ color: "#aaa" }}>(optional, max 3)</span></label>
+                {form.buttons.length < 3 && (
+                  <button onClick={addButton} style={{ fontSize: 11, color: "#378ADD", background: "none", border: "none", cursor: "pointer" }}>+ Add button</button>
+                )}
+              </div>
+              {form.buttons.map((btn, i) => (
+                <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
+                  <select
+                    value={btn.type}
+                    onChange={e => updateButton(i, "type", e.target.value)}
+                    style={{ ...inputStyle, width: 140, flex: "none" }}
+                  >
+                    <option value="QUICK_REPLY">Quick reply</option>
+                    <option value="URL">URL</option>
+                    <option value="PHONE_NUMBER">Phone</option>
+                  </select>
+                  <input
+                    value={btn.text}
+                    onChange={e => updateButton(i, "text", e.target.value)}
+                    placeholder={btn.type === "URL" ? "Button label" : btn.type === "PHONE_NUMBER" ? "Button label" : "Reply text"}
+                    style={{ ...inputStyle, flex: 1 }}
+                  />
+                  {btn.type === "URL" && (
+                    <input
+                      value={btn.url || ""}
+                      onChange={e => updateButton(i, "url", e.target.value)}
+                      placeholder="https://..."
+                      style={{ ...inputStyle, flex: 1 }}
+                    />
+                  )}
+                  {btn.type === "PHONE_NUMBER" && (
+                    <input
+                      value={btn.phone_number || ""}
+                      onChange={e => updateButton(i, "phone_number", e.target.value)}
+                      placeholder="+91..."
+                      style={{ ...inputStyle, flex: 1 }}
+                    />
+                  )}
+                  <button onClick={() => removeButton(i)} style={{ fontSize: 14, color: "#A32D2D", background: "none", border: "none", cursor: "pointer", flexShrink: 0 }}>✕</button>
+                </div>
+              ))}
+            </div>
+
+            {error && (
+              <div style={{ fontSize: 12, color: "#A32D2D", background: "#FFEBEE", padding: "8px 10px", borderRadius: 8 }}>{error}</div>
+            )}
+
+            <div style={{ display: "flex", gap: 10, paddingBottom: 8 }}>
+              <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
+              <Btn onClick={submit} disabled={saving || success} style={{ flex: 1, padding: "10px" }}>
+                {saving ? <><Spinner size={14} /> &nbsp;Submitting…</> : "📤 Submit for approval"}
+              </Btn>
+            </div>
+          </div>
+
+          {/* Phone preview */}
+          <div style={{ background: "#E8E8E5", padding: "20px 16px", overflowY: "auto", borderLeft: "0.5px solid #E0E0DC" }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#888", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 12 }}>Preview</div>
+            {/* Phone frame */}
+            <div style={{ background: "#fff", borderRadius: 20, boxShadow: "0 4px 20px rgba(0,0,0,0.15)", overflow: "hidden" }}>
+              {/* Status bar */}
+              <div style={{ background: "#075E54", padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 32, height: 32, borderRadius: "50%", background: "#25D366", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🏨</div>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "#fff" }}>Hotel Munafe</div>
+                  <div style={{ fontSize: 10, color: "#B2DFDB" }}>Business account</div>
+                </div>
+              </div>
+              {/* Chat area */}
+              <div style={{ background: "#ECE5DD", minHeight: 300, padding: "12px 10px" }}>
+                <div style={{ background: "#fff", borderRadius: "0 10px 10px 10px", padding: "10px 12px", maxWidth: "85%", boxShadow: "0 1px 2px rgba(0,0,0,0.1)" }}>
+                  {/* Header preview */}
+                  {form.headerType === "TEXT" && form.headerText && (
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#111", marginBottom: 6 }}>{form.headerText}</div>
+                  )}
+                  {form.headerType === "IMAGE" && (
+                    <div style={{ background: "#F0F0EE", borderRadius: 8, height: 80, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 8, fontSize: 24 }}>🖼</div>
+                  )}
+                  {form.headerType === "VIDEO" && (
+                    <div style={{ background: "#F0F0EE", borderRadius: 8, height: 80, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 8, fontSize: 24 }}>▶️</div>
+                  )}
+                  {form.headerType === "DOCUMENT" && (
+                    <div style={{ background: "#F0F0EE", borderRadius: 8, padding: "8px 10px", display: "flex", alignItems: "center", gap: 6, marginBottom: 8, fontSize: 11, color: "#555" }}>📄 Document</div>
+                  )}
+                  {/* Body */}
+                  {form.body ? (
+                    <div style={{ fontSize: 12, color: "#111", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{previewBody}</div>
+                  ) : (
+                    <div style={{ fontSize: 12, color: "#aaa", fontStyle: "italic" }}>Your message body will appear here…</div>
+                  )}
+                  {/* Footer */}
+                  {form.footer && (
+                    <div style={{ fontSize: 10, color: "#888", marginTop: 6, borderTop: "0.5px solid #F0F0EE", paddingTop: 6 }}>{form.footer}</div>
+                  )}
+                  <div style={{ fontSize: 10, color: "#aaa", textAlign: "right", marginTop: 4 }}>
+                    {new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}
+                  </div>
+                </div>
+                {/* Buttons */}
+                {form.buttons.filter(b => b.text).map((btn, i) => (
+                  <div key={i} style={{ background: "#fff", borderRadius: 10, padding: "8px 12px", marginTop: 4, textAlign: "center", fontSize: 12, color: "#075E54", fontWeight: 500, maxWidth: "85%", boxShadow: "0 1px 2px rgba(0,0,0,0.1)" }}>
+                    {btn.type === "URL" ? "🔗 " : btn.type === "PHONE_NUMBER" ? "📞 " : "↩ "}{btn.text}
+                  </div>
+                ))}
+              </div>
+            </div>
+            {/* Approval note */}
+            <div style={{ marginTop: 12, fontSize: 10, color: "#888", textAlign: "center", lineHeight: 1.6 }}>
+              Templates must be approved by Meta before use. Approval typically takes 24–48 hours.
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ─── Template Viewer ──────────────────────────────────────────────────────────
 function TemplateViewer({ apiClient }) {
-  const [templates, setTemplates] = useState([]);
-  const [loading,   setLoading]   = useState(true);
+  const [templates,    setTemplates]    = useState([]);
+  const [loading,      setLoading]      = useState(true);
+  const [showDrawer,   setShowDrawer]   = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    setLoading(true);
     apiClient.get("/api/marketing/templates")
       .then(res => setTemplates(res.data.templates || []))
       .catch(() => setTemplates([]))
       .finally(() => setLoading(false));
   }, [apiClient]);
 
+  useEffect(() => { load(); }, [load]);
+
   const statusColor = s => s === "APPROVED" ? "#2E7D32" : s === "PENDING" ? "#BA7517" : "#A32D2D";
   const statusBg    = s => s === "APPROVED" ? "#E8F5E9" : s === "PENDING" ? "#FFF3E0" : "#FFEBEE";
 
-  return (
-    <Card>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-        <span style={{ fontSize: 14, fontWeight: 500, color: "#111" }}>Message templates</span>
-        <span style={{ fontSize: 11, color: "#aaa" }}>from Meta Business</span>
+  // Group by category
+  const marketing = templates.filter(t => t.category === "MARKETING");
+  const utility   = templates.filter(t => t.category === "UTILITY");
+
+  const TemplateRow = ({ t }) => (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: "#F7F7F5", borderRadius: 8, marginBottom: 6 }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 500, color: "#111", marginBottom: 2 }}>{t.name}</div>
+        <div style={{ fontSize: 10, color: "#888" }}>{t.language}</div>
+        {/* Show body preview if available */}
+        {t.components?.find(c => c.type === "BODY")?.text && (
+          <div style={{ fontSize: 11, color: "#666", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 400 }}>
+            {t.components.find(c => c.type === "BODY").text}
+          </div>
+        )}
       </div>
-      {loading ? (
-        <div style={{ display: "flex", justifyContent: "center", padding: "16px 0" }}><Spinner /></div>
-      ) : templates.length === 0 ? (
-        <div style={{ fontSize: 12, color: "#aaa", textAlign: "center", padding: "16px 0", background: "#F7F7F5", borderRadius: 8 }}>
-          No templates found. Create templates in Meta Business Suite and they'll appear here.
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 320, overflowY: "auto" }}>
-          {templates.map((t, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", background: "#F7F7F5", borderRadius: 8 }}>
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 500, color: "#111" }}>{t.name}</div>
-                <div style={{ fontSize: 10, color: "#888" }}>{t.category} · {t.language}</div>
-              </div>
-              <Pill label={t.status} color={statusColor(t.status)} bg={statusBg(t.status)} />
-            </div>
-          ))}
-        </div>
+      <Pill label={t.status} color={statusColor(t.status)} bg={statusBg(t.status)} />
+    </div>
+  );
+
+  return (
+    <>
+      {showDrawer && (
+        <TemplateCreateDrawer
+          apiClient={apiClient}
+          onClose={() => setShowDrawer(false)}
+          onCreated={() => { setShowDrawer(false); setTimeout(load, 1000); }}
+        />
       )}
-    </Card>
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div>
+            <span style={{ fontSize: 14, fontWeight: 500, color: "#111" }}>Message templates</span>
+            <span style={{ marginLeft: 8, fontSize: 11, color: "#aaa" }}>{templates.length} total</span>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={load} style={{ fontSize: 11, color: "#378ADD", background: "none", border: "none", cursor: "pointer" }}>↻ Sync</button>
+            <Btn onClick={() => setShowDrawer(true)} style={{ padding: "5px 12px" }}>+ New template</Btn>
+          </div>
+        </div>
+
+        {loading ? (
+          <div style={{ display: "flex", justifyContent: "center", padding: "24px 0" }}><Spinner /></div>
+        ) : templates.length === 0 ? (
+          <div style={{ fontSize: 12, color: "#aaa", textAlign: "center", padding: "32px 0", background: "#F7F7F5", borderRadius: 10 }}>
+            <div style={{ fontSize: 28, marginBottom: 10 }}>📋</div>
+            <div style={{ fontWeight: 500, marginBottom: 6 }}>No templates yet</div>
+            <div style={{ marginBottom: 16 }}>Create your first template to start sending campaigns outside the 24h window.</div>
+            <Btn onClick={() => setShowDrawer(true)}>+ Create template</Btn>
+          </div>
+        ) : (
+          <div>
+            {marketing.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "#aaa", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 8 }}>📢 Marketing ({marketing.length})</div>
+                {marketing.map((t, i) => <TemplateRow key={i} t={t} />)}
+              </div>
+            )}
+            {utility.length > 0 && (
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "#aaa", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 8 }}>🔔 Utility ({utility.length})</div>
+                {utility.map((t, i) => <TemplateRow key={i} t={t} />)}
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
+    </>
   );
 }
 
