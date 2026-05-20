@@ -5,12 +5,12 @@
 
 import React, { createContext, useState, useCallback, useEffect } from 'react';
 import { createClient } from "@supabase/supabase-js";
+import axios from 'axios';
 
 export const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
-import axios from 'axios';
 
 const AuthContext = createContext();
 
@@ -18,7 +18,7 @@ const apiClient = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3001',
   headers: {
     'Content-Type': 'application/json'
-   }
+  }
 });
 
 export function AuthProvider({ children }) {
@@ -55,7 +55,7 @@ export function AuthProvider({ children }) {
 
     initAuth();
 
-// Axios interceptor: on 401/403, try to refresh token automatically
+    // Axios interceptor: on 401/403, try to refresh token automatically
     const interceptor = apiClient.interceptors.response.use(
       (response) => response,
       async (error) => {
@@ -64,7 +64,7 @@ export function AuthProvider({ children }) {
         if ((error.response?.status === 401 || error.response?.status === 403) 
             && !originalRequest._retry 
             && !originalRequest.url?.includes('/api/auth/refresh')) { 
-          
+
           originalRequest._retry = true;
           try {
             const refreshTokenValue = localStorage.getItem('refreshToken');
@@ -101,9 +101,6 @@ export function AuthProvider({ children }) {
         return Promise.reject(error);
       }
     );
-
-    return () => apiClient.interceptors.response.eject(interceptor);
-  }, []);
 
     return () => apiClient.interceptors.response.eject(interceptor);
   }, []);
