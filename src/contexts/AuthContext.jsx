@@ -55,15 +55,16 @@ export function AuthProvider({ children }) {
 
     initAuth();
 
-    // Axios interceptor: on 401/403, try to refresh token automatically
+// Axios interceptor: on 401/403, try to refresh token automatically
     const interceptor = apiClient.interceptors.response.use(
       (response) => response,
       async (error) => {
         const originalRequest = error.config;
-if ((error.response?.status === 401 || error.response?.status === 403) 
-    && !originalRequest._retry 
-    && !originalRequest.url?.includes('/api/auth/refresh')) {  // ← add this
-  {
+
+        if ((error.response?.status === 401 || error.response?.status === 403) 
+            && !originalRequest._retry 
+            && !originalRequest.url?.includes('/api/auth/refresh')) { 
+          
           originalRequest._retry = true;
           try {
             const refreshTokenValue = localStorage.getItem('refreshToken');
@@ -100,6 +101,9 @@ if ((error.response?.status === 401 || error.response?.status === 403)
         return Promise.reject(error);
       }
     );
+
+    return () => apiClient.interceptors.response.eject(interceptor);
+  }, []);
 
     return () => apiClient.interceptors.response.eject(interceptor);
   }, []);
