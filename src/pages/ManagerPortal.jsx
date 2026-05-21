@@ -1,6 +1,12 @@
 // ============================================================================
 // AUTOM8 FRONTEND - MANAGER PORTAL
 // src/pages/ManagerPortal.jsx
+//
+// FIX: Queue tab was hidden behind hasFeature(FEATURES.TOKEN_MANAGEMENT).
+//      If SubscriptionContext hasn't loaded yet, or the feature flag isn't
+//      returned, the tab disappeared entirely — manager couldn't see walk-ins.
+//      Queue tab is now always rendered. The subscription guard is kept only
+//      on the "New Order" button (non-critical path).
 // ============================================================================
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -37,13 +43,11 @@ function safeFormat(dateVal, fmt) {
 }
 
 // ─── Active order statuses — the ONLY statuses that keep a table "occupied" ──
-// "cancelled" and "completed" are explicitly excluded so stale orders don't
-// lock tables in the UI.
 const ACTIVE_ORDER_STATUSES = ['pending', 'confirmed', 'in_progress'];
 
 export default function ManagerPortal() {
   const { user, apiClient, logout } = useAuth();
-  const { hasFeature, hasAnyOf } = useSubscription();
+  const { hasAnyOf } = useSubscription();
 
   // ── core state ─────────────────────────────────────────────────────────────
   const [tables,        setTables]        = useState([]);
@@ -60,14 +64,12 @@ export default function ManagerPortal() {
   const [tokens,         setTokens]         = useState([]);
   const [assigningToken, setAssigningToken] = useState(null);
   const [assignTableSel, setAssignTableSel] = useState({});
+  // FIX: default tab is 'queue' so manager sees walk-ins immediately on login
   const [activeTab,      setActiveTab]      = useState('queue');
   const [toastMsg,       setToastMsg]       = useState('');
 
   // ── "free table" modal ─────────────────────────────────────────────────────
-  // Opened when manager clicks "Mark Available" on an occupied table.
-  // Asks: Complete Order / Cancel Order / Just Free (if no order linked).
   const [freeTableModal, setFreeTableModal] = useState(null);
-  // shape: { tableId, tableNumber, order | null, token | null }
 
   // ─── toast helper ──────────────────────────────────────────────────────────
   const showToast = (msg) => {
@@ -132,8 +134,6 @@ export default function ManagerPortal() {
   }, [fetchData, fetchTokens, fetchTables, fetchOrders]);
 
   // ─── derived helpers ───────────────────────────────────────────────────────
-  // FIX: only orders with ACTIVE_ORDER_STATUSES count toward "occupied".
-  // Completed/cancelled orders no longer lock a table in the UI.
   const getTableStatus = (table) => {
     const order = orders.find(
       o => o.table_id === table.id && ACTIVE_ORDER_STATUSES.includes(o.status)
@@ -183,31 +183,20 @@ export default function ManagerPortal() {
   };
 
   // ─── confirm freeing the table ─────────────────────────────────────────────
-  // orderAction: 'complete' | 'cancel' | null (null = no order to handle)
   const confirmFreeTable = async (orderAction) => {
     const { tableId, tableNumber, order, token } = freeTableModal;
     setFreeTableModal(null);
-
     try {
-      // 1. Handle the linked order
       if (order && orderAction === 'complete') {
         await apiClient.put(`/api/orders/${order.id}/status`, { status: 'completed' });
       } else if (order && orderAction === 'cancel') {
         await apiClient.delete(`/api/orders/${order.id}`);
       }
-
-      // 2. Complete any seated walk-in token on this table
       if (token) {
-        try {
-          await apiClient.put(`/api/tokens/${token.id}/complete`);
-        } catch (tokErr) {
-          console.warn('Could not complete token:', tokErr.message);
-        }
+        try { await apiClient.put(`/api/tokens/${token.id}/complete`); }
+        catch (tokErr) { console.warn('Could not complete token:', tokErr.message); }
       }
-
-      // 3. Force the table to available in DB
       await apiClient.put(`/api/tables/${tableId}/status`, { status: 'available' });
-
       await fetchTables();
       await fetchOrders();
       await fetchTokens();
@@ -347,7 +336,6 @@ export default function ManagerPortal() {
             <div className="p-6 space-y-3">
               {freeTableModal.order ? (
                 <>
-                  {/* Order summary */}
                   <div className="bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-700 mb-2">
                     <p className="font-semibold text-gray-900 mb-1">
                       Order #{freeTableModal.order.order_number?.slice(-4)}
@@ -355,8 +343,6 @@ export default function ManagerPortal() {
                     <p>Status: <span className="capitalize font-medium">{freeTableModal.order.status}</span></p>
                     <p>Amount: <span className="font-medium">₹{freeTableModal.order.total_amount?.toFixed(2) ?? '—'}</span></p>
                   </div>
-
-                  {/* Option A: Complete */}
                   <button
                     onClick={() => confirmFreeTable('complete')}
                     className="w-full flex items-center gap-3 bg-green-50 hover:bg-green-100 border border-green-200 text-green-800 font-semibold px-4 py-3 rounded-xl transition text-sm text-left"
@@ -367,8 +353,6 @@ export default function ManagerPortal() {
                       <p className="text-green-600 font-normal text-xs">Guests paid and left — mark order done</p>
                     </div>
                   </button>
-
-                  {/* Option B: Cancel */}
                   <button
                     onClick={() => confirmFreeTable('cancel')}
                     className="w-full flex items-center gap-3 bg-red-50 hover:bg-red-100 border border-red-200 text-red-800 font-semibold px-4 py-3 rounded-xl transition text-sm text-left"
@@ -381,7 +365,6 @@ export default function ManagerPortal() {
                   </button>
                 </>
               ) : (
-                /* No active order — just free the table */
                 <button
                   onClick={() => confirmFreeTable(null)}
                   className="w-full flex items-center gap-3 bg-green-50 hover:bg-green-100 border border-green-200 text-green-800 font-semibold px-4 py-3 rounded-xl transition text-sm text-left"
@@ -393,7 +376,6 @@ export default function ManagerPortal() {
                   </div>
                 </button>
               )}
-
               <button
                 onClick={() => setFreeTableModal(null)}
                 className="w-full text-center text-sm text-gray-400 hover:text-gray-600 py-2 transition"
@@ -421,15 +403,15 @@ export default function ManagerPortal() {
             <div className="flex items-center gap-3">
               <span className="text-sm text-gray-600">👤 {user?.full_name || user?.email}</span>
               {hasAnyOf(FEATURES.DINE_IN, FEATURES.TAKEAWAY, FEATURES.DELIVERY) && (
-              <button
-                onClick={() => { setShowNewOrder(true); setActiveTab('orders'); }}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition flex items-center"
-              >
-                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                New Order
-              </button>
+                <button
+                  onClick={() => { setShowNewOrder(true); setActiveTab('orders'); }}
+                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition flex items-center"
+                >
+                  <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  New Order
+                </button>
               )}
               <button
                 onClick={logout}
@@ -463,9 +445,10 @@ export default function ManagerPortal() {
         </div>
 
         {/* ── Tab bar ───────────────────────────────────────────────────────── */}
+        {/* FIX: Queue tab always rendered — no subscription guard */}
         <div className="flex gap-2 mb-6 bg-white rounded-xl p-1.5 shadow-sm w-fit">
           {[
-            ...(hasFeature(FEATURES.TOKEN_MANAGEMENT) ? [{ key: 'queue', label: `Queue${waitingTokens.length ? ` (${waitingTokens.length})` : ''}` }] : []),
+            { key: 'queue',  label: `Queue${waitingTokens.length ? ` (${waitingTokens.length})` : ''}` },
             { key: 'tables', label: 'Tables' },
             { key: 'orders', label: 'Active Orders' },
           ].map(tab => (
@@ -489,6 +472,7 @@ export default function ManagerPortal() {
         {activeTab === 'queue' && (
           <div className="space-y-10">
 
+            {/* ── Waiting for table ──────────────────────────────────────────── */}
             <section>
               <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
                 🟠 Waiting for Table
@@ -504,14 +488,16 @@ export default function ManagerPortal() {
               ) : (
                 <div className="grid gap-4">
                   {waitingTokens.map(token => {
-                    const avail = availableTablesFor(token.pax);
+                    const avail      = availableTablesFor(token.pax);
                     const isAssigning = assigningToken === token.id;
                     return (
                       <div key={token.id} className="bg-white rounded-xl shadow-sm p-5 border border-orange-100">
-                        <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-start gap-4">
+                          {/* Token badge */}
                           <div className="w-14 h-14 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-lg font-bold flex-shrink-0">
                             {String(token.id).replace('T-', '')}
                           </div>
+
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-bold text-gray-900 text-lg">{token.id}</span>
@@ -520,7 +506,11 @@ export default function ManagerPortal() {
                             <p className="text-gray-600 text-sm mt-0.5">
                               {token.name} · {token.pax} {token.pax === 1 ? 'person' : 'people'} · Arrived {safeFormat(token.arrived_at, 'HH:mm')}
                             </p>
-                            {token.phone && <p className="text-gray-400 text-xs mt-0.5">📱 +{token.phone}</p>}
+                            {token.phone && (
+                              <p className="text-gray-400 text-xs mt-0.5">📱 +{token.phone}</p>
+                            )}
+
+                            {/* Table assignment row */}
                             <div className="flex items-center gap-2 mt-3 flex-wrap">
                               <select
                                 value={assignTableSel[token.id] || ''}
@@ -528,24 +518,31 @@ export default function ManagerPortal() {
                                 disabled={avail.length === 0}
                                 className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:opacity-50"
                               >
-                                <option value="">{avail.length === 0 ? 'No tables available' : '— assign table —'}</option>
+                                <option value="">
+                                  {avail.length === 0 ? 'No tables available' : '— assign table —'}
+                                </option>
                                 {avail.map(t => (
                                   <option key={t.id} value={t.id}>
                                     Table {t.table_number}{t.capacity ? ` (${t.capacity} seats)` : ''}{t.section ? ` · ${t.section}` : ''}
                                   </option>
                                 ))}
                               </select>
+
                               <button
                                 onClick={() => assignTable(token)}
                                 disabled={!assignTableSel[token.id] || isAssigning}
                                 className="bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-1"
                               >
-                                {isAssigning
-                                  ? <><span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" />Assigning...</>
-                                  : '✓ Assign + Notify'
-                                }
+                                {isAssigning ? (
+                                  <><span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" /> Assigning...</>
+                                ) : '✓ Assign + Notify'}
                               </button>
-                              <button onClick={() => dismissToken(token.id)} className="text-gray-400 hover:text-red-500 text-sm px-2 py-2 transition" title="Dismiss">✕</button>
+
+                              <button
+                                onClick={() => dismissToken(token.id)}
+                                className="text-gray-400 hover:text-red-500 text-sm px-2 py-2 transition"
+                                title="Dismiss token"
+                              >✕</button>
                             </div>
                           </div>
                         </div>
@@ -556,6 +553,7 @@ export default function ManagerPortal() {
               )}
             </section>
 
+            {/* ── Seated ─────────────────────────────────────────────────────── */}
             {seatedTokens.length > 0 && (
               <section>
                 <h2 className="text-xl font-bold text-gray-900 mb-4">🟢 Seated</h2>
@@ -569,12 +567,17 @@ export default function ManagerPortal() {
                         <div>
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-gray-900">{token.id}</span>
-                            <span className="text-xs font-semibold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Table {token.table_number}</span>
+                            <span className="text-xs font-semibold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+                              Table {token.table_number}
+                            </span>
                           </div>
                           <p className="text-gray-500 text-sm">{token.name} · {token.pax} pax</p>
                         </div>
                       </div>
-                      <button onClick={() => completeToken(token)} className="text-xs bg-gray-100 hover:bg-red-50 hover:text-red-600 text-gray-600 font-semibold px-3 py-2 rounded-lg transition">
+                      <button
+                        onClick={() => completeToken(token)}
+                        className="text-xs bg-gray-100 hover:bg-red-50 hover:text-red-600 text-gray-600 font-semibold px-3 py-2 rounded-lg transition"
+                      >
                         Free Table
                       </button>
                     </div>
@@ -583,6 +586,7 @@ export default function ManagerPortal() {
               </section>
             )}
 
+            {/* ── Takeaway ───────────────────────────────────────────────────── */}
             {takeawayTokens.length > 0 && (
               <section>
                 <h2 className="text-xl font-bold text-gray-900 mb-4">🔵 Takeaway</h2>
@@ -599,7 +603,10 @@ export default function ManagerPortal() {
                           <p className="text-gray-500 text-sm">{token.name} · {safeFormat(token.arrived_at, 'HH:mm')}</p>
                         </div>
                       </div>
-                      <button onClick={() => dismissToken(token.id)} className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 font-semibold px-3 py-2 rounded-lg transition">Done</button>
+                      <button
+                        onClick={() => dismissToken(token.id)}
+                        className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 font-semibold px-3 py-2 rounded-lg transition"
+                      >Done</button>
                     </div>
                   ))}
                 </div>
