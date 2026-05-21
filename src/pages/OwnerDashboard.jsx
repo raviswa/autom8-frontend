@@ -1,14 +1,8 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import { supabase } from "../contexts/AuthContext";
-import { createClient } from "@supabase/supabase-js";
-
-// Munafe Chat Supabase (conversation / WABA data)
-// Requires VITE_MUNAFE_CHAT_ANON_KEY in Railway env vars
-// Get it from: ttlhffzgkpneshbawdhb.supabase.co → Settings → API → anon public
-const _chatKey = import.meta.env.VITE_MUNAFE_CHAT_ANON_KEY;
-const supabaseChat = _chatKey
-  ? createClient("https://ttlhffzgkpneshbawdhb.supabase.co", _chatKey)
-  : null;
+import { supabase, useAuth } from "../contexts/AuthContext";
+// API base URL — Munafe Chat data is now proxied through the autom8 backend
+// to avoid RLS issues with the chat Supabase project
+const API_URL = import.meta.env.VITE_API_URL || "https://autom8-backend-production.up.railway.app";
 
 // ── Export to Excel (no npm install — uses plain CSV download) ────────────────
 function exportToCSV(rows, filename) {
@@ -511,79 +505,52 @@ function useCancelStats(restaurantId, startISO, endISO) {
 }
 
 // ─── Hook: WABA info from Munafe Chat restaurants table ───────────────────────
-function useWABAInfo(restaurantId) {
+function useWABAInfo(token) {
   const [info, setInfo] = useState(undefined); // undefined = loading, null = not found
   useEffect(() => {
-    if (!supabaseChat) { setInfo(null); return; }
+    if (!token) return;
     (async () => {
-      // Try by id first, then fall back to first record
-      let data = null;
-      if (restaurantId) {
-        const res = await supabaseChat
-          .from("restaurants")
-          .select("id, name, whatsapp_number, manager_phone, timezone, dining_duration_minutes, payment_mode")
-          .eq("id", restaurantId)
-          .maybeSingle();
-        data = res.data;
+      try {
+        const res = await fetch(`${API_URL}/api/dashboard/waba`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const json = await res.json();
+          setInfo(json.restaurant ?? null);
+        } else {
+          setInfo(null);
+        }
+      } catch {
+        setInfo(null);
       }
-      if (!data) {
-        const res = await supabaseChat
-          .from("restaurants")
-          .select("id, name, whatsapp_number, manager_phone, timezone, dining_duration_minutes, payment_mode")
-          .limit(1)
-          .maybeSingle();
-        data = res.data;
-      }
-      setInfo(data ?? null);
     })();
-  }, [restaurantId]);
+  }, [token]);
   return info;
 }
 
 // ─── Hook: WhatsApp orders from Munafe Chat bookings table ────────────────────
-function useWAOrders(restaurantId, startISO, endISO) {
+function useWAOrders(token, startISO, endISO) {
   const [orders, setOrders] = useState(null);
   useEffect(() => {
-    if (!supabaseChat) { setOrders([]); return; }
+    if (!token) return;
     setOrders(null);
     (async () => {
-      // bookings table in Munafe Chat — no restaurant_id filter needed
-      // since the chat DB is single-tenant for this restaurant
-      const { data, error } = await supabaseChat
-        .from("bookings")
-        .select("id, created_at, service_type, status, total_amount, party_size, token_number, customer_id, customers!inner(name, phone)")
-        .gte("created_at", startISO)
-        .lte("created_at", endISO)
-        .order("created_at", { ascending: false })
-        .limit(500);
-
-      if (!error && data) {
-        setOrders(data);
-        return;
+      try {
+        const params = new URLSearchParams({ start: startISO, end: endISO });
+        const res = await fetch(`${API_URL}/api/dashboard/wa-orders?${params}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const json = await res.json();
+          setOrders(json.orders ?? []);
+        } else {
+          setOrders([]);
+        }
+      } catch {
+        setOrders([]);
       }
-
-      // fallback: bookings without join
-      const { data: plain } = await supabaseChat
-        .from("bookings")
-        .select("id, created_at, service_type, status, total_amount, party_size, token_number, customer_id")
-        .gte("created_at", startISO)
-        .lte("created_at", endISO)
-        .order("created_at", { ascending: false })
-        .limit(500);
-
-      if (plain) { setOrders(plain); return; }
-
-      // last fallback: conversation_events
-      const { data: evts } = await supabaseChat
-        .from("conversation_events")
-        .select("id, created_at, event_type, customer_id, data")
-        .gte("created_at", startISO)
-        .lte("created_at", endISO)
-        .order("created_at", { ascending: false })
-        .limit(500);
-      setOrders(evts ?? []);
     })();
-  }, [startISO, endISO]);
+  }, [token, startISO, endISO]);
   return orders;
 }
 
@@ -766,6 +733,12 @@ function WAOrdersTable({ orders, rangeLabel }) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function OwnerDashboard({ restaurantId, restaurantName, onLogout }) {
+  const authCtx = useAuth();
+  // Support both { token } and { user } shapes from AuthContext
+  const token = authCtx?.token
+    || authCtx?.session?.access_token
+    || (typeof window !== "undefined" && JSON.parse(localStorage.getItem("userData") || "{}").token)
+    || null;
   const [preset,      setPreset]      = useState("today");
   const [customStart, setCustomStart] = useState(null);
   const [customEnd,   setCustomEnd]   = useState(null);
@@ -785,8 +758,8 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout 
   const tables      = useTables(restaurantId);
   const kotStats    = useKotStats(restaurantId);
   const cancelStats = useCancelStats(restaurantId, startISO, endISO);
-  const wabaInfo    = useWABAInfo(restaurantId);
-  const waOrders    = useWAOrders(restaurantId, startISO, endISO);
+  const wabaInfo    = useWABAInfo(token);
+  const waOrders    = useWAOrders(token, startISO, endISO);
 
   const rangeLabel = (customStart && customEnd) ? `Custom · ${fmtDate(customStart)} – ${fmtDate(customEnd)}` : { today: "Today", yesterday: "Yesterday", "7d": "Last 7 days", "30d": "Last 30 days" }[preset];
 
