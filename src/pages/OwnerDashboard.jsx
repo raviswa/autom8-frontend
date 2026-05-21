@@ -845,7 +845,7 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
   const rangeLabel = (customStart && customEnd) ? `Custom · ${fmtDate(customStart)} – ${fmtDate(customEnd)}` : { today: "Today", yesterday: "Yesterday", "7d": "Last 7 days", "30d": "Last 30 days" }[preset];
 
   const row1 = [
-    { icon: "₹",  label: "Total revenue",   value: kpi ? fmtINR(kpi.totalRevenue) : "—", badge: null, sub: "selected period" },
+    { icon: "₹",  label: "Total revenue",   value: kpi ? fmtINR(kpi.totalRevenue*100) : "—", badge: null, sub: "selected period" },
     { icon: "🛒", label: "Orders",           value: kpi?.totalOrders ?? "—",               badge: null, sub: "selected period" },
     { icon: "🧾", label: "Avg order value",  value: kpi ? `₹${kpi.aov}` : "—",             badge: null, sub: "selected period", tooltip: "Total revenue ÷ orders. Excludes cancelled orders." },
     { icon: "👥", label: "Total covers",     value: kpi?.totalCovers ?? "—",                neutral: true, sub: "selected period", tooltip: "Total orders placed. Each order = 1 cover (one dining transaction)." },
