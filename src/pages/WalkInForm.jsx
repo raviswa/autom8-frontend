@@ -2,14 +2,17 @@
 // AUTOM8 FRONTEND - CUSTOMER WALK-IN FORM (QR Code Landing Page)
 // src/pages/WalkInForm.jsx
 //
-// Customer scans QR code → lands here → fills form → token generated
-// Route suggestion: /checkin  (add to your React Router config)
+// FIX: restaurant_id is read from the URL query parameter ?restaurant=<uuid>
+//      This is the correct multi-tenant approach — each restaurant's QR code
+//      encodes their own ID in the URL. No env var needed.
 //
-// Usage in App.jsx / router:
+//      QR code for Munafe should point to:
+//        https://autom8-frontend-production.up.railway.app/checkin?restaurant=46fb9b9e-431a-43c9-9edb-d316b0fef216
+//
+//      For each new restaurant, generate a QR code with their own UUID.
+//
+// Route in App.jsx / router:
 //   <Route path="/checkin" element={<WalkInForm />} />
-//
-// The QR code printed at restaurant entrance should point to:
-//   https://autom8-frontend-production.up.railway.app/checkin
 // ============================================================================
 
 import React, { useState } from 'react';
@@ -26,11 +29,20 @@ export default function WalkInForm() {
   const [error,   setError]   = useState('');
   const [token,   setToken]   = useState(null);
 
+  // Read restaurant_id from URL query param — e.g. /checkin?restaurant=<uuid>
+  // This is set once when the QR code is generated, works for any number of restaurants.
+  const restaurantId = new URLSearchParams(window.location.search).get('restaurant');
+
   const submit = async () => {
-    if (!name.trim())      { setError('Please enter your name');         return; }
-    if (!type)             { setError('Please choose dine-in or takeaway'); return; }
+    if (!name.trim()) { setError('Please enter your name');              return; }
+    if (!type)        { setError('Please choose dine-in or takeaway');   return; }
     if (type === 'dinein' && (pax < 1 || pax > 20)) {
       setError('Please enter a valid number of people (1–20)');
+      return;
+    }
+    if (!restaurantId) {
+      setError('Invalid QR code — restaurant not found. Please scan the QR code at the entrance again.');
+      console.error('[WalkInForm] No ?restaurant= param in URL:', window.location.href);
       return;
     }
 
@@ -39,13 +51,14 @@ export default function WalkInForm() {
 
     try {
       const res = await fetch(`${API_BASE}/api/tokens`, {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name:  name.trim(),
-          phone: phone.trim(),
+          name:          name.trim(),
+          phone:         phone.trim(),
           type,
-          pax:   type === 'takeaway' ? 1 : pax,
+          pax:           type === 'takeaway' ? 1 : pax,
+          restaurant_id: restaurantId,
         }),
       });
 
