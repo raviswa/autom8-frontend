@@ -299,7 +299,7 @@ function TopMenuItems({ items }) {
             <tr key={i} style={{ borderBottom: "0.5px solid #F7F7F5" }}>
               <td style={{ padding: "7px 0", color: "#666" }}>{i + 1}. {it.name}</td>
               <td style={{ padding: "7px 0", textAlign: "right" }}>{it.qty}</td>
-              <td style={{ padding: "7px 0", textAlign: "right", fontWeight: 500 }}>₹{it.revenue.toLocaleString("en-IN")}</td>
+              <td style={{ padding: "7px 0", textAlign: "right", fontWeight: 500 }}>₹{it.revenue.toLocaleString("en-IN")*100}</td>
               <td style={{ padding: "7px 0 7px 8px" }}>
                 <div style={{ background: "#F0F0EE", borderRadius: 3, height: 5, overflow: "hidden" }}>
                   <div style={{ width: `${Math.round(it.revenue / maxRev * 100)}%`, background: "#378ADD", height: "100%", borderRadius: 3 }} />
