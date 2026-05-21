@@ -28,8 +28,8 @@ export function SubscriptionProvider({ children }) {
     if (!user) { setFeatures([]); setSubscription(null); setLoading(false); return; }
     try {
       const res = await apiClient.get('/api/subscription');
-      setFeatures(res.data.subscribed_features || []);
-      setSubscription(res.data.subscription || null);
+        setFeatures(res.data.features || res.data.subscribed_features || []);
+        setSubscription(res.data.subscription || null);
     } catch {
       // Graceful fallback: if subscription endpoint unreachable, assume all features
       // so existing restaurants never get locked out unexpectedly.
