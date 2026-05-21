@@ -1,9 +1,5 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { supabase, useAuth } from "../contexts/AuthContext";
-// API base URL — Munafe Chat data is now proxied through the autom8 backend
-// to avoid RLS issues with the chat Supabase project
-const API_URL = import.meta.env.VITE_API_URL || "https://autom8-backend-production.up.railway.app";
-
 // ── Export to Excel (no npm install — uses plain CSV download) ────────────────
 function exportToCSV(rows, filename) {
   if (!rows?.length) return;
@@ -320,7 +316,7 @@ function TableOccupancy({ tables }) {
             const c = TABLE_COLORS[t.status] ?? TABLE_COLORS.free;
             return (
               <div key={t.id} style={{ background: c.bg, borderRadius: 8, padding: "6px 4px", textAlign: "center" }}>
-                <div style={{ fontSize: 10, fontWeight: 500, color: c.text }}>{t.label ?? `T${t.id}`}</div>
+                <div style={{ fontSize: 10, fontWeight: 500, color: c.text }}>T{t.table_number ?? t.id}</div>
                 <div style={{ fontSize: 10, color: c.text, opacity: 0.8 }}>{(t.current_pax ?? 0) > 0 ? `${t.current_pax}p` : "—"}</div>
               </div>
             );
@@ -457,7 +453,7 @@ function useTables(restaurantId) {
   const [tables, setTables] = useState([]);
   const fetch = useCallback(async () => {
     if (!restaurantId) return;
-    const { data } = await supabase.from("tables").select("id, label, status, current_pax").eq("restaurant_id", restaurantId).order("label");
+    const { data } = await supabase.from("tables").select("id, table_number, section, status").eq("restaurant_id", restaurantId).order("table_number", { ascending: true });
     if (data) setTables(data);
   }, [restaurantId]);
   useEffect(() => {
@@ -473,8 +469,8 @@ function useKotStats(restaurantId) {
   const fetch = useCallback(async () => {
     if (!restaurantId) return;
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    const { data } = await supabase.from("kot_tickets").select("status, created_at, served_at").eq("restaurant_id", restaurantId).gte("created_at", today.toISOString());
-    if (!data) return;
+    const { data, error } = await supabase.from("kot_tickets").select("status, created_at, served_at").eq("restaurant_id", restaurantId).gte("created_at", today.toISOString());
+    if (error || !data) { setStats({ open: 0, inProgress: 0, served: 0, avgTime: null, delayed: 0, fastestItem: null, slowestItem: null }); return; }
     const times = data.filter(k => k.served_at).map(k => (new Date(k.served_at) - new Date(k.created_at)) / 60000);
     setStats({ open: data.filter(k => k.status === "open").length, inProgress: data.filter(k => k.status === "in_progress").length, served: data.filter(k => k.status === "served").length, avgTime: times.length ? Math.round(times.reduce((s, v) => s + v, 0) / times.length) : null, delayed: times.filter(t => t > 20).length, fastestItem: null, slowestItem: null });
   }, [restaurantId]);
@@ -493,7 +489,7 @@ function useCancelStats(restaurantId, startISO, endISO) {
     (async () => {
       const [{ data: cancelled }, { data: voided }] = await Promise.all([
         supabase.from("orders").select("total").eq("restaurant_id", restaurantId).eq("status", "cancelled").gte("created_at", startISO).lte("created_at", endISO),
-        supabase.from("order_items").select("unit_price, quantity, void_reason, menu_items(name)").eq("restaurant_id", restaurantId).eq("voided", true).gte("created_at", startISO).lte("created_at", endISO),
+        supabase.from("order_items").select("unit_price, quantity, menu_items(name)").eq("restaurant_id", restaurantId).gte("created_at", startISO).lte("created_at", endISO).limit(0), // voided not implemented yet
       ]);
       const reasonMap = {}, itemMap = {};
       (voided ?? []).forEach(v => { const r = v.void_reason ?? "Unknown"; reasonMap[r] = (reasonMap[r] ?? 0) + 1; const n = v.menu_items?.name ?? "Unknown"; itemMap[n] = (itemMap[n] ?? 0) + 1; });
@@ -505,52 +501,41 @@ function useCancelStats(restaurantId, startISO, endISO) {
 }
 
 // ─── Hook: WABA info from Munafe Chat restaurants table ───────────────────────
-function useWABAInfo(token) {
+function useWABAInfo(apiClient) {
   const [info, setInfo] = useState(undefined); // undefined = loading, null = not found
   useEffect(() => {
-    if (!token) return;
+    if (!apiClient) return;
     (async () => {
       try {
-        const res = await fetch(`${API_URL}/api/dashboard/waba`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const json = await res.json();
-          setInfo(json.restaurant ?? null);
-        } else {
-          setInfo(null);
-        }
-      } catch {
+        const res = await apiClient.get('/api/dashboard/waba');
+        setInfo(res.data?.restaurant ?? null);
+      } catch (err) {
+        console.warn('[useWABAInfo] failed:', err?.response?.data || err.message);
         setInfo(null);
       }
     })();
-  }, [token]);
+  }, [apiClient]);
   return info;
 }
 
 // ─── Hook: WhatsApp orders from Munafe Chat bookings table ────────────────────
-function useWAOrders(token, startISO, endISO) {
+function useWAOrders(apiClient, startISO, endISO) {
   const [orders, setOrders] = useState(null);
   useEffect(() => {
-    if (!token) return;
+    if (!apiClient) return;
     setOrders(null);
     (async () => {
       try {
-        const params = new URLSearchParams({ start: startISO, end: endISO });
-        const res = await fetch(`${API_URL}/api/dashboard/wa-orders?${params}`, {
-          headers: { Authorization: `Bearer ${token}` },
+        const res = await apiClient.get('/api/dashboard/wa-orders', {
+          params: { start: startISO, end: endISO },
         });
-        if (res.ok) {
-          const json = await res.json();
-          setOrders(json.orders ?? []);
-        } else {
-          setOrders([]);
-        }
-      } catch {
+        setOrders(res.data?.orders ?? []);
+      } catch (err) {
+        console.warn('[useWAOrders] failed:', err?.response?.data || err.message);
         setOrders([]);
       }
     })();
-  }, [token, startISO, endISO]);
+  }, [apiClient, startISO, endISO]);
   return orders;
 }
 
@@ -732,13 +717,9 @@ function WAOrdersTable({ orders, rangeLabel }) {
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
-export default function OwnerDashboard({ restaurantId, restaurantName, onLogout }) {
-  const authCtx = useAuth();
-  // Support both { token } and { user } shapes from AuthContext
-  const token = authCtx?.token
-    || authCtx?.session?.access_token
-    || (typeof window !== "undefined" && JSON.parse(localStorage.getItem("userData") || "{}").token)
-    || null;
+export default function OwnerDashboard({ restaurantId, restaurantName, onLogout, apiClient: apiClientProp }) {
+  const { apiClient: apiClientCtx } = useAuth();
+  const apiClient = apiClientCtx || apiClientProp; // prefer context, fall back to prop
   const [preset,      setPreset]      = useState("today");
   const [customStart, setCustomStart] = useState(null);
   const [customEnd,   setCustomEnd]   = useState(null);
@@ -758,8 +739,8 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout 
   const tables      = useTables(restaurantId);
   const kotStats    = useKotStats(restaurantId);
   const cancelStats = useCancelStats(restaurantId, startISO, endISO);
-  const wabaInfo    = useWABAInfo(token);
-  const waOrders    = useWAOrders(token, startISO, endISO);
+  const wabaInfo    = useWABAInfo(apiClient);
+  const waOrders    = useWAOrders(apiClient, startISO, endISO);
 
   const rangeLabel = (customStart && customEnd) ? `Custom · ${fmtDate(customStart)} – ${fmtDate(customEnd)}` : { today: "Today", yesterday: "Yesterday", "7d": "Last 7 days", "30d": "Last 30 days" }[preset];
 
