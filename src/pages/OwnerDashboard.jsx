@@ -395,10 +395,10 @@ function useKpiData(restaurantId, startISO, endISO) {
     if (!restaurantId) return;
     (async () => {
       const [{ data: orders }, { data: tokens }] = await Promise.all([
-        supabase.from("orders").select("total, pax").eq("restaurant_id", restaurantId).eq("status", "completed").gte("created_at", startISO).lte("created_at", endISO),
+        supabase.from("orders").select("total_amount, pax").eq("restaurant_id", restaurantId).eq("status", "completed").gte("created_at", startISO).lte("created_at", endISO),
         supabase.from("walk_in_tokens").select("created_at, seated_at").eq("restaurant_id", restaurantId).gte("arrived_at", startISO).lte("arrived_at", endISO),
       ]);
-      const totalRevenue = (orders ?? []).reduce((s, o) => s + (o.total ?? 0), 0);
+      const totalRevenue = (orders ?? []).reduce((s, o) => s + (o.total_amount ?? 0), 0);
       const totalOrders  = (orders ?? []).length;
       const seated = (tokens ?? []).filter(t => t.seated_at);
       const avgMins = seated.length ? Math.round(seated.reduce((s, t) => s + (new Date(t.seated_at) - new Date(t.created_at)) / 60000, 0) / seated.length) : null;
@@ -414,7 +414,7 @@ function useChartData(restaurantId, startISO, endISO, preset) {
     if (!restaurantId) return;
     setData(null); // clear old data immediately to avoid stale chart
     (async () => {
-      const { data: orders } = await supabase.from("orders").select("total, pax, created_at").eq("restaurant_id", restaurantId).eq("status", "completed").gte("created_at", startISO).lte("created_at", endISO);
+      const { data: orders } = await supabase.from("orders").select("total_amount, pax, created_at").eq("restaurant_id", restaurantId).eq("status", "completed").gte("created_at", startISO).lte("created_at", endISO);
       if (!orders) return;
       const byLabel = {};
       orders.forEach(o => {
@@ -423,7 +423,7 @@ function useChartData(restaurantId, startISO, endISO, preset) {
           ? `${d.getHours()}:00`
           : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
         if (!byLabel[label]) byLabel[label] = { revenue: 0, orders: 0, covers: 0 };
-        byLabel[label].revenue += o.total ?? 0;
+        byLabel[label].revenue += o.total_amount ?? 0;
         byLabel[label].orders  += 1;
         byLabel[label].covers  += o.pax ?? 0;
       });
@@ -439,10 +439,21 @@ function useMenuItems(restaurantId, startISO, endISO) {
   useEffect(() => {
     if (!restaurantId) return;
     (async () => {
-      const { data } = await supabase.from("order_items").select("quantity, unit_price, menu_items(name)").eq("restaurant_id", restaurantId).gte("created_at", startISO).lte("created_at", endISO);
+      // Get completed orders in range, then their items
+      const { data: orders } = await supabase.from("orders")
+        .select("id")
+        .eq("restaurant_id", restaurantId)
+        .eq("status", "completed")
+        .gte("created_at", startISO)
+        .lte("created_at", endISO);
+      if (!orders?.length) { setItems([]); return; }
+      const orderIds = orders.map(o => o.id);
+      const { data } = await supabase.from("order_items")
+        .select("quantity, unit_price, menu_item:menu_item_id(name)")
+        .in("order_id", orderIds);
       if (!data) return;
       const map = {};
-      data.forEach(r => { const n = r.menu_items?.name ?? "Unknown"; if (!map[n]) map[n] = { name: n, qty: 0, revenue: 0 }; map[n].qty += r.quantity ?? 1; map[n].revenue += (r.quantity ?? 1) * (r.unit_price ?? 0); });
+      data.forEach(r => { const n = r.menu_item?.name ?? "Unknown"; if (!map[n]) map[n] = { name: n, qty: 0, revenue: 0 }; map[n].qty += r.quantity ?? 1; map[n].revenue += (r.quantity ?? 1) * (r.unit_price ?? 0); });
       setItems(Object.values(map).sort((a, b) => b.revenue - a.revenue).slice(0, 7));
     })();
   }, [restaurantId, startISO, endISO]);
@@ -488,13 +499,13 @@ function useCancelStats(restaurantId, startISO, endISO) {
     if (!restaurantId) return;
     (async () => {
       const [{ data: cancelled }, { data: voided }] = await Promise.all([
-        supabase.from("orders").select("total").eq("restaurant_id", restaurantId).eq("status", "cancelled").gte("created_at", startISO).lte("created_at", endISO),
+        supabase.from("orders").select("total_amount").eq("restaurant_id", restaurantId).eq("status", "cancelled").gte("created_at", startISO).lte("created_at", endISO),
         supabase.from("order_items").select("unit_price, quantity, menu_items(name)").eq("restaurant_id", restaurantId).gte("created_at", startISO).lte("created_at", endISO).limit(0), // voided not implemented yet
       ]);
       const reasonMap = {}, itemMap = {};
       (voided ?? []).forEach(v => { const r = v.void_reason ?? "Unknown"; reasonMap[r] = (reasonMap[r] ?? 0) + 1; const n = v.menu_items?.name ?? "Unknown"; itemMap[n] = (itemMap[n] ?? 0) + 1; });
       const total = (cancelled?.length ?? 0) + (voided?.length ?? 0);
-      setStats({ cancelled: cancelled?.length ?? 0, voided: voided?.length ?? 0, revLost: (cancelled ?? []).reduce((s, o) => s + (o.total ?? 0), 0), topReason: Object.entries(reasonMap).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—", topItem: Object.entries(itemMap).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—", rate: total > 0 ? Math.round(((cancelled?.length ?? 0) / total) * 100) : 0 });
+      setStats({ cancelled: cancelled?.length ?? 0, voided: voided?.length ?? 0, revLost: (cancelled ?? []).reduce((s, o) => s + (o.total_amount ?? 0), 0), topReason: Object.entries(reasonMap).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—", topItem: Object.entries(itemMap).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—", rate: total > 0 ? Math.round(((cancelled?.length ?? 0) / total) * 100) : 0 });
     })();
   }, [restaurantId, startISO, endISO]);
   return stats;
