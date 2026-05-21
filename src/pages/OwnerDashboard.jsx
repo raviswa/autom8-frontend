@@ -1,4 +1,4 @@
-// Dashboard v202605210624
+// Dashboard v202605210709
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { supabase, useAuth } from "../contexts/AuthContext";
 // ── Export to Excel (no npm install — uses plain CSV download) ────────────────
@@ -408,19 +408,46 @@ function KotStatus({ stats }) {
 function CancellationVoids({ stats }) {
   return (
     <StatCard title="Cancellations &amp; voids" sub="selected period">
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <MiniStat label="Cancelled" value={stats?.cancelled ?? 0} color="#A32D2D" />
-        <MiniStat label="Revenue lost" value={fmtINR(stats?.revLost ?? 0)} color="#BA7517" />
+
+      {/* Section 1: Booking-level cancellations (from WhatsApp bot) */}
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 11, fontWeight: 500, color: "#888", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>
+          Booking cancellations (WhatsApp)
+        </div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          <MiniStat label="Cancelled"      value={stats?.bookingCancels ?? 0} color="#A32D2D" />
+          <MiniStat label="Total bookings" value={stats?.totalBookings   ?? 0} />
+          <MiniStat label="Rate"           value={stats?.bookingRate != null ? `${stats.bookingRate}%` : "—"} color="#BA7517" />
+        </div>
+        <div style={{ fontSize: 11, color: "#aaa", padding: "6px 8px", background: "#FFF8F5", borderRadius: 6 }}>
+          Customer-level: booking resets, flow cancellations, service type cancellations
+        </div>
       </div>
-      <KRow label="Revenue lost"       value={stats?.revLost != null ? `₹${stats.revLost.toLocaleString("en-IN")}` : "₹0"} danger />
-      <KRow label="Total orders (base)" value={stats?.totalOrders != null ? stats.totalOrders : "—"} />
-      <KRow label="Cancellation rate"  value={stats?.rate != null ? `${stats.rate}% of total orders` : "—"} />
-      <div style={{ marginTop: 10, padding: "8px 10px", background: "#FFF8F5", borderRadius: 8, fontSize: 11, color: "#888", lineHeight: 1.6 }}>
-        ℹ️ These are orders explicitly cancelled by the manager. Tokens with no order placed are not counted here. Cancellation reason capture not yet enabled.
+
+      {/* Divider */}
+      <div style={{ borderTop: "0.5px solid #F0F0EE", marginBottom: 14 }} />
+
+      {/* Section 2: Order-level cancellations (manager cancelled placed orders) */}
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 500, color: "#888", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>
+          Order cancellations (Manager)
+        </div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          <MiniStat label="Cancelled"   value={stats?.cancelled   ?? 0} color="#A32D2D" />
+          <MiniStat label="Revenue lost" value={fmtINR(stats?.revLost ?? 0)} color="#BA7517" />
+          <MiniStat label="Rate"         value={stats?.rate != null ? `${stats.rate}%` : "—"} color="#BA7517" />
+        </div>
+        <KRow label="Revenue lost"       value={stats?.revLost != null ? `₹${stats.revLost.toLocaleString("en-IN")}` : "₹0"} danger />
+        <KRow label="Total orders (base)" value={stats?.totalOrders ?? "—"} />
+        <div style={{ marginTop: 8, fontSize: 11, color: "#aaa", padding: "6px 8px", background: "#FFF8F5", borderRadius: 6 }}>
+          Manager cancelled placed orders in the portal. Cancellation reason not yet captured.
+        </div>
       </div>
+
     </StatCard>
   );
 }
+
 
 
 // ─── Data hooks ───────────────────────────────────────────────────────────────
@@ -535,46 +562,37 @@ function useKotStats(restaurantId) {
   return stats;
 }
 
-function useCancelStats(restaurantId, startISO, endISO) {
+function useCancelStats(apiClient, restaurantId, startISO, endISO) {
   const [stats, setStats] = useState(null);
+
   useEffect(() => {
-    if (!restaurantId) return;
+    if (!apiClient || !restaurantId || !startISO || !endISO) return;
+    let cancelled = false;
     (async () => {
-      // Fetch cancelled orders and total order count in parallel
-      const [cancelRes, totalRes] = await Promise.all([
-        supabase.from("orders")
-          .select("total_amount")
-          .eq("restaurant_id", restaurantId)
-          .eq("status", "cancelled")
-          .gte("created_at", startISO)
-          .lte("created_at", endISO),
-        supabase.from("orders")
-          .select("*", { count: "exact", head: true })
-          .eq("restaurant_id", restaurantId)
-          .gte("created_at", startISO)
-          .lte("created_at", endISO),
-      ]);
-
-      const cancelledOrders = cancelRes.data ?? [];
-      const totalCount      = totalRes.count ?? 0;
-      const cancelCount     = cancelledOrders.length;
-      // Note: these are orders with status='cancelled' — orders explicitly cancelled
-      // by manager. Does NOT include tokens with no orders placed.
-      // cancellation_reason not yet stored on orders table.
-      const revLost = cancelledOrders.reduce((s, o) => s + (o.total_amount ?? 0), 0);
-      const rate    = totalCount > 0 ? Math.round((cancelCount / totalCount) * 100) : 0;
-
-      setStats({
-        cancelled:   cancelCount,
-        voided:      0,
-        revLost,
-        topReason:   "—", // cancellation_reason column not yet on orders table
-        topItem:     "—",
-        rate,
-        totalOrders: totalCount,
-      });
+      try {
+        const res = await apiClient.get('/api/dashboard/cancel-stats', {
+          params: { start: startISO, end: endISO },
+        });
+        if (cancelled) return;
+        const d = res.data;
+        setStats({
+          // Order-level cancellations (manager cancelled a placed order)
+          cancelled:     d.orderCancels,
+          revLost:       d.orderRevLost,
+          totalOrders:   d.totalOrders,
+          rate:          d.orderRate,
+          // Booking-level cancellations (customer cancelled booking/flow)
+          bookingCancels: d.bookingCancels,
+          totalBookings:  d.totalBookings,
+          bookingRate:    d.bookingRate,
+        });
+      } catch (err) {
+        console.error('[useCancelStats]', err.message);
+      }
     })();
-  }, [restaurantId, startISO, endISO]);
+    return () => { cancelled = true; };
+  }, [apiClient, restaurantId, startISO, endISO]);
+
   return stats;
 }
 
@@ -820,7 +838,7 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
   const menuItems   = useMenuItems(restaurantId, startISO, endISO);
   const tables      = useTables(restaurantId);
   const kotStats    = useKotStats(restaurantId);
-  const cancelStats = useCancelStats(restaurantId, startISO, endISO);
+  const cancelStats = useCancelStats(apiClient, restaurantId, startISO, endISO);
   const wabaInfo    = useWABAInfo(apiClient);
   const waOrders    = useWAOrders(apiClient, startISO, endISO);
 
