@@ -1,3 +1,4 @@
+// Dashboard v202605210249
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { supabase, useAuth } from "../contexts/AuthContext";
 // ── Export to Excel (no npm install — uses plain CSV download) ────────────────
@@ -396,12 +397,12 @@ function useKpiData(restaurantId, startISO, endISO) {
     (async () => {
       const [{ data: orders }, { data: tokens }] = await Promise.all([
         supabase.from("orders").select("total_amount").eq("restaurant_id", restaurantId).not("status", "eq", "cancelled").gte("created_at", startISO).lte("created_at", endISO),
-        supabase.from("walk_in_tokens").select("created_at, seated_at").eq("restaurant_id", restaurantId).gte("arrived_at", startISO).lte("arrived_at", endISO),
+        supabase.from("walk_in_tokens").select("arrived_at, seated_at").eq("restaurant_id", restaurantId).gte("arrived_at", startISO).lte("arrived_at", endISO),
       ]);
       const totalRevenue = (orders ?? []).reduce((s, o) => s + (o.total_amount ?? 0), 0);
       const totalOrders  = (orders ?? []).length;
       const seated = (tokens ?? []).filter(t => t.seated_at);
-      const avgMins = seated.length ? Math.round(seated.reduce((s, t) => s + (new Date(t.seated_at) - new Date(t.created_at)) / 60000, 0) / seated.length) : null;
+      const avgMins = seated.length ? Math.round(seated.reduce((s, t) => s + (new Date(t.seated_at) - new Date(t.arrived_at ?? t.created_at)) / 60000, 0) / seated.length) : null;
       setData({ totalRevenue, totalOrders, aov: totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0, totalCovers: (orders ?? []).length, tokensIssued: (tokens ?? []).length, avgDining: avgMins, avgWait: avgMins });
     })();
   }, [restaurantId, startISO, endISO]);
@@ -500,7 +501,7 @@ function useCancelStats(restaurantId, startISO, endISO) {
     (async () => {
       const [{ data: cancelled }, { data: voided }] = await Promise.all([
         supabase.from("orders").select("total_amount").eq("restaurant_id", restaurantId).eq("status", "cancelled").gte("created_at", startISO).lte("created_at", endISO),
-        supabase.from("order_items").select("unit_price, quantity, menu_items(name)").eq("restaurant_id", restaurantId).gte("created_at", startISO).lte("created_at", endISO).limit(0), // voided not implemented yet
+        Promise.resolve({ data: [] }), // voided items not implemented yet
       ]);
       const reasonMap = {}, itemMap = {};
       (voided ?? []).forEach(v => { const r = v.void_reason ?? "Unknown"; reasonMap[r] = (reasonMap[r] ?? 0) + 1; const n = v.menu_items?.name ?? "Unknown"; itemMap[n] = (itemMap[n] ?? 0) + 1; });
