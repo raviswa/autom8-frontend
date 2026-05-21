@@ -395,14 +395,14 @@ function useKpiData(restaurantId, startISO, endISO) {
     if (!restaurantId) return;
     (async () => {
       const [{ data: orders }, { data: tokens }] = await Promise.all([
-        supabase.from("orders").select("total_amount, pax").eq("restaurant_id", restaurantId).eq("status", "completed").gte("created_at", startISO).lte("created_at", endISO),
+        supabase.from("orders").select("total_amount").eq("restaurant_id", restaurantId).not("status", "eq", "cancelled").gte("created_at", startISO).lte("created_at", endISO),
         supabase.from("walk_in_tokens").select("created_at, seated_at").eq("restaurant_id", restaurantId).gte("arrived_at", startISO).lte("arrived_at", endISO),
       ]);
       const totalRevenue = (orders ?? []).reduce((s, o) => s + (o.total_amount ?? 0), 0);
       const totalOrders  = (orders ?? []).length;
       const seated = (tokens ?? []).filter(t => t.seated_at);
       const avgMins = seated.length ? Math.round(seated.reduce((s, t) => s + (new Date(t.seated_at) - new Date(t.created_at)) / 60000, 0) / seated.length) : null;
-      setData({ totalRevenue, totalOrders, aov: totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0, totalCovers: (orders ?? []).reduce((s, o) => s + (o.pax ?? 0), 0), tokensIssued: (tokens ?? []).length, avgDining: avgMins, avgWait: avgMins });
+      setData({ totalRevenue, totalOrders, aov: totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0, totalCovers: (orders ?? []).length, tokensIssued: (tokens ?? []).length, avgDining: avgMins, avgWait: avgMins });
     })();
   }, [restaurantId, startISO, endISO]);
   return data;
@@ -414,7 +414,7 @@ function useChartData(restaurantId, startISO, endISO, preset) {
     if (!restaurantId) return;
     setData(null); // clear old data immediately to avoid stale chart
     (async () => {
-      const { data: orders } = await supabase.from("orders").select("total_amount, pax, created_at").eq("restaurant_id", restaurantId).eq("status", "completed").gte("created_at", startISO).lte("created_at", endISO);
+      const { data: orders } = await supabase.from("orders").select("total_amount, created_at").eq("restaurant_id", restaurantId).not("status", "eq", "cancelled").gte("created_at", startISO).lte("created_at", endISO);
       if (!orders) return;
       const byLabel = {};
       orders.forEach(o => {
@@ -425,7 +425,7 @@ function useChartData(restaurantId, startISO, endISO, preset) {
         if (!byLabel[label]) byLabel[label] = { revenue: 0, orders: 0, covers: 0 };
         byLabel[label].revenue += o.total_amount ?? 0;
         byLabel[label].orders  += 1;
-        byLabel[label].covers  += o.pax ?? 0;
+        byLabel[label].covers  += 1;
       });
       const labels = Object.keys(byLabel);
       setData({ labels, revenue: labels.map(l => byLabel[l].revenue), orders: labels.map(l => byLabel[l].orders), covers: labels.map(l => byLabel[l].covers) });
@@ -443,7 +443,7 @@ function useMenuItems(restaurantId, startISO, endISO) {
       const { data: orders } = await supabase.from("orders")
         .select("id")
         .eq("restaurant_id", restaurantId)
-        .eq("status", "completed")
+        .not("status", "eq", "cancelled")
         .gte("created_at", startISO)
         .lte("created_at", endISO);
       if (!orders?.length) { setItems([]); return; }
@@ -515,13 +515,15 @@ function useCancelStats(restaurantId, startISO, endISO) {
 function useWABAInfo(apiClient) {
   const [info, setInfo] = useState(undefined); // undefined = loading, null = not found
   useEffect(() => {
-    if (!apiClient) return;
+    if (!apiClient) { console.warn('[useWABAInfo] no apiClient'); return; }
     (async () => {
       try {
+        console.log('[useWABAInfo] calling /api/dashboard/waba...');
         const res = await apiClient.get('/api/dashboard/waba');
+        console.log('[useWABAInfo] response:', res.data);
         setInfo(res.data?.restaurant ?? null);
       } catch (err) {
-        console.warn('[useWABAInfo] failed:', err?.response?.data || err.message);
+        console.error('[useWABAInfo] failed:', err?.response?.status, err?.response?.data || err.message);
         setInfo(null);
       }
     })();
@@ -533,16 +535,18 @@ function useWABAInfo(apiClient) {
 function useWAOrders(apiClient, startISO, endISO) {
   const [orders, setOrders] = useState(null);
   useEffect(() => {
-    if (!apiClient) return;
+    if (!apiClient) { console.warn('[useWAOrders] no apiClient'); return; }
     setOrders(null);
     (async () => {
       try {
+        console.log('[useWAOrders] calling /api/dashboard/wa-orders...', { startISO, endISO });
         const res = await apiClient.get('/api/dashboard/wa-orders', {
           params: { start: startISO, end: endISO },
         });
+        console.log('[useWAOrders] response:', res.data?.orders?.length, 'orders');
         setOrders(res.data?.orders ?? []);
       } catch (err) {
-        console.warn('[useWAOrders] failed:', err?.response?.data || err.message);
+        console.error('[useWAOrders] failed:', err?.response?.status, err?.response?.data || err.message);
         setOrders([]);
       }
     })();
