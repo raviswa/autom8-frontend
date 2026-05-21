@@ -3,10 +3,12 @@ import { supabase } from "../contexts/AuthContext";
 import { createClient } from "@supabase/supabase-js";
 
 // Munafe Chat Supabase (conversation / WABA data)
-const supabaseChat = createClient(
-  "https://ttlhffzgkpneshbawdhb.supabase.co",
-  import.meta.env.VITE_MUNAFE_CHAT_ANON_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY
-);
+// Requires VITE_MUNAFE_CHAT_ANON_KEY in Railway env vars
+// Get it from: ttlhffzgkpneshbawdhb.supabase.co → Settings → API → anon public
+const _chatKey = import.meta.env.VITE_MUNAFE_CHAT_ANON_KEY;
+const supabaseChat = _chatKey
+  ? createClient("https://ttlhffzgkpneshbawdhb.supabase.co", _chatKey)
+  : null;
 
 // ── Export to Excel (no npm install — uses plain CSV download) ────────────────
 function exportToCSV(rows, filename) {
@@ -510,25 +512,29 @@ function useCancelStats(restaurantId, startISO, endISO) {
 
 // ─── Hook: WABA info from Munafe Chat restaurants table ───────────────────────
 function useWABAInfo(restaurantId) {
-  const [info, setInfo] = useState(null);
+  const [info, setInfo] = useState(undefined); // undefined = loading, null = not found
   useEffect(() => {
-    if (!restaurantId) return;
+    if (!supabaseChat) { setInfo(null); return; }
     (async () => {
-      const { data, error } = await supabaseChat
-        .from("restaurants")
-        .select("name, whatsapp_number, manager_phone, waba_id, timezone, dining_duration_minutes, payment_mode")
-        .eq("id", restaurantId)
-        .single();
-      if (!error && data) setInfo(data);
-      else {
-        // fallback: try matching by restaurant name / any record
-        const { data: first } = await supabaseChat
+      // Try by id first, then fall back to first record
+      let data = null;
+      if (restaurantId) {
+        const res = await supabaseChat
           .from("restaurants")
-          .select("name, whatsapp_number, manager_phone, waba_id, timezone, dining_duration_minutes, payment_mode")
-          .limit(1)
-          .single();
-        if (first) setInfo(first);
+          .select("id, name, whatsapp_number, manager_phone, timezone, dining_duration_minutes, payment_mode")
+          .eq("id", restaurantId)
+          .maybeSingle();
+        data = res.data;
       }
+      if (!data) {
+        const res = await supabaseChat
+          .from("restaurants")
+          .select("id, name, whatsapp_number, manager_phone, timezone, dining_duration_minutes, payment_mode")
+          .limit(1)
+          .maybeSingle();
+        data = res.data;
+      }
+      setInfo(data ?? null);
     })();
   }, [restaurantId]);
   return info;
@@ -538,32 +544,46 @@ function useWABAInfo(restaurantId) {
 function useWAOrders(restaurantId, startISO, endISO) {
   const [orders, setOrders] = useState(null);
   useEffect(() => {
-    if (!restaurantId) return;
+    if (!supabaseChat) { setOrders([]); return; }
     setOrders(null);
     (async () => {
-      // Try bookings table first
+      // bookings table in Munafe Chat — no restaurant_id filter needed
+      // since the chat DB is single-tenant for this restaurant
       const { data, error } = await supabaseChat
         .from("bookings")
-        .select("id, created_at, service_type, status, total_amount, party_size, token_number, customers(name, phone)")
+        .select("id, created_at, service_type, status, total_amount, party_size, token_number, customer_id, customers!inner(name, phone)")
         .gte("created_at", startISO)
         .lte("created_at", endISO)
         .order("created_at", { ascending: false })
         .limit(500);
-      if (!error) {
-        setOrders(data ?? []);
-      } else {
-        // fallback: conversation_events
-        const { data: evts } = await supabaseChat
-          .from("conversation_events")
-          .select("id, created_at, event_type, customer_id")
-          .gte("created_at", startISO)
-          .lte("created_at", endISO)
-          .order("created_at", { ascending: false })
-          .limit(500);
-        setOrders(evts ?? []);
+
+      if (!error && data) {
+        setOrders(data);
+        return;
       }
+
+      // fallback: bookings without join
+      const { data: plain } = await supabaseChat
+        .from("bookings")
+        .select("id, created_at, service_type, status, total_amount, party_size, token_number, customer_id")
+        .gte("created_at", startISO)
+        .lte("created_at", endISO)
+        .order("created_at", { ascending: false })
+        .limit(500);
+
+      if (plain) { setOrders(plain); return; }
+
+      // last fallback: conversation_events
+      const { data: evts } = await supabaseChat
+        .from("conversation_events")
+        .select("id, created_at, event_type, customer_id, data")
+        .gte("created_at", startISO)
+        .lte("created_at", endISO)
+        .order("created_at", { ascending: false })
+        .limit(500);
+      setOrders(evts ?? []);
     })();
-  }, [restaurantId, startISO, endISO]);
+  }, [startISO, endISO]);
   return orders;
 }
 
@@ -576,7 +596,13 @@ function WABAPanel({ info }) {
     </div>
   );
 
-  if (!info) return (
+  // undefined = still loading, null = not found/no key
+  if (info === undefined) return (
+    <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "center", color: "#aaa", fontSize: 13 }}>
+      Loading...
+    </div>
+  );
+  if (info === null) return (
     <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "20px 24px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <span style={{ fontSize: 14, fontWeight: 500, color: "#111" }}>WhatsApp Business</span>
