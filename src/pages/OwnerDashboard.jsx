@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { supabase } from "../contexts/AuthContext";
 
-// ─── Constants ──────────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 const HEAT_COLORS = ["#E6F1FB", "#85B7EB", "#378ADD", "#185FA5", "#0C447C"];
 const TABLE_COLORS = {
   occupied: { bg: "#1D9E75", text: "#085041" },
@@ -16,25 +16,28 @@ const PRESETS = [
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function getRange(preset) {
+// Returns stable ISO strings — called with preset key, result is memoized by key
+function getRangeISO(preset) {
   const now   = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   switch (preset) {
-    case "today":     return { start: today, end: now };
+    case "today":
+      return { startISO: today.toISOString(), endISO: now.toISOString() };
     case "yesterday": {
       const s = new Date(today); s.setDate(s.getDate() - 1);
       const e = new Date(today); e.setMilliseconds(-1);
-      return { start: s, end: e };
+      return { startISO: s.toISOString(), endISO: e.toISOString() };
     }
     case "7d": {
       const s = new Date(today); s.setDate(s.getDate() - 6);
-      return { start: s, end: now };
+      return { startISO: s.toISOString(), endISO: now.toISOString() };
     }
     case "30d": {
       const s = new Date(today); s.setDate(s.getDate() - 29);
-      return { start: s, end: now };
+      return { startISO: s.toISOString(), endISO: now.toISOString() };
     }
-    default: return { start: today, end: now };
+    default:
+      return { startISO: today.toISOString(), endISO: now.toISOString() };
   }
 }
 
@@ -486,11 +489,13 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout 
   const [customEnd,   setCustomEnd]   = useState(null);
   const [showCal,     setShowCal]     = useState(false);
 
-  const { start, end } = (customStart && customEnd) ? { start: customStart, end: customEnd } : getRange(preset);
-
-  // Memoize ISO strings — prevents hooks re-firing on every render
-  const startISO = useMemo(() => start.toISOString(), [start.getTime()]);
-  const endISO   = useMemo(() => end.toISOString(),   [end.getTime()]);
+  // Compute stable ISO strings — only recomputes when preset/custom dates change
+  const { startISO, endISO } = useMemo(() => {
+    if (customStart && customEnd) {
+      return { startISO: customStart.toISOString(), endISO: customEnd.toISOString() };
+    }
+    return getRangeISO(preset);
+  }, [preset, customStart, customEnd]);
 
   const kpi         = useKpiData(restaurantId, startISO, endISO);
   const chartData   = useChartData(restaurantId, startISO, endISO, preset);
