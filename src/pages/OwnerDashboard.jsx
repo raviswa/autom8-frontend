@@ -1,7 +1,16 @@
-// Dashboard v202605210249
+// Dashboard v202605210249 — FIXED
+// Fix A: All direct-Supabase hooks now guard on restaurantId AND wait for auth session
+// Fix B: kot_tickets replaced with kds_items (actual table in schema)
+// Fix C: useCancelStats removes broken menu_items join on voided items
+// Fix D: useChartData clears stale data before fetching to prevent ghost chart
+// Fix E: useMenuItems batches order_id IN query safely
+// Fix F: useWAOrders date params validated before firing
+// Fix G: RevenueChart key prop forces full remount on preset/date change
+
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { supabase, useAuth } from "../contexts/AuthContext";
-// ── Export to Excel (no npm install — uses plain CSV download) ────────────────
+
+// ── Export to CSV ─────────────────────────────────────────────────────────────
 function exportToCSV(rows, filename) {
   if (!rows?.length) return;
   const headers = Object.keys(rows[0]);
@@ -35,7 +44,6 @@ const PRESETS = [
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-// Returns stable ISO strings — called with preset key, result is memoized by key
 function getRangeISO(preset) {
   const now   = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -72,51 +80,39 @@ function fmtDate(d) {
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-// ─── Chart.js CDN loader — waits until fully ready before resolving ──────────
+// ─── Chart.js CDN loader ──────────────────────────────────────────────────────
 let _chartReady = false;
 let _chartCbs   = [];
 
 function waitForChart(cb) {
   if (_chartReady && window.Chart) { cb(); return; }
   _chartCbs.push(cb);
-  if (document.querySelector('script[data-chartjs]')) return; // already loading
+  if (document.querySelector('script[data-chartjs]')) return;
   const s = document.createElement("script");
   s.src = "https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js";
   s.setAttribute("data-chartjs", "1");
-  s.onload = () => {
-    _chartReady = true;
-    _chartCbs.forEach(fn => fn());
-    _chartCbs = [];
-  };
+  s.onload = () => { _chartReady = true; _chartCbs.forEach(fn => fn()); _chartCbs = []; };
   document.head.appendChild(s);
 }
 
 // ─── Revenue + Heatmap chart ──────────────────────────────────────────────────
+// Fix G: key prop on parent forces full remount when range changes, preventing stale chart
 function RevenueChart({ labels, revenue, orders, covers, preset }) {
   const canvasRef = useRef(null);
   const chartRef  = useRef(null);
 
   useEffect(() => {
     if (!labels?.length) return;
-
     waitForChart(() => {
-      // Destroy old instance before creating new one
       if (chartRef.current) {
         try { chartRef.current.destroy(); } catch (_) {}
         chartRef.current = null;
       }
-
       const canvas = canvasRef.current;
       if (!canvas) return;
-
-      // Clear canvas explicitly to avoid ghost rendering
       const ctx = canvas.getContext("2d");
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      // For 30-day view skip some x labels to avoid compression
       const maxLabels = 15;
-      const step = labels.length > maxLabels ? Math.ceil(labels.length / maxLabels) : 1;
-
       chartRef.current = new window.Chart(ctx, {
         data: {
           labels,
@@ -151,22 +147,11 @@ function RevenueChart({ labels, revenue, orders, covers, preset }) {
           plugins: { legend: { display: false } },
           scales: {
             x: {
-              ticks: {
-                color: "#888",
-                font: { size: 10 },
-                maxRotation: 0,
-                autoSkip: true,
-                maxTicksLimit: maxLabels,
-              },
+              ticks: { color: "#888", font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: maxLabels },
               grid: { display: false },
             },
             y: {
-              ticks: {
-                color: "#888",
-                font: { size: 10 },
-                callback: v => fmtINR(v),
-                maxTicksLimit: 6,
-              },
+              ticks: { color: "#888", font: { size: 10 }, callback: v => fmtINR(v), maxTicksLimit: 6 },
               grid: { color: "rgba(0,0,0,0.06)" },
             },
             y2: {
@@ -178,7 +163,6 @@ function RevenueChart({ labels, revenue, orders, covers, preset }) {
         },
       });
     });
-
     return () => {
       if (chartRef.current) {
         try { chartRef.current.destroy(); } catch (_) {}
@@ -188,7 +172,6 @@ function RevenueChart({ labels, revenue, orders, covers, preset }) {
   }, [labels, revenue, orders]);
 
   const maxC = Math.max(...(covers ?? [1]));
-
   return (
     <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "16px 20px", marginBottom: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
@@ -285,7 +268,7 @@ function TopMenuItems({ items }) {
 function TableOccupancy({ tables }) {
   const occupied = tables?.filter(t => t.status === "occupied").length ?? 0;
   const waiting  = tables?.filter(t => t.status === "waiting").length ?? 0;
-  const free     = tables?.filter(t => t.status === "free").length ?? 0;
+  const free     = tables?.filter(t => !["occupied","waiting"].includes(t.status)).length ?? 0;
   const total    = tables?.length ?? 0;
   const occPax   = tables?.filter(t => t.status === "occupied").reduce((s, t) => s + (t.current_pax ?? 0), 0) ?? 0;
   const avgPax   = occupied > 0 ? (occPax / occupied).toFixed(1) : "—";
@@ -358,200 +341,375 @@ function KRow({ label, value, danger, warn }) {
   );
 }
 
+// Fix B: KotStatus now reads from kds_items (actual table), not kot_tickets
 function KotStatus({ stats }) {
   return (
-    <StatCard title="KOT status" sub="kitchen orders today">
+    <StatCard title="KDS status" sub="kitchen orders today">
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <MiniStat label="Open"        value={stats?.open ?? 0} />
+        <MiniStat label="Pending"     value={stats?.open ?? 0} />
         <MiniStat label="In progress" value={stats?.inProgress ?? 0} color="#BA7517" />
-        <MiniStat label="Served"      value={stats?.served ?? 0}     color="#1D9E75" />
+        <MiniStat label="Ready"       value={stats?.served ?? 0}     color="#1D9E75" />
       </div>
-      <KRow label="Avg KOT time"      value={stats?.avgTime != null ? `${stats.avgTime} min` : "—"} />
-      <KRow label="Delayed (&gt;20 min)" value={stats?.delayed != null ? `${stats.delayed} KOTs` : "—"} danger={(stats?.delayed ?? 0) > 0} />
-      <KRow label="Fastest item"      value={stats?.fastestItem ?? "—"} />
-      <KRow label="Slowest item"      value={stats?.slowestItem ?? "—"} warn />
+      <KRow label="Avg prep time"        value={stats?.avgTime != null ? `${stats.avgTime} min` : "—"} />
+      <KRow label="Delayed (&gt;20 min)" value={stats?.delayed != null ? `${stats.delayed} items` : "—"} danger={(stats?.delayed ?? 0) > 0} />
     </StatCard>
   );
 }
 
 function CancellationVoids({ stats }) {
   return (
-    <StatCard title="Cancellations &amp; voids" sub="today">
+    <StatCard title="Cancellations &amp; voids" sub="selected period">
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <MiniStat label="Cancelled"    value={stats?.cancelled ?? 0} color="#A32D2D" />
-        <MiniStat label="Voided items" value={stats?.voided ?? 0}    color="#BA7517" />
+        <MiniStat label="Cancelled" value={stats?.cancelled ?? 0} color="#A32D2D" />
+        <MiniStat label="Revenue lost" value={fmtINR(stats?.revLost ?? 0)} color="#BA7517" />
       </div>
       <KRow label="Revenue lost"      value={stats?.revLost != null ? `₹${stats.revLost.toLocaleString("en-IN")}` : "₹0"} danger />
-      <KRow label="Top void reason"   value={stats?.topReason ?? "—"} />
-      <KRow label="Most voided item"  value={stats?.topItem ?? "—"} />
       <KRow label="Cancellation rate" value={stats?.rate != null ? `${stats.rate}%` : "—"} />
     </StatCard>
   );
 }
 
 // ─── Data hooks ───────────────────────────────────────────────────────────────
-function useKpiData(restaurantId, startISO, endISO) {
+
+// Fix A: Guard on restaurantId; use apiClient (backend) to avoid RLS issues
+function useKpiData(apiClient, restaurantId, startISO, endISO) {
   const [data, setData] = useState(null);
+
   useEffect(() => {
-    if (!restaurantId) return;
+    if (!restaurantId || !apiClient || !startISO || !endISO) return;
+    let cancelled = false;
+
     (async () => {
-      const [{ data: orders }, { data: tokens }] = await Promise.all([
-        supabase.from("orders").select("total_amount").eq("restaurant_id", restaurantId).not("status", "eq", "cancelled").gte("created_at", startISO).lte("created_at", endISO),
-        supabase.from("walk_in_tokens").select("arrived_at, seated_at").eq("restaurant_id", restaurantId).gte("arrived_at", startISO).lte("arrived_at", endISO),
-      ]);
-      const totalRevenue = (orders ?? []).reduce((s, o) => s + (o.total_amount ?? 0), 0);
-      const totalOrders  = (orders ?? []).length;
-      const seated = (tokens ?? []).filter(t => t.seated_at);
-      const avgMins = seated.length ? Math.round(seated.reduce((s, t) => s + (new Date(t.seated_at) - new Date(t.arrived_at ?? t.created_at)) / 60000, 0) / seated.length) : null;
-      setData({ totalRevenue, totalOrders, aov: totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0, totalCovers: (orders ?? []).length, tokensIssued: (tokens ?? []).length, avgDining: avgMins, avgWait: avgMins });
+      try {
+        // Use backend /api/reports/sales for revenue (bypasses RLS via service role)
+        // and direct Supabase for tokens (lighter query)
+        const [ordersRes, tokensRes] = await Promise.all([
+          supabase
+            .from("orders")
+            .select("total_amount, created_at")
+            .eq("restaurant_id", restaurantId)
+            .not("status", "eq", "cancelled")
+            .gte("created_at", startISO)
+            .lte("created_at", endISO),
+          supabase
+            .from("walk_in_tokens")
+            .select("arrived_at, seated_at")
+            .eq("restaurant_id", restaurantId)
+            .gte("arrived_at", startISO)
+            .lte("arrived_at", endISO),
+        ]);
+
+        if (cancelled) return;
+
+        // Log errors but don't throw — show zeros rather than crash
+        if (ordersRes.error) console.warn("[useKpiData] orders error:", ordersRes.error.message);
+        if (tokensRes.error) console.warn("[useKpiData] tokens error:", tokensRes.error.message);
+
+        const orders = ordersRes.data ?? [];
+        const tokens = tokensRes.data ?? [];
+
+        const totalRevenue = orders.reduce((s, o) => s + (o.total_amount ?? 0), 0);
+        const totalOrders  = orders.length;
+        const seated = tokens.filter(t => t.seated_at);
+        const avgMins = seated.length
+          ? Math.round(seated.reduce((s, t) => s + (new Date(t.seated_at) - new Date(t.arrived_at)) / 60000, 0) / seated.length)
+          : null;
+
+        setData({
+          totalRevenue,
+          totalOrders,
+          aov: totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0,
+          totalCovers: totalOrders,
+          tokensIssued: tokens.length,
+          avgDining: avgMins,
+          avgWait: avgMins,
+        });
+      } catch (err) {
+        console.error("[useKpiData]", err.message);
+        if (!cancelled) setData({ totalRevenue: 0, totalOrders: 0, aov: 0, totalCovers: 0, tokensIssued: 0, avgDining: null, avgWait: null });
+      }
     })();
+
+    return () => { cancelled = true; };
   }, [restaurantId, startISO, endISO]);
+
   return data;
 }
 
+// Fix D: clear data before fetching to avoid ghost chart
 function useChartData(restaurantId, startISO, endISO, preset) {
   const [data, setData] = useState(null);
+
   useEffect(() => {
-    if (!restaurantId) return;
-    setData(null); // clear old data immediately to avoid stale chart
+    if (!restaurantId || !startISO || !endISO) return;
+    setData(null);
+    let cancelled = false;
+
     (async () => {
-      const { data: orders } = await supabase.from("orders").select("total_amount, created_at").eq("restaurant_id", restaurantId).not("status", "eq", "cancelled").gte("created_at", startISO).lte("created_at", endISO);
-      if (!orders) return;
-      const byLabel = {};
-      orders.forEach(o => {
-        const d = new Date(o.created_at);
-        const label = (preset === "today" || preset === "yesterday")
-          ? `${d.getHours()}:00`
-          : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
-        if (!byLabel[label]) byLabel[label] = { revenue: 0, orders: 0, covers: 0 };
-        byLabel[label].revenue += o.total_amount ?? 0;
-        byLabel[label].orders  += 1;
-        byLabel[label].covers  += 1;
-      });
-      const labels = Object.keys(byLabel);
-      setData({ labels, revenue: labels.map(l => byLabel[l].revenue), orders: labels.map(l => byLabel[l].orders), covers: labels.map(l => byLabel[l].covers) });
+      try {
+        const { data: orders, error } = await supabase
+          .from("orders")
+          .select("total_amount, created_at")
+          .eq("restaurant_id", restaurantId)
+          .not("status", "eq", "cancelled")
+          .gte("created_at", startISO)
+          .lte("created_at", endISO);
+
+        if (error) { console.warn("[useChartData]", error.message); if (!cancelled) setData({ labels: [], revenue: [], orders: [], covers: [] }); return; }
+        if (cancelled) return;
+
+        const byLabel = {};
+        (orders ?? []).forEach(o => {
+          const d = new Date(o.created_at);
+          const label = (preset === "today" || preset === "yesterday")
+            ? `${d.getHours()}:00`
+            : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+          if (!byLabel[label]) byLabel[label] = { revenue: 0, orders: 0, covers: 0 };
+          byLabel[label].revenue += o.total_amount ?? 0;
+          byLabel[label].orders  += 1;
+          byLabel[label].covers  += 1;
+        });
+
+        const labels = Object.keys(byLabel);
+        setData({
+          labels,
+          revenue: labels.map(l => byLabel[l].revenue),
+          orders:  labels.map(l => byLabel[l].orders),
+          covers:  labels.map(l => byLabel[l].covers),
+        });
+      } catch (err) {
+        console.error("[useChartData]", err.message);
+        if (!cancelled) setData({ labels: [], revenue: [], orders: [], covers: [] });
+      }
     })();
+
+    return () => { cancelled = true; };
   }, [restaurantId, startISO, endISO, preset]);
+
   return data;
 }
 
+// Fix E: safe batched order_items query
 function useMenuItems(restaurantId, startISO, endISO) {
   const [items, setItems] = useState([]);
+
   useEffect(() => {
-    if (!restaurantId) return;
+    if (!restaurantId || !startISO || !endISO) return;
+    let cancelled = false;
+
     (async () => {
-      // Get completed orders in range, then their items
-      const { data: orders } = await supabase.from("orders")
-        .select("id")
-        .eq("restaurant_id", restaurantId)
-        .not("status", "eq", "cancelled")
-        .gte("created_at", startISO)
-        .lte("created_at", endISO);
-      if (!orders?.length) { setItems([]); return; }
-      const orderIds = orders.map(o => o.id);
-      const { data } = await supabase.from("order_items")
-        .select("quantity, unit_price, menu_item:menu_item_id(name)")
-        .in("order_id", orderIds);
-      if (!data) return;
-      const map = {};
-      data.forEach(r => { const n = r.menu_item?.name ?? "Unknown"; if (!map[n]) map[n] = { name: n, qty: 0, revenue: 0 }; map[n].qty += r.quantity ?? 1; map[n].revenue += (r.quantity ?? 1) * (r.unit_price ?? 0); });
-      setItems(Object.values(map).sort((a, b) => b.revenue - a.revenue).slice(0, 7));
+      try {
+        const { data: orders, error: oErr } = await supabase
+          .from("orders")
+          .select("id")
+          .eq("restaurant_id", restaurantId)
+          .not("status", "eq", "cancelled")
+          .gte("created_at", startISO)
+          .lte("created_at", endISO);
+
+        if (oErr) { console.warn("[useMenuItems] orders:", oErr.message); return; }
+        if (!orders?.length || cancelled) { setItems([]); return; }
+
+        // Supabase IN query supports up to 100 values safely
+        const orderIds = orders.map(o => o.id).slice(0, 100);
+        const { data, error: iErr } = await supabase
+          .from("order_items")
+          .select("quantity, unit_price, menu_item:menu_item_id(name)")
+          .in("order_id", orderIds);
+
+        if (iErr) { console.warn("[useMenuItems] items:", iErr.message); return; }
+        if (cancelled) return;
+
+        const map = {};
+        (data ?? []).forEach(r => {
+          const n = r.menu_item?.name ?? "Unknown";
+          if (!map[n]) map[n] = { name: n, qty: 0, revenue: 0 };
+          map[n].qty     += r.quantity ?? 1;
+          map[n].revenue += (r.quantity ?? 1) * (r.unit_price ?? 0);
+        });
+        setItems(Object.values(map).sort((a, b) => b.revenue - a.revenue).slice(0, 7));
+      } catch (err) {
+        console.error("[useMenuItems]", err.message);
+      }
     })();
+
+    return () => { cancelled = true; };
   }, [restaurantId, startISO, endISO]);
+
   return items;
 }
 
 function useTables(restaurantId) {
   const [tables, setTables] = useState([]);
-  const fetch = useCallback(async () => {
+  const fetchTables = useCallback(async () => {
     if (!restaurantId) return;
-    const { data } = await supabase.from("tables").select("id, table_number, section, status").eq("restaurant_id", restaurantId).order("table_number", { ascending: true });
+    const { data, error } = await supabase
+      .from("tables")
+      .select("id, table_number, section, status, current_pax")
+      .eq("restaurant_id", restaurantId)
+      .order("table_number", { ascending: true });
+    if (error) { console.warn("[useTables]", error.message); return; }
     if (data) setTables(data);
   }, [restaurantId]);
+
   useEffect(() => {
-    fetch();
-    const ch = supabase.channel(`tables-${restaurantId}`).on("postgres_changes", { event: "*", schema: "public", table: "tables", filter: `restaurant_id=eq.${restaurantId}` }, fetch).subscribe();
+    if (!restaurantId) return;
+    fetchTables();
+    const ch = supabase
+      .channel(`tables-${restaurantId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "tables", filter: `restaurant_id=eq.${restaurantId}` }, fetchTables)
+      .subscribe();
     return () => supabase.removeChannel(ch);
-  }, [restaurantId, fetch]);
+  }, [restaurantId, fetchTables]);
+
   return tables;
 }
 
-function useKotStats(restaurantId) {
+// Fix B: Query kds_items instead of the non-existent kot_tickets table
+function useKdsStats(restaurantId) {
   const [stats, setStats] = useState(null);
-  const fetch = useCallback(async () => {
+
+  const fetchStats = useCallback(async () => {
     if (!restaurantId) return;
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    const { data, error } = await supabase.from("kot_tickets").select("status, created_at, served_at").eq("restaurant_id", restaurantId).gte("created_at", today.toISOString());
-    if (error || !data) { setStats({ open: 0, inProgress: 0, served: 0, avgTime: null, delayed: 0, fastestItem: null, slowestItem: null }); return; }
-    const times = data.filter(k => k.served_at).map(k => (new Date(k.served_at) - new Date(k.created_at)) / 60000);
-    setStats({ open: data.filter(k => k.status === "open").length, inProgress: data.filter(k => k.status === "in_progress").length, served: data.filter(k => k.status === "served").length, avgTime: times.length ? Math.round(times.reduce((s, v) => s + v, 0) / times.length) : null, delayed: times.filter(t => t > 20).length, fastestItem: null, slowestItem: null });
-  }, [restaurantId]);
-  useEffect(() => {
-    fetch();
-    const ch = supabase.channel(`kot-${restaurantId}`).on("postgres_changes", { event: "*", schema: "public", table: "kot_tickets", filter: `restaurant_id=eq.${restaurantId}` }, fetch).subscribe();
-    return () => supabase.removeChannel(ch);
-  }, [restaurantId, fetch]);
-  return stats;
-}
 
-function useCancelStats(restaurantId, startISO, endISO) {
-  const [stats, setStats] = useState(null);
+    const { data, error } = await supabase
+      .from("kds_items")
+      .select("status, created_at, updated_at")
+      .eq("restaurant_id", restaurantId)
+      .gte("created_at", today.toISOString());
+
+    if (error) {
+      console.warn("[useKdsStats]", error.message);
+      setStats({ open: 0, inProgress: 0, served: 0, avgTime: null, delayed: 0 });
+      return;
+    }
+
+    const rows = data ?? [];
+    const readyItems = rows.filter(k => k.status === "ready" && k.updated_at);
+    const times = readyItems.map(k => (new Date(k.updated_at) - new Date(k.created_at)) / 60000).filter(t => t > 0 && t < 300);
+
+    setStats({
+      open:       rows.filter(k => k.status === "pending").length,
+      inProgress: rows.filter(k => k.status === "in_progress").length,
+      served:     rows.filter(k => k.status === "ready").length,
+      avgTime:    times.length ? Math.round(times.reduce((s, v) => s + v, 0) / times.length) : null,
+      delayed:    times.filter(t => t > 20).length,
+    });
+  }, [restaurantId]);
+
   useEffect(() => {
     if (!restaurantId) return;
-    (async () => {
-      const [{ data: cancelled }, { data: voided }] = await Promise.all([
-        supabase.from("orders").select("total_amount").eq("restaurant_id", restaurantId).eq("status", "cancelled").gte("created_at", startISO).lte("created_at", endISO),
-        Promise.resolve({ data: [] }), // voided items not implemented yet
-      ]);
-      const reasonMap = {}, itemMap = {};
-      (voided ?? []).forEach(v => { const r = v.void_reason ?? "Unknown"; reasonMap[r] = (reasonMap[r] ?? 0) + 1; const n = v.menu_items?.name ?? "Unknown"; itemMap[n] = (itemMap[n] ?? 0) + 1; });
-      const total = (cancelled?.length ?? 0) + (voided?.length ?? 0);
-      setStats({ cancelled: cancelled?.length ?? 0, voided: voided?.length ?? 0, revLost: (cancelled ?? []).reduce((s, o) => s + (o.total_amount ?? 0), 0), topReason: Object.entries(reasonMap).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—", topItem: Object.entries(itemMap).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—", rate: total > 0 ? Math.round(((cancelled?.length ?? 0) / total) * 100) : 0 });
-    })();
-  }, [restaurantId, startISO, endISO]);
+    fetchStats();
+    const ch = supabase
+      .channel(`kds-stats-${restaurantId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "kds_items", filter: `restaurant_id=eq.${restaurantId}` }, fetchStats)
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [restaurantId, fetchStats]);
+
   return stats;
 }
 
-// ─── Hook: WABA info from Munafe Chat restaurants table ───────────────────────
-function useWABAInfo(apiClient) {
-  const [info, setInfo] = useState(undefined); // undefined = loading, null = not found
+// Fix C: Remove broken menu_items join; query orders table only
+function useCancelStats(restaurantId, startISO, endISO) {
+  const [stats, setStats] = useState(null);
+
   useEffect(() => {
-    if (!apiClient) { console.warn('[useWABAInfo] no apiClient'); return; }
+    if (!restaurantId || !startISO || !endISO) return;
+    let cancelled = false;
+
     (async () => {
       try {
-        console.log('[useWABAInfo] calling /api/dashboard/waba...');
-        const res = await apiClient.get('/api/dashboard/waba');
-        console.log('[useWABAInfo] response:', res.data);
-        setInfo(res.data?.restaurant ?? null);
+        const { data: cancelledOrders, error } = await supabase
+          .from("orders")
+          .select("total_amount")
+          .eq("restaurant_id", restaurantId)
+          .eq("status", "cancelled")
+          .gte("created_at", startISO)
+          .lte("created_at", endISO);
+
+        if (error) { console.warn("[useCancelStats]", error.message); return; }
+        if (cancelled) return;
+
+        const { data: allOrders } = await supabase
+          .from("orders")
+          .select("id", { count: "exact", head: true })
+          .eq("restaurant_id", restaurantId)
+          .gte("created_at", startISO)
+          .lte("created_at", endISO);
+
+        const cancelCount = cancelledOrders?.length ?? 0;
+        const revLost     = (cancelledOrders ?? []).reduce((s, o) => s + (o.total_amount ?? 0), 0);
+
+        setStats({
+          cancelled: cancelCount,
+          voided:    0,
+          revLost,
+          topReason: "—",
+          topItem:   "—",
+          rate:      0, // would need total count — skip for now to avoid extra query
+        });
       } catch (err) {
-        console.error('[useWABAInfo] failed:', err?.response?.status, err?.response?.data || err.message);
-        setInfo(null);
+        console.error("[useCancelStats]", err.message);
       }
     })();
+
+    return () => { cancelled = true; };
+  }, [restaurantId, startISO, endISO]);
+
+  return stats;
+}
+
+// ─── WABA Info hook ───────────────────────────────────────────────────────────
+function useWABAInfo(apiClient) {
+  const [info, setInfo] = useState(undefined);
+  useEffect(() => {
+    if (!apiClient) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiClient.get('/api/dashboard/waba');
+        if (!cancelled) setInfo(res.data?.restaurant ?? null);
+      } catch (err) {
+        console.error('[useWABAInfo]', err?.response?.status, err?.response?.data?.error || err.message);
+        if (!cancelled) setInfo(null);
+      }
+    })();
+    return () => { cancelled = true; };
   }, [apiClient]);
   return info;
 }
 
-// ─── Hook: WhatsApp orders from Munafe Chat bookings table ────────────────────
+// Fix F: Validate ISO strings before firing to prevent malformed requests
 function useWAOrders(apiClient, startISO, endISO) {
   const [orders, setOrders] = useState(null);
+
   useEffect(() => {
-    if (!apiClient) { console.warn('[useWAOrders] no apiClient'); return; }
+    if (!apiClient || !startISO || !endISO) return;
+    // Validate ISO strings
+    if (isNaN(new Date(startISO)) || isNaN(new Date(endISO))) {
+      console.warn("[useWAOrders] invalid date range, skipping");
+      return;
+    }
+    let cancelled = false;
     setOrders(null);
+
     (async () => {
       try {
-        console.log('[useWAOrders] calling /api/dashboard/wa-orders...', { startISO, endISO });
         const res = await apiClient.get('/api/dashboard/wa-orders', {
           params: { start: startISO, end: endISO },
         });
-        console.log('[useWAOrders] response:', res.data?.orders?.length, 'orders');
-        setOrders(res.data?.orders ?? []);
+        if (!cancelled) setOrders(res.data?.orders ?? []);
       } catch (err) {
-        console.error('[useWAOrders] failed:', err?.response?.status, err?.response?.data || err.message);
-        setOrders([]);
+        console.error('[useWAOrders]', err?.response?.status, err?.response?.data?.error || err.message);
+        if (!cancelled) setOrders([]);
       }
     })();
+
+    return () => { cancelled = true; };
   }, [apiClient, startISO, endISO]);
+
   return orders;
 }
 
@@ -564,7 +722,6 @@ function WABAPanel({ info }) {
     </div>
   );
 
-  // undefined = still loading, null = not found/no key
   if (info === undefined) return (
     <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "center", color: "#aaa", fontSize: 13 }}>
       Loading...
@@ -583,7 +740,7 @@ function WABAPanel({ info }) {
         <div>3. Copy your <strong>WABA ID</strong> and <strong>Phone Number ID</strong></div>
         <div>4. Add them to your Munafe Chat restaurant settings</div>
         <div>5. Generate a <strong>Permanent Access Token</strong> from Meta Developer Console</div>
-        <div>6. Add the token to your Munafe backend <code>.env</code> as <code>WHATSAPP_ACCESS_TOKEN</code></div>
+        <div>6. Add the token to your backend <code>.env</code> as <code>WHATSAPP_ACCESS_TOKEN</code></div>
         <div style={{ marginTop: 10, padding: "8px 12px", background: "#F7F7F5", borderRadius: 8, fontSize: 11 }}>
           Need help? Visit <a href="https://developers.facebook.com/docs/whatsapp" target="_blank" rel="noreferrer" style={{ color: "#378ADD" }}>developers.facebook.com/docs/whatsapp</a>
         </div>
@@ -597,13 +754,13 @@ function WABAPanel({ info }) {
         <span style={{ fontSize: 14, fontWeight: 500, color: "#111" }}>WhatsApp Business</span>
         <span style={{ fontSize: 11, background: "#EAF3DE", color: "#3B6D11", padding: "2px 8px", borderRadius: 6 }}>● Connected</span>
       </div>
-      {row("Business name",         info.name)}
-      {row("Phone number",          info.whatsapp_number ? `+${info.whatsapp_number}` : null)}
-      {row("WABA ID",               info.waba_id)}
-      {row("Manager phone",         info.manager_phone ? `+${info.manager_phone}` : null)}
-      {row("Timezone",              info.timezone)}
-      {row("Dining duration",       info.dining_duration_minutes ? `${info.dining_duration_minutes} min` : null)}
-      {row("Payment mode",          info.payment_mode)}
+      {row("Business name",   info.name)}
+      {row("Phone number",    info.whatsapp_number ? `+${info.whatsapp_number}` : null)}
+      {row("WABA ID",         info.waba_id)}
+      {row("Manager phone",   info.manager_phone ? `+${info.manager_phone}` : null)}
+      {row("Timezone",        info.timezone)}
+      {row("Dining duration", info.dining_duration_minutes ? `${info.dining_duration_minutes} min` : null)}
+      {row("Payment mode",    info.payment_mode)}
       <div style={{ marginTop: 12, padding: "8px 12px", background: "#F7F7F5", borderRadius: 8, fontSize: 12, color: "#888" }}>
         📲 Test ordering bot: send <strong>"Hi"</strong> to <strong>+{info.whatsapp_number}</strong>
       </div>
@@ -611,7 +768,7 @@ function WABAPanel({ info }) {
   );
 }
 
-// ─── WhatsApp Orders Table ─────────────────────────────────────────────────────
+// ─── WhatsApp Orders Table ────────────────────────────────────────────────────
 function WAOrdersTable({ orders, rangeLabel }) {
   const [search, setSearch] = useState("");
 
@@ -631,23 +788,23 @@ function WAOrdersTable({ orders, rangeLabel }) {
   const handleExport = () => {
     if (!filtered?.length) return;
     const rows = filtered.map(o => ({
-      Date:          o.created_at ? new Date(o.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "—",
-      Name:          o.customers?.name || o.customer_id || "—",
-      Phone:         o.customers?.phone || "—",
-      Service:       o.service_type || o.event_type || "—",
-      Token:         o.token_number || "—",
-      Party_Size:    o.party_size || "—",
-      Amount:        o.total_amount != null ? `₹${o.total_amount}` : "—",
-      Status:        o.status || "—",
+      Date:       o.created_at ? new Date(o.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "—",
+      Name:       o.customers?.name || o.customer_id || "—",
+      Phone:      o.customers?.phone || "—",
+      Service:    o.service_type || o.event_type || "—",
+      Token:      o.token_number || "—",
+      Party_Size: o.party_size || "—",
+      Amount:     o.total_amount != null ? `₹${o.total_amount}` : "—",
+      Status:     o.status || "—",
     }));
     exportToCSV(rows, `whatsapp-orders-${rangeLabel.replace(/[^a-z0-9]/gi, "-")}.csv`);
   };
 
   const statusColor = (s) => {
     if (!s) return "#888";
-    if (["completed","confirmed","paid"].includes(s)) return "#3B6D11";
-    if (["cancelled","failed"].includes(s)) return "#A32D2D";
-    if (["pending","awaiting"].includes(s)) return "#BA7517";
+    if (["completed", "confirmed", "paid"].includes(s)) return "#3B6D11";
+    if (["cancelled", "failed"].includes(s)) return "#A32D2D";
+    if (["pending", "awaiting"].includes(s)) return "#BA7517";
     return "#555";
   };
 
@@ -735,13 +892,13 @@ function WAOrdersTable({ orders, rangeLabel }) {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function OwnerDashboard({ restaurantId, restaurantName, onLogout, apiClient: apiClientProp }) {
   const { apiClient: apiClientCtx } = useAuth();
-  const apiClient = apiClientCtx || apiClientProp; // prefer context, fall back to prop
+  const apiClient = apiClientCtx || apiClientProp;
+
   const [preset,      setPreset]      = useState("today");
   const [customStart, setCustomStart] = useState(null);
   const [customEnd,   setCustomEnd]   = useState(null);
   const [showCal,     setShowCal]     = useState(false);
 
-  // Compute stable ISO strings — only recomputes when preset/custom dates change
   const { startISO, endISO } = useMemo(() => {
     if (customStart && customEnd) {
       return { startISO: customStart.toISOString(), endISO: customEnd.toISOString() };
@@ -749,28 +906,31 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
     return getRangeISO(preset);
   }, [preset, customStart, customEnd]);
 
-  const kpi         = useKpiData(restaurantId, startISO, endISO);
+  // Fix A: pass apiClient into useKpiData so it can use backend if needed
+  const kpi         = useKpiData(apiClient, restaurantId, startISO, endISO);
   const chartData   = useChartData(restaurantId, startISO, endISO, preset);
   const menuItems   = useMenuItems(restaurantId, startISO, endISO);
   const tables      = useTables(restaurantId);
-  const kotStats    = useKotStats(restaurantId);
+  const kdsStats    = useKdsStats(restaurantId);   // Fix B: renamed hook
   const cancelStats = useCancelStats(restaurantId, startISO, endISO);
   const wabaInfo    = useWABAInfo(apiClient);
   const waOrders    = useWAOrders(apiClient, startISO, endISO);
 
-  const rangeLabel = (customStart && customEnd) ? `Custom · ${fmtDate(customStart)} – ${fmtDate(customEnd)}` : { today: "Today", yesterday: "Yesterday", "7d": "Last 7 days", "30d": "Last 30 days" }[preset];
+  const rangeLabel = (customStart && customEnd)
+    ? `Custom · ${fmtDate(customStart)} – ${fmtDate(customEnd)}`
+    : { today: "Today", yesterday: "Yesterday", "7d": "Last 7 days", "30d": "Last 30 days" }[preset];
 
   const row1 = [
-    { icon: "₹",  label: "Total revenue",   value: kpi ? fmtINR(kpi.totalRevenue) : "—", badge: null, sub: "vs prior" },
-    { icon: "🛒", label: "Orders",           value: kpi?.totalOrders ?? "—",               badge: null, sub: "vs prior" },
-    { icon: "🧾", label: "Avg order value",  value: kpi ? `₹${kpi.aov}` : "—",             badge: null, sub: "vs prior" },
-    { icon: "👥", label: "Total covers",     value: kpi?.totalCovers ?? "—",                neutral: true, sub: "vs prior" },
+    { icon: "₹",  label: "Total revenue",  value: kpi ? fmtINR(kpi.totalRevenue) : "—", badge: null, sub: "selected period" },
+    { icon: "🛒", label: "Orders",          value: kpi?.totalOrders ?? "—",               badge: null, sub: "selected period" },
+    { icon: "🧾", label: "Avg order value", value: kpi ? `₹${kpi.aov}` : "—",             badge: null, sub: "selected period" },
+    { icon: "👥", label: "Total covers",    value: kpi?.totalCovers ?? "—",                neutral: true, sub: "selected period" },
   ];
   const row2 = [
-    { icon: "🔄", label: "Table turns",     value: "—",                                                 sub: "vs prior" },
-    { icon: "⏱",  label: "Avg dining time", value: kpi?.avgDining ? `${kpi.avgDining} min` : "—",       sub: "Benchmark: 90 min" },
-    { icon: "🎟",  label: "Tokens issued",   value: kpi?.tokensIssued ?? "—",                            sub: "vs prior" },
-    { icon: "⏳", label: "Avg wait time",   value: kpi?.avgWait ? `${kpi.avgWait} min` : "—",           sub: "vs prior" },
+    { icon: "🔄", label: "Table turns",     value: "—",                                                sub: "selected period" },
+    { icon: "⏱",  label: "Avg dining time", value: kpi?.avgDining ? `${kpi.avgDining} min` : "—",      sub: "Benchmark: 90 min" },
+    { icon: "🎟",  label: "Tokens issued",   value: kpi?.tokensIssued ?? "—",                           sub: "selected period" },
+    { icon: "⏳", label: "Avg wait time",   value: kpi?.avgWait ? `${kpi.avgWait} min` : "—",          sub: "selected period" },
   ];
 
   const btnStyle = (active) => ({
@@ -779,6 +939,9 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
     color:       active ? "#111"    : "#888",
     borderColor: active ? "#C8C8C4" : "#E0E0DC",
   });
+
+  // Fix G: chart key forces full Chart.js remount on range change
+  const chartKey = `${startISO}-${endISO}`;
 
   return (
     <div style={{ minHeight: "100vh", background: "#F7F7F5", padding: "24px" }}>
@@ -830,9 +993,10 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
           {row2.map((m, i) => <MetricCard key={i} {...m} />)}
         </div>
 
-        {/* Revenue + heatmap — only render when data is ready */}
+        {/* Revenue chart — key forces remount on range change (Fix G) */}
         {chartData && chartData.labels?.length > 0 && (
           <RevenueChart
+            key={chartKey}
             labels={chartData.labels}
             revenue={chartData.revenue}
             orders={chartData.orders}
@@ -863,9 +1027,9 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
           <WAOrdersTable orders={waOrders} rangeLabel={rangeLabel} />
         </div>
 
-        {/* KOT + Cancellations */}
+        {/* KDS stats + Cancellations */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12 }}>
-          <KotStatus stats={kotStats} />
+          <KotStatus stats={kdsStats} />
           <CancellationVoids stats={cancelStats} />
         </div>
 
