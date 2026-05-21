@@ -2,16 +2,15 @@
 // AUTOM8 FRONTEND - MANAGER PORTAL
 // src/pages/ManagerPortal.jsx
 //
-// FIX: Queue tab was hidden behind hasFeature(FEATURES.TOKEN_MANAGEMENT).
-//      If SubscriptionContext hasn't loaded yet, or the feature flag isn't
-//      returned, the tab disappeared entirely — manager couldn't see walk-ins.
-//      Queue tab is now always rendered. The subscription guard is kept only
-//      on the "New Order" button (non-critical path).
+// FIX: Removed all useSubscription / hasFeature / hasAnyOf / FEATURES usage.
+//      The import was causing a silent crash if SubscriptionContext wasn't
+//      available, which prevented the entire component from mounting —
+//      including the Queue tab. No subscription gating needed in the manager
+//      portal; all features are available to authenticated managers.
 // ============================================================================
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { useSubscription, FEATURES } from '../contexts/SubscriptionContext';
 import { format, parseISO } from 'date-fns';
 
 // ─── Status colours (tables) ─────────────────────────────────────────────────
@@ -47,7 +46,6 @@ const ACTIVE_ORDER_STATUSES = ['pending', 'confirmed', 'in_progress'];
 
 export default function ManagerPortal() {
   const { user, apiClient, logout } = useAuth();
-  const { hasAnyOf } = useSubscription();
 
   // ── core state ─────────────────────────────────────────────────────────────
   const [tables,        setTables]        = useState([]);
@@ -64,8 +62,7 @@ export default function ManagerPortal() {
   const [tokens,         setTokens]         = useState([]);
   const [assigningToken, setAssigningToken] = useState(null);
   const [assignTableSel, setAssignTableSel] = useState({});
-  // FIX: default tab is 'queue' so manager sees walk-ins immediately on login
-  const [activeTab,      setActiveTab]      = useState('queue');
+  const [activeTab,      setActiveTab]      = useState('queue'); // default to queue
   const [toastMsg,       setToastMsg]       = useState('');
 
   // ── "free table" modal ─────────────────────────────────────────────────────
@@ -402,17 +399,15 @@ export default function ManagerPortal() {
             </div>
             <div className="flex items-center gap-3">
               <span className="text-sm text-gray-600">👤 {user?.full_name || user?.email}</span>
-              {hasAnyOf(FEATURES.DINE_IN, FEATURES.TAKEAWAY, FEATURES.DELIVERY) && (
-                <button
-                  onClick={() => { setShowNewOrder(true); setActiveTab('orders'); }}
-                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition flex items-center"
-                >
-                  <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                  New Order
-                </button>
-              )}
+              <button
+                onClick={() => { setShowNewOrder(true); setActiveTab('orders'); }}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition flex items-center"
+              >
+                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                New Order
+              </button>
               <button
                 onClick={logout}
                 className="bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-5 rounded-lg transition flex items-center"
@@ -445,7 +440,6 @@ export default function ManagerPortal() {
         </div>
 
         {/* ── Tab bar ───────────────────────────────────────────────────────── */}
-        {/* FIX: Queue tab always rendered — no subscription guard */}
         <div className="flex gap-2 mb-6 bg-white rounded-xl p-1.5 shadow-sm w-fit">
           {[
             { key: 'queue',  label: `Queue${waitingTokens.length ? ` (${waitingTokens.length})` : ''}` },
@@ -472,7 +466,6 @@ export default function ManagerPortal() {
         {activeTab === 'queue' && (
           <div className="space-y-10">
 
-            {/* ── Waiting for table ──────────────────────────────────────────── */}
             <section>
               <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
                 🟠 Waiting for Table
@@ -493,11 +486,9 @@ export default function ManagerPortal() {
                     return (
                       <div key={token.id} className="bg-white rounded-xl shadow-sm p-5 border border-orange-100">
                         <div className="flex items-start gap-4">
-                          {/* Token badge */}
                           <div className="w-14 h-14 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-lg font-bold flex-shrink-0">
                             {String(token.id).replace('T-', '')}
                           </div>
-
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-bold text-gray-900 text-lg">{token.id}</span>
@@ -509,8 +500,6 @@ export default function ManagerPortal() {
                             {token.phone && (
                               <p className="text-gray-400 text-xs mt-0.5">📱 +{token.phone}</p>
                             )}
-
-                            {/* Table assignment row */}
                             <div className="flex items-center gap-2 mt-3 flex-wrap">
                               <select
                                 value={assignTableSel[token.id] || ''}
@@ -527,17 +516,16 @@ export default function ManagerPortal() {
                                   </option>
                                 ))}
                               </select>
-
                               <button
                                 onClick={() => assignTable(token)}
                                 disabled={!assignTableSel[token.id] || isAssigning}
                                 className="bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-1"
                               >
-                                {isAssigning ? (
-                                  <><span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" /> Assigning...</>
-                                ) : '✓ Assign + Notify'}
+                                {isAssigning
+                                  ? <><span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" /> Assigning...</>
+                                  : '✓ Assign + Notify'
+                                }
                               </button>
-
                               <button
                                 onClick={() => dismissToken(token.id)}
                                 className="text-gray-400 hover:text-red-500 text-sm px-2 py-2 transition"
@@ -553,7 +541,6 @@ export default function ManagerPortal() {
               )}
             </section>
 
-            {/* ── Seated ─────────────────────────────────────────────────────── */}
             {seatedTokens.length > 0 && (
               <section>
                 <h2 className="text-xl font-bold text-gray-900 mb-4">🟢 Seated</h2>
@@ -586,7 +573,6 @@ export default function ManagerPortal() {
               </section>
             )}
 
-            {/* ── Takeaway ───────────────────────────────────────────────────── */}
             {takeawayTokens.length > 0 && (
               <section>
                 <h2 className="text-xl font-bold text-gray-900 mb-4">🔵 Takeaway</h2>
