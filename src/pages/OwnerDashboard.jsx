@@ -1,5 +1,5 @@
-// Dashboard v202605210548
-import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+// Dashboard v202605210601
+import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { supabase, useAuth } from "../contexts/AuthContext";
 // ── Export to Excel (no npm install — uses plain CSV download) ────────────────
 function exportToCSV(rows, filename) {
@@ -232,10 +232,41 @@ function Badge({ val, neutral }) {
   return <span style={{ display: "inline-block", fontSize: 11, fontWeight: 500, padding: "1px 7px", borderRadius: 6, background: up ? "#EAF3DE" : "#FCEBEB", color: up ? "#3B6D11" : "#A32D2D" }}>{up ? "↑" : "↓"} {Math.abs(val)}%</span>;
 }
 
-function MetricCard({ icon, label, value, sub, badge, neutral }) {
+
+// ─── Tooltip ──────────────────────────────────────────────────────────────────
+function Tooltip({ text, children }) {
+  const [show, setShow] = React.useState(false);
+  return (
+    <span style={{ position: "relative", display: "inline-flex", alignItems: "center" }}
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+    >
+      {children}
+      <span style={{ marginLeft: 3, cursor: "help", color: "#C8C8C4", fontSize: 11 }}>ⓘ</span>
+      {show && (
+        <span style={{
+          position: "absolute", bottom: "120%", left: "50%", transform: "translateX(-50%)",
+          background: "#1A1A1A", color: "#fff", fontSize: 11, padding: "6px 10px",
+          borderRadius: 8, whiteSpace: "pre-wrap", maxWidth: 220, zIndex: 100,
+          boxShadow: "0 4px 12px rgba(0,0,0,0.2)", lineHeight: 1.5,
+          pointerEvents: "none",
+        }}>
+          {text}
+          <span style={{ position: "absolute", top: "100%", left: "50%", transform: "translateX(-50%)",
+            borderLeft: "5px solid transparent", borderRight: "5px solid transparent",
+            borderTop: "5px solid #1A1A1A" }} />
+        </span>
+      )}
+    </span>
+  );
+}
+
+function MetricCard({ icon, label, value, sub, badge, neutral, tooltip }) {
   return (
     <div style={{ background: "#F7F7F5", borderRadius: 12, padding: "14px 16px" }}>
-      <div style={{ fontSize: 12, color: "#888", marginBottom: 4 }}>{icon} {label}</div>
+      <div style={{ fontSize: 12, color: "#888", marginBottom: 4 }}>
+        {icon} {tooltip ? <Tooltip text={tooltip}>{label}</Tooltip> : label}
+      </div>
       <div style={{ fontSize: 22, fontWeight: 500, color: "#111" }}>{value ?? "—"}</div>
       <div style={{ fontSize: 11, color: "#aaa", marginTop: 4, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
         <Badge val={badge} neutral={neutral} />
@@ -376,18 +407,21 @@ function KotStatus({ stats }) {
 
 function CancellationVoids({ stats }) {
   return (
-    <StatCard title="Cancellations &amp; voids" sub="today">
+    <StatCard title="Cancellations &amp; voids" sub="selected period">
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <MiniStat label="Cancelled"    value={stats?.cancelled ?? 0} color="#A32D2D" />
-        <MiniStat label="Voided items" value={stats?.voided ?? 0}    color="#BA7517" />
+        <MiniStat label="Cancelled" value={stats?.cancelled ?? 0} color="#A32D2D" />
+        <MiniStat label="Revenue lost" value={fmtINR(stats?.revLost ?? 0)} color="#BA7517" />
       </div>
-      <KRow label="Revenue lost"      value={stats?.revLost != null ? `₹${stats.revLost.toLocaleString("en-IN")}` : "₹0"} danger />
-      <KRow label="Top void reason"   value={stats?.topReason ?? "—"} />
-      <KRow label="Most voided item"  value={stats?.topItem ?? "—"} />
-      <KRow label="Cancellation rate" value={stats?.rate != null ? `${stats.rate}%` : "—"} />
+      <KRow label="Revenue lost"       value={stats?.revLost != null ? `₹${stats.revLost.toLocaleString("en-IN")}` : "₹0"} danger />
+      <KRow label="Total orders (base)" value={stats?.totalOrders != null ? stats.totalOrders : "—"} />
+      <KRow label="Cancellation rate"  value={stats?.rate != null ? `${stats.rate}% of total orders` : "—"} />
+      <div style={{ marginTop: 10, padding: "8px 10px", background: "#FFF8F5", borderRadius: 8, fontSize: 11, color: "#888", lineHeight: 1.6 }}>
+        ℹ️ These are orders explicitly cancelled by the manager. Tokens with no order placed are not counted here. Cancellation reason capture not yet enabled.
+      </div>
     </StatCard>
   );
 }
+
 
 // ─── Data hooks ───────────────────────────────────────────────────────────────
 function useKpiData(restaurantId, startISO, endISO) {
@@ -460,7 +494,7 @@ function useMenuItems(restaurantId, startISO, endISO) {
         if (!n) return; // skip items with no name at all
         if (!map[n]) map[n] = { name: n, qty: 0, revenue: 0 };
         map[n].qty     += r.quantity ?? 1;
-        map[n].revenue += (r.quantity ?? 1) * (r.unit_price ?? 0);
+        map[n].revenue += (r.quantity ?? 1) * ((r.unit_price ?? 0) / 100);
       });
       setItems(Object.values(map).sort((a, b) => b.revenue - a.revenue).slice(0, 7));
     })();
@@ -506,14 +540,39 @@ function useCancelStats(restaurantId, startISO, endISO) {
   useEffect(() => {
     if (!restaurantId) return;
     (async () => {
-      const [{ data: cancelled }, { data: voided }] = await Promise.all([
-        supabase.from("orders").select("total_amount").eq("restaurant_id", restaurantId).eq("status", "cancelled").gte("created_at", startISO).lte("created_at", endISO),
-        Promise.resolve({ data: [] }), // voided items not implemented yet
+      // Fetch cancelled orders and total order count in parallel
+      const [cancelRes, totalRes] = await Promise.all([
+        supabase.from("orders")
+          .select("total_amount")
+          .eq("restaurant_id", restaurantId)
+          .eq("status", "cancelled")
+          .gte("created_at", startISO)
+          .lte("created_at", endISO),
+        supabase.from("orders")
+          .select("*", { count: "exact", head: true })
+          .eq("restaurant_id", restaurantId)
+          .gte("created_at", startISO)
+          .lte("created_at", endISO),
       ]);
-      const reasonMap = {}, itemMap = {};
-      (voided ?? []).forEach(v => { const r = v.void_reason ?? "Unknown"; reasonMap[r] = (reasonMap[r] ?? 0) + 1; const n = v.menu_items?.name ?? "Unknown"; itemMap[n] = (itemMap[n] ?? 0) + 1; });
-      const total = (cancelled?.length ?? 0) + (voided?.length ?? 0);
-      setStats({ cancelled: cancelled?.length ?? 0, voided: voided?.length ?? 0, revLost: (cancelled ?? []).reduce((s, o) => s + (o.total_amount ?? 0), 0), topReason: Object.entries(reasonMap).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—", topItem: Object.entries(itemMap).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—", rate: total > 0 ? Math.round(((cancelled?.length ?? 0) / total) * 100) : 0 });
+
+      const cancelledOrders = cancelRes.data ?? [];
+      const totalCount      = totalRes.count ?? 0;
+      const cancelCount     = cancelledOrders.length;
+      // Note: these are orders with status='cancelled' — orders explicitly cancelled
+      // by manager. Does NOT include tokens with no orders placed.
+      // cancellation_reason not yet stored on orders table.
+      const revLost = cancelledOrders.reduce((s, o) => s + (o.total_amount ?? 0), 0);
+      const rate    = totalCount > 0 ? Math.round((cancelCount / totalCount) * 100) : 0;
+
+      setStats({
+        cancelled:   cancelCount,
+        voided:      0,
+        revLost,
+        topReason:   "—", // cancellation_reason column not yet on orders table
+        topItem:     "—",
+        rate,
+        totalOrders: totalCount,
+      });
     })();
   }, [restaurantId, startISO, endISO]);
   return stats;
@@ -768,16 +827,20 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
   const rangeLabel = (customStart && customEnd) ? `Custom · ${fmtDate(customStart)} – ${fmtDate(customEnd)}` : { today: "Today", yesterday: "Yesterday", "7d": "Last 7 days", "30d": "Last 30 days" }[preset];
 
   const row1 = [
-    { icon: "₹",  label: "Total revenue",   value: kpi ? fmtINR(kpi.totalRevenue) : "—", badge: null, sub: "vs prior" },
-    { icon: "🛒", label: "Orders",           value: kpi?.totalOrders ?? "—",               badge: null, sub: "vs prior" },
-    { icon: "🧾", label: "Avg order value",  value: kpi ? `₹${kpi.aov}` : "—",             badge: null, sub: "vs prior" },
-    { icon: "👥", label: "Total covers",     value: kpi?.totalCovers ?? "—",                neutral: true, sub: "vs prior" },
+    { icon: "₹",  label: "Total revenue",   value: kpi ? fmtINR(kpi.totalRevenue) : "—", badge: null, sub: "selected period" },
+    { icon: "🛒", label: "Orders",           value: kpi?.totalOrders ?? "—",               badge: null, sub: "selected period" },
+    { icon: "🧾", label: "Avg order value",  value: kpi ? `₹${kpi.aov}` : "—",             badge: null, sub: "selected period", tooltip: "Total revenue ÷ orders. Excludes cancelled orders." },
+    { icon: "👥", label: "Total covers",     value: kpi?.totalCovers ?? "—",                neutral: true, sub: "selected period", tooltip: "Total orders placed. Each order = 1 cover (one dining transaction)." },
   ];
   const row2 = [
-    { icon: "🔄", label: "Table turns",     value: "—",                                                 sub: "vs prior" },
-    { icon: "⏱",  label: "Avg dining time", value: kpi?.avgDining ? `${kpi.avgDining} min` : "—",       sub: "Benchmark: 90 min" },
-    { icon: "🎟",  label: "Tokens issued",   value: kpi?.tokensIssued ?? "—",                            sub: "vs prior" },
-    { icon: "⏳", label: "Avg wait time",   value: kpi?.avgWait ? `${kpi.avgWait} min` : "—",           sub: "vs prior" },
+    { icon: "🔄", label: "Table turns",     value: kpi && tables?.length ? (kpi.totalOrders / tables.length).toFixed(1) : "—",
+      sub: "selected period", tooltip: "Total orders ÷ tables. Shows how efficiently tables are reused. Higher = better." },
+    { icon: "⏱",  label: "Avg dining time", value: kpi?.avgDining ? `${kpi.avgDining} min` : "—",
+      sub: "Benchmark: 90 min", tooltip: "Avg mins from walk-in check-in to table completion. Benchmark: 90 min." },
+    { icon: "🎟",  label: "Tokens issued",   value: kpi?.tokensIssued ?? "—",
+      sub: "selected period", tooltip: "Walk-in customers who received a queue token via bot or QR." },
+    { icon: "⏳", label: "Avg wait time",   value: kpi?.avgWait ? `${kpi.avgWait} min` : "—",
+      sub: "selected period", tooltip: "Avg mins from check-in to table assignment." },
   ];
 
   const btnStyle = (active) => ({
