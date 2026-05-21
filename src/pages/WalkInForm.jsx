@@ -2,37 +2,68 @@
 // AUTOM8 FRONTEND - CUSTOMER WALK-IN FORM (QR Code Landing Page)
 // src/pages/WalkInForm.jsx
 //
-// FIX: restaurant_id is read from the URL query parameter ?restaurant=<uuid>
-//      This is the correct multi-tenant approach — each restaurant's QR code
-//      encodes their own ID in the URL. No env var needed.
+// restaurant_id resolution — in priority order:
+//   1. ?restaurant=<uuid> in the URL  (QR code scan, ideal path)
+//   2. GET /api/restaurant/default    (fallback when link has no param,
+//                                      e.g. WhatsApp bot sends bare /checkin)
 //
-//      QR code for Munafe should point to:
-//        https://autom8-frontend-production.up.railway.app/checkin?restaurant=46fb9b9e-431a-43c9-9edb-d316b0fef216
+// For multi-restaurant: always use the ?restaurant= param in QR codes and
+// WhatsApp links. The fallback only exists so a missing param doesn't silently
+// drop the token — it returns the single active restaurant if there is one.
 //
-//      For each new restaurant, generate a QR code with their own UUID.
-//
-// Route in App.jsx / router:
-//   <Route path="/checkin" element={<WalkInForm />} />
+// Route in App.jsx:  <Route path="/checkin" element={<WalkInForm />} />
 // ============================================================================
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
 export default function WalkInForm() {
-  const [step,    setStep]    = useState('form');   // 'form' | 'token'
-  const [name,    setName]    = useState('');
-  const [phone,   setPhone]   = useState('');
-  const [type,    setType]    = useState('');        // 'dinein' | 'takeaway'
-  const [pax,     setPax]     = useState(2);
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState('');
-  const [token,   setToken]   = useState(null);
+  const [step,          setStep]         = useState('form');   // 'form' | 'token'
+  const [name,          setName]         = useState('');
+  const [phone,         setPhone]        = useState('');
+  const [type,          setType]         = useState('');        // 'dinein' | 'takeaway'
+  const [pax,           setPax]          = useState(2);
+  const [loading,       setLoading]      = useState(false);
+  const [error,         setError]        = useState('');
+  const [token,         setToken]        = useState(null);
+  const [restaurantId,  setRestaurantId] = useState(null);
+  const [resolving,     setResolving]    = useState(true);    // true while we figure out restaurant
 
-  // Read restaurant_id from URL query param — e.g. /checkin?restaurant=<uuid>
-  // This is set once when the QR code is generated, works for any number of restaurants.
-  const restaurantId = new URLSearchParams(window.location.search).get('restaurant');
+  // ─── Resolve restaurant_id on mount ────────────────────────────────────────
+  useEffect(() => {
+    const fromUrl = new URLSearchParams(window.location.search).get('restaurant');
 
+    if (fromUrl) {
+      // Ideal path — QR code or WhatsApp link includes the param
+      console.log('[WalkInForm] restaurant_id from URL:', fromUrl);
+      setRestaurantId(fromUrl);
+      setResolving(false);
+      return;
+    }
+
+    // Fallback — no param in URL (e.g. bare /checkin link from WhatsApp bot)
+    // Ask the backend for the default/only restaurant
+    console.warn('[WalkInForm] No ?restaurant= param — fetching default from backend');
+    fetch(`${API_BASE}/api/restaurant/default`)
+      .then(r => r.json())
+      .then(data => {
+        if (data?.restaurant_id) {
+          console.log('[WalkInForm] Resolved default restaurant_id:', data.restaurant_id);
+          setRestaurantId(data.restaurant_id);
+        } else {
+          console.error('[WalkInForm] /api/restaurant/default returned no id:', data);
+          setError('Could not identify restaurant. Please scan the QR code at the entrance.');
+        }
+      })
+      .catch(err => {
+        console.error('[WalkInForm] Failed to fetch default restaurant:', err.message);
+        setError('Could not connect to the server. Please try again.');
+      })
+      .finally(() => setResolving(false));
+  }, []);
+
+  // ─── Submit ────────────────────────────────────────────────────────────────
   const submit = async () => {
     if (!name.trim()) { setError('Please enter your name');              return; }
     if (!type)        { setError('Please choose dine-in or takeaway');   return; }
@@ -41,8 +72,7 @@ export default function WalkInForm() {
       return;
     }
     if (!restaurantId) {
-      setError('Invalid QR code — restaurant not found. Please scan the QR code at the entrance again.');
-      console.error('[WalkInForm] No ?restaurant= param in URL:', window.location.href);
+      setError('Restaurant not identified. Please scan the QR code at the entrance again.');
       return;
     }
 
@@ -77,6 +107,18 @@ export default function WalkInForm() {
     }
   };
 
+  // ─── Resolving screen ──────────────────────────────────────────────────────
+  if (resolving) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+        <div className="text-center">
+          <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-gray-500 text-sm">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
   // ─── Token confirmation screen ─────────────────────────────────────────────
   if (step === 'token' && token) {
     return (
@@ -92,7 +134,6 @@ export default function WalkInForm() {
           <h1 className="text-2xl font-bold text-gray-900 mb-1">You're checked in!</h1>
           <p className="text-gray-500 text-sm mb-6">Please wait while we prepare your table.</p>
 
-          {/* Token display */}
           <div className="bg-blue-50 border-2 border-blue-200 rounded-2xl p-6 mb-6">
             <p className="text-xs font-semibold text-blue-400 uppercase tracking-widest mb-2">Your Token</p>
             <p className="text-5xl font-bold text-blue-600">{token.id}</p>
@@ -134,7 +175,6 @@ export default function WalkInForm() {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-sm">
 
-        {/* Restaurant logo / header */}
         <div className="text-center mb-8">
           <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-3">
             <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 20 20">
@@ -147,7 +187,6 @@ export default function WalkInForm() {
 
         <div className="space-y-5">
 
-          {/* Name */}
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">Your name</label>
             <input
@@ -159,7 +198,6 @@ export default function WalkInForm() {
             />
           </div>
 
-          {/* Phone */}
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">
               WhatsApp number <span className="font-normal text-gray-400">(for table notification)</span>
@@ -173,7 +211,6 @@ export default function WalkInForm() {
             />
           </div>
 
-          {/* Dine-in / Takeaway */}
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-2">How would you like to order?</label>
             <div className="grid grid-cols-2 gap-3">
@@ -197,7 +234,6 @@ export default function WalkInForm() {
             </div>
           </div>
 
-          {/* Pax (only for dine-in) */}
           {type === 'dinein' && (
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-2">
@@ -222,17 +258,15 @@ export default function WalkInForm() {
             </div>
           )}
 
-          {/* Error */}
           {error && (
             <p className="text-red-500 text-sm bg-red-50 rounded-lg px-3 py-2">{error}</p>
           )}
 
-          {/* Submit */}
           <button
             onClick={submit}
-            disabled={loading}
+            disabled={loading || resolving}
             className={`w-full py-4 rounded-xl font-bold text-white text-sm transition ${
-              loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+              loading || resolving ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
             }`}
           >
             {loading ? (
@@ -240,9 +274,7 @@ export default function WalkInForm() {
                 <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                 Getting your token...
               </span>
-            ) : (
-              'Get Token →'
-            )}
+            ) : 'Get Token →'}
           </button>
 
         </div>
