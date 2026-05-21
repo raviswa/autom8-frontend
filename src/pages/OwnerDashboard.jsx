@@ -1,4 +1,4 @@
-// Dashboard v202605210616
+// Dashboard v202605210624
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { supabase, useAuth } from "../contexts/AuthContext";
 // ── Export to Excel (no npm install — uses plain CSV download) ────────────────
@@ -494,7 +494,7 @@ function useMenuItems(restaurantId, startISO, endISO) {
         if (!n) return; // skip items with no name at all
         if (!map[n]) map[n] = { name: n, qty: 0, revenue: 0 };
         map[n].qty     += r.quantity ?? 1;
-        map[n].revenue += (r.quantity ?? 1) * ((r.unit_price ?? 0) / 100);
+        map[n].revenue += (r.quantity ?? 1) * (r.unit_price ?? 0);
       });
       setItems(Object.values(map).sort((a, b) => b.revenue - a.revenue).slice(0, 7));
     })();
@@ -750,19 +750,19 @@ function WAOrdersTable({ orders, rangeLabel }) {
         <div style={{ textAlign: "center", padding: "24px 0", fontSize: 13, color: "#aaa" }}>No orders in this period</div>
       )}
       {filtered?.length > 0 && (
-        <div style={{ overflowX: "auto" }}>
+        <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: 300, borderRadius: 8, border: "0.5px solid #F0F0EE" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-            <thead>
+            <thead style={{ position: "sticky", top: 0, background: "#fff", zIndex: 1 }}>
               <tr style={{ borderBottom: "0.5px solid #E8E8E5" }}>
                 {["Date & Time", "Name", "Phone", "Service", "Token", "Pax", "Amount", "Status"].map(h => (
-                  <th key={h} style={{ textAlign: "left", color: "#aaa", fontWeight: 400, fontSize: 11, padding: "4px 8px 8px 0", whiteSpace: "nowrap" }}>{h}</th>
+                  <th key={h} style={{ textAlign: "left", color: "#aaa", fontWeight: 400, fontSize: 11, padding: "8px 8px 8px 0", whiteSpace: "nowrap", background: "#fff" }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {filtered.map((o, i) => (
-                <tr key={o.id || i} style={{ borderBottom: "0.5px solid #F7F7F5" }}>
-                  <td style={{ padding: "7px 8px 7px 0", color: "#555", whiteSpace: "nowrap" }}>
+                <tr key={o.id || i} style={{ borderBottom: "0.5px solid #F7F7F5" }} onMouseEnter={e => e.currentTarget.style.background="#F7F7F5"} onMouseLeave={e => e.currentTarget.style.background=""}>
+                  <td style={{ padding: "5px 8px 5px 0", color: "#555", whiteSpace: "nowrap", fontSize: 11 }}>
                     {o.created_at ? new Date(o.created_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" }) : "—"}
                   </td>
                   <td style={{ padding: "7px 8px 7px 0", fontWeight: 500, color: "#111", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
