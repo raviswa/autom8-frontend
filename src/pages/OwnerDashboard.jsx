@@ -1,5 +1,31 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { supabase } from "../contexts/AuthContext";
+import { createClient } from "@supabase/supabase-js";
+
+// Munafe Chat Supabase (conversation / WABA data)
+const supabaseChat = createClient(
+  "https://ttlhffzgkpneshbawdhb.supabase.co",
+  import.meta.env.VITE_MUNAFE_CHAT_ANON_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY
+);
+
+// ── Export to Excel (no npm install — uses plain CSV download) ────────────────
+function exportToCSV(rows, filename) {
+  if (!rows?.length) return;
+  const headers = Object.keys(rows[0]);
+  const csv = [
+    headers.join(","),
+    ...rows.map(r => headers.map(h => {
+      const v = r[h] ?? "";
+      const s = String(v).replace(/"/g, '""');
+      return s.includes(",") || s.includes("\n") || s.includes('"') ? `"${s}"` : s;
+    }).join(","))
+  ].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const HEAT_COLORS = ["#E6F1FB", "#85B7EB", "#378ADD", "#185FA5", "#0C447C"];
@@ -482,6 +508,236 @@ function useCancelStats(restaurantId, startISO, endISO) {
   return stats;
 }
 
+// ─── Hook: WABA info from Munafe Chat restaurants table ───────────────────────
+function useWABAInfo(restaurantId) {
+  const [info, setInfo] = useState(null);
+  useEffect(() => {
+    if (!restaurantId) return;
+    (async () => {
+      const { data, error } = await supabaseChat
+        .from("restaurants")
+        .select("name, whatsapp_number, manager_phone, waba_id, timezone, dining_duration_minutes, payment_mode")
+        .eq("id", restaurantId)
+        .single();
+      if (!error && data) setInfo(data);
+      else {
+        // fallback: try matching by restaurant name / any record
+        const { data: first } = await supabaseChat
+          .from("restaurants")
+          .select("name, whatsapp_number, manager_phone, waba_id, timezone, dining_duration_minutes, payment_mode")
+          .limit(1)
+          .single();
+        if (first) setInfo(first);
+      }
+    })();
+  }, [restaurantId]);
+  return info;
+}
+
+// ─── Hook: WhatsApp orders from Munafe Chat bookings table ────────────────────
+function useWAOrders(restaurantId, startISO, endISO) {
+  const [orders, setOrders] = useState(null);
+  useEffect(() => {
+    if (!restaurantId) return;
+    setOrders(null);
+    (async () => {
+      // Try bookings table first
+      const { data, error } = await supabaseChat
+        .from("bookings")
+        .select("id, created_at, service_type, status, total_amount, party_size, token_number, customers(name, phone)")
+        .gte("created_at", startISO)
+        .lte("created_at", endISO)
+        .order("created_at", { ascending: false })
+        .limit(500);
+      if (!error) {
+        setOrders(data ?? []);
+      } else {
+        // fallback: conversation_events
+        const { data: evts } = await supabaseChat
+          .from("conversation_events")
+          .select("id, created_at, event_type, customer_id")
+          .gte("created_at", startISO)
+          .lte("created_at", endISO)
+          .order("created_at", { ascending: false })
+          .limit(500);
+        setOrders(evts ?? []);
+      }
+    })();
+  }, [restaurantId, startISO, endISO]);
+  return orders;
+}
+
+// ─── WABA Info Panel ──────────────────────────────────────────────────────────
+function WABAPanel({ info }) {
+  const row = (label, value) => (
+    <div style={{ display: "flex", gap: 12, marginBottom: 10 }}>
+      <div style={{ fontSize: 12, color: "#888", minWidth: 160 }}>{label}</div>
+      <div style={{ fontSize: 13, fontWeight: 500, color: "#111", wordBreak: "break-all" }}>{value || "—"}</div>
+    </div>
+  );
+
+  if (!info) return (
+    <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "20px 24px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <span style={{ fontSize: 14, fontWeight: 500, color: "#111" }}>WhatsApp Business</span>
+        <span style={{ fontSize: 11, background: "#FCEBEB", color: "#A32D2D", padding: "2px 8px", borderRadius: 6 }}>Not configured</span>
+      </div>
+      <div style={{ fontSize: 12, color: "#888", lineHeight: 1.7 }}>
+        <div style={{ fontWeight: 500, color: "#111", marginBottom: 8 }}>How to connect your WABA:</div>
+        <div>1. Go to <strong>Meta Business Suite</strong> → WhatsApp Manager</div>
+        <div>2. Create or select a WhatsApp Business Account</div>
+        <div>3. Copy your <strong>WABA ID</strong> and <strong>Phone Number ID</strong></div>
+        <div>4. Add them to your Munafe Chat restaurant settings</div>
+        <div>5. Generate a <strong>Permanent Access Token</strong> from Meta Developer Console</div>
+        <div>6. Add the token to your Munafe backend <code>.env</code> as <code>WHATSAPP_ACCESS_TOKEN</code></div>
+        <div style={{ marginTop: 10, padding: "8px 12px", background: "#F7F7F5", borderRadius: 8, fontSize: 11 }}>
+          Need help? Visit <a href="https://developers.facebook.com/docs/whatsapp" target="_blank" rel="noreferrer" style={{ color: "#378ADD" }}>developers.facebook.com/docs/whatsapp</a>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "20px 24px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <span style={{ fontSize: 14, fontWeight: 500, color: "#111" }}>WhatsApp Business</span>
+        <span style={{ fontSize: 11, background: "#EAF3DE", color: "#3B6D11", padding: "2px 8px", borderRadius: 6 }}>● Connected</span>
+      </div>
+      {row("Business name",         info.name)}
+      {row("Phone number",          info.whatsapp_number ? `+${info.whatsapp_number}` : null)}
+      {row("WABA ID",               info.waba_id)}
+      {row("Manager phone",         info.manager_phone ? `+${info.manager_phone}` : null)}
+      {row("Timezone",              info.timezone)}
+      {row("Dining duration",       info.dining_duration_minutes ? `${info.dining_duration_minutes} min` : null)}
+      {row("Payment mode",          info.payment_mode)}
+      <div style={{ marginTop: 12, padding: "8px 12px", background: "#F7F7F5", borderRadius: 8, fontSize: 12, color: "#888" }}>
+        📲 Test ordering bot: send <strong>"Hi"</strong> to <strong>+{info.whatsapp_number}</strong>
+      </div>
+    </div>
+  );
+}
+
+// ─── WhatsApp Orders Table ─────────────────────────────────────────────────────
+function WAOrdersTable({ orders, rangeLabel }) {
+  const [search, setSearch] = useState("");
+
+  const filtered = useMemo(() => {
+    if (!orders) return null;
+    if (!search.trim()) return orders;
+    const q = search.toLowerCase();
+    return orders.filter(o => {
+      const name  = (o.customers?.name || o.customer_id || "").toLowerCase();
+      const phone = (o.customers?.phone || "").toLowerCase();
+      const svc   = (o.service_type || o.event_type || "").toLowerCase();
+      const token = (o.token_number || "").toLowerCase();
+      return name.includes(q) || phone.includes(q) || svc.includes(q) || token.includes(q);
+    });
+  }, [orders, search]);
+
+  const handleExport = () => {
+    if (!filtered?.length) return;
+    const rows = filtered.map(o => ({
+      Date:          o.created_at ? new Date(o.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "—",
+      Name:          o.customers?.name || o.customer_id || "—",
+      Phone:         o.customers?.phone || "—",
+      Service:       o.service_type || o.event_type || "—",
+      Token:         o.token_number || "—",
+      Party_Size:    o.party_size || "—",
+      Amount:        o.total_amount != null ? `₹${o.total_amount}` : "—",
+      Status:        o.status || "—",
+    }));
+    exportToCSV(rows, `whatsapp-orders-${rangeLabel.replace(/[^a-z0-9]/gi, "-")}.csv`);
+  };
+
+  const statusColor = (s) => {
+    if (!s) return "#888";
+    if (["completed","confirmed","paid"].includes(s)) return "#3B6D11";
+    if (["cancelled","failed"].includes(s)) return "#A32D2D";
+    if (["pending","awaiting"].includes(s)) return "#BA7517";
+    return "#555";
+  };
+
+  return (
+    <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "20px 24px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+        <div>
+          <span style={{ fontSize: 14, fontWeight: 500, color: "#111" }}>WhatsApp orders</span>
+          {filtered != null && (
+            <span style={{ fontSize: 11, color: "#aaa", marginLeft: 8 }}>{filtered.length} total · {rangeLabel}</span>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search name, phone, token..."
+            style={{ fontSize: 12, padding: "5px 10px", borderRadius: 8, border: "0.5px solid #E0E0DC", outline: "none", width: 200 }}
+          />
+          <button
+            onClick={handleExport}
+            disabled={!filtered?.length}
+            style={{ fontSize: 12, padding: "5px 12px", borderRadius: 8, border: "0.5px solid #E0E0DC", background: filtered?.length ? "#F7F7F5" : "#fafafa", color: filtered?.length ? "#111" : "#aaa", cursor: filtered?.length ? "pointer" : "default" }}
+          >
+            ⬇ Export CSV
+          </button>
+        </div>
+      </div>
+
+      {orders === null && (
+        <div style={{ textAlign: "center", padding: "24px 0", fontSize: 13, color: "#aaa" }}>Loading...</div>
+      )}
+      {orders !== null && filtered?.length === 0 && (
+        <div style={{ textAlign: "center", padding: "24px 0", fontSize: 13, color: "#aaa" }}>No orders in this period</div>
+      )}
+      {filtered?.length > 0 && (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr style={{ borderBottom: "0.5px solid #E8E8E5" }}>
+                {["Date & Time", "Name", "Phone", "Service", "Token", "Pax", "Amount", "Status"].map(h => (
+                  <th key={h} style={{ textAlign: "left", color: "#aaa", fontWeight: 400, fontSize: 11, padding: "4px 8px 8px 0", whiteSpace: "nowrap" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((o, i) => (
+                <tr key={o.id || i} style={{ borderBottom: "0.5px solid #F7F7F5" }}>
+                  <td style={{ padding: "7px 8px 7px 0", color: "#555", whiteSpace: "nowrap" }}>
+                    {o.created_at ? new Date(o.created_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" }) : "—"}
+                  </td>
+                  <td style={{ padding: "7px 8px 7px 0", fontWeight: 500, color: "#111", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {o.customers?.name || o.customer_id || "—"}
+                  </td>
+                  <td style={{ padding: "7px 8px 7px 0", color: "#555", whiteSpace: "nowrap" }}>
+                    {o.customers?.phone ? `+${o.customers.phone}` : "—"}
+                  </td>
+                  <td style={{ padding: "7px 8px 7px 0", color: "#555", whiteSpace: "nowrap", textTransform: "capitalize" }}>
+                    {(o.service_type || o.event_type || "—").replace(/_/g, " ")}
+                  </td>
+                  <td style={{ padding: "7px 8px 7px 0", color: "#555", fontFamily: "monospace" }}>
+                    {o.token_number || "—"}
+                  </td>
+                  <td style={{ padding: "7px 8px 7px 0", color: "#555", textAlign: "center" }}>
+                    {o.party_size || "—"}
+                  </td>
+                  <td style={{ padding: "7px 8px 7px 0", fontWeight: 500, color: "#111", whiteSpace: "nowrap" }}>
+                    {o.total_amount != null ? `₹${Number(o.total_amount).toLocaleString("en-IN")}` : "—"}
+                  </td>
+                  <td style={{ padding: "7px 8px 7px 0" }}>
+                    <span style={{ fontSize: 11, fontWeight: 500, color: statusColor(o.status), background: statusColor(o.status) + "18", padding: "2px 7px", borderRadius: 5, textTransform: "capitalize" }}>
+                      {o.status || "—"}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function OwnerDashboard({ restaurantId, restaurantName, onLogout }) {
   const [preset,      setPreset]      = useState("today");
@@ -503,6 +759,8 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout 
   const tables      = useTables(restaurantId);
   const kotStats    = useKotStats(restaurantId);
   const cancelStats = useCancelStats(restaurantId, startISO, endISO);
+  const wabaInfo    = useWABAInfo(restaurantId);
+  const waOrders    = useWAOrders(restaurantId, startISO, endISO);
 
   const rangeLabel = (customStart && customEnd) ? `Custom · ${fmtDate(customStart)} – ${fmtDate(customEnd)}` : { today: "Today", yesterday: "Yesterday", "7d": "Last 7 days", "30d": "Last 30 days" }[preset];
 
@@ -601,6 +859,12 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12, marginBottom: 12 }}>
           <TopMenuItems items={menuItems} />
           <TableOccupancy tables={tables} />
+        </div>
+
+        {/* WABA info + WhatsApp orders */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12, marginBottom: 12 }}>
+          <WABAPanel info={wabaInfo} />
+          <WAOrdersTable orders={waOrders} rangeLabel={rangeLabel} />
         </div>
 
         {/* KOT + Cancellations */}
