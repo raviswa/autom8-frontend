@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { supabase } from "../contexts/AuthContext";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -368,14 +368,14 @@ function CancellationVoids({ stats }) {
 }
 
 // ─── Data hooks ───────────────────────────────────────────────────────────────
-function useKpiData(restaurantId, start, end) {
+function useKpiData(restaurantId, startISO, endISO) {
   const [data, setData] = useState(null);
   useEffect(() => {
     if (!restaurantId) return;
     (async () => {
       const [{ data: orders }, { data: tokens }] = await Promise.all([
-        supabase.from("orders").select("total, pax").eq("restaurant_id", restaurantId).eq("status", "completed").gte("created_at", start.toISOString()).lte("created_at", end.toISOString()),
-        supabase.from("walk_in_tokens").select("created_at, seated_at").eq("restaurant_id", restaurantId).gte("arrived_at", start.toISOString()).lte("arrived_at", end.toISOString()),
+        supabase.from("orders").select("total, pax").eq("restaurant_id", restaurantId).eq("status", "completed").gte("created_at", startISO).lte("created_at", endISO),
+        supabase.from("walk_in_tokens").select("created_at, seated_at").eq("restaurant_id", restaurantId).gte("arrived_at", startISO).lte("arrived_at", endISO),
       ]);
       const totalRevenue = (orders ?? []).reduce((s, o) => s + (o.total ?? 0), 0);
       const totalOrders  = (orders ?? []).length;
@@ -383,17 +383,17 @@ function useKpiData(restaurantId, start, end) {
       const avgMins = seated.length ? Math.round(seated.reduce((s, t) => s + (new Date(t.seated_at) - new Date(t.created_at)) / 60000, 0) / seated.length) : null;
       setData({ totalRevenue, totalOrders, aov: totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0, totalCovers: (orders ?? []).reduce((s, o) => s + (o.pax ?? 0), 0), tokensIssued: (tokens ?? []).length, avgDining: avgMins, avgWait: avgMins });
     })();
-  }, [restaurantId, start.toISOString(), end.toISOString()]);
+  }, [restaurantId, startISO, endISO]);
   return data;
 }
 
-function useChartData(restaurantId, start, end, preset) {
+function useChartData(restaurantId, startISO, endISO, preset) {
   const [data, setData] = useState(null);
   useEffect(() => {
     if (!restaurantId) return;
     setData(null); // clear old data immediately to avoid stale chart
     (async () => {
-      const { data: orders } = await supabase.from("orders").select("total, pax, created_at").eq("restaurant_id", restaurantId).eq("status", "completed").gte("created_at", start.toISOString()).lte("created_at", end.toISOString());
+      const { data: orders } = await supabase.from("orders").select("total, pax, created_at").eq("restaurant_id", restaurantId).eq("status", "completed").gte("created_at", startISO).lte("created_at", endISO);
       if (!orders) return;
       const byLabel = {};
       orders.forEach(o => {
@@ -409,22 +409,22 @@ function useChartData(restaurantId, start, end, preset) {
       const labels = Object.keys(byLabel);
       setData({ labels, revenue: labels.map(l => byLabel[l].revenue), orders: labels.map(l => byLabel[l].orders), covers: labels.map(l => byLabel[l].covers) });
     })();
-  }, [restaurantId, start.toISOString(), end.toISOString(), preset]);
+  }, [restaurantId, startISO, endISO, preset]);
   return data;
 }
 
-function useMenuItems(restaurantId, start, end) {
+function useMenuItems(restaurantId, startISO, endISO) {
   const [items, setItems] = useState([]);
   useEffect(() => {
     if (!restaurantId) return;
     (async () => {
-      const { data } = await supabase.from("order_items").select("quantity, unit_price, menu_items(name)").eq("restaurant_id", restaurantId).gte("created_at", start.toISOString()).lte("created_at", end.toISOString());
+      const { data } = await supabase.from("order_items").select("quantity, unit_price, menu_items(name)").eq("restaurant_id", restaurantId).gte("created_at", startISO).lte("created_at", endISO);
       if (!data) return;
       const map = {};
       data.forEach(r => { const n = r.menu_items?.name ?? "Unknown"; if (!map[n]) map[n] = { name: n, qty: 0, revenue: 0 }; map[n].qty += r.quantity ?? 1; map[n].revenue += (r.quantity ?? 1) * (r.unit_price ?? 0); });
       setItems(Object.values(map).sort((a, b) => b.revenue - a.revenue).slice(0, 7));
     })();
-  }, [restaurantId, start.toISOString(), end.toISOString()]);
+  }, [restaurantId, startISO, endISO]);
   return items;
 }
 
@@ -461,21 +461,21 @@ function useKotStats(restaurantId) {
   return stats;
 }
 
-function useCancelStats(restaurantId, start, end) {
+function useCancelStats(restaurantId, startISO, endISO) {
   const [stats, setStats] = useState(null);
   useEffect(() => {
     if (!restaurantId) return;
     (async () => {
       const [{ data: cancelled }, { data: voided }] = await Promise.all([
-        supabase.from("orders").select("total").eq("restaurant_id", restaurantId).eq("status", "cancelled").gte("created_at", start.toISOString()).lte("created_at", end.toISOString()),
-        supabase.from("order_items").select("unit_price, quantity, void_reason, menu_items(name)").eq("restaurant_id", restaurantId).eq("voided", true).gte("created_at", start.toISOString()).lte("created_at", end.toISOString()),
+        supabase.from("orders").select("total").eq("restaurant_id", restaurantId).eq("status", "cancelled").gte("created_at", startISO).lte("created_at", endISO),
+        supabase.from("order_items").select("unit_price, quantity, void_reason, menu_items(name)").eq("restaurant_id", restaurantId).eq("voided", true).gte("created_at", startISO).lte("created_at", endISO),
       ]);
       const reasonMap = {}, itemMap = {};
       (voided ?? []).forEach(v => { const r = v.void_reason ?? "Unknown"; reasonMap[r] = (reasonMap[r] ?? 0) + 1; const n = v.menu_items?.name ?? "Unknown"; itemMap[n] = (itemMap[n] ?? 0) + 1; });
       const total = (cancelled?.length ?? 0) + (voided?.length ?? 0);
       setStats({ cancelled: cancelled?.length ?? 0, voided: voided?.length ?? 0, revLost: (cancelled ?? []).reduce((s, o) => s + (o.total ?? 0), 0), topReason: Object.entries(reasonMap).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—", topItem: Object.entries(itemMap).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—", rate: total > 0 ? Math.round(((cancelled?.length ?? 0) / total) * 100) : 0 });
     })();
-  }, [restaurantId, start.toISOString(), end.toISOString()]);
+  }, [restaurantId, startISO, endISO]);
   return stats;
 }
 
@@ -488,12 +488,16 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout 
 
   const { start, end } = (customStart && customEnd) ? { start: customStart, end: customEnd } : getRange(preset);
 
-  const kpi         = useKpiData(restaurantId, start, end);
-  const chartData   = useChartData(restaurantId, start, end, preset);
-  const menuItems   = useMenuItems(restaurantId, start, end);
+  // Memoize ISO strings — prevents hooks re-firing on every render
+  const startISO = useMemo(() => start.toISOString(), [start.getTime()]);
+  const endISO   = useMemo(() => end.toISOString(),   [end.getTime()]);
+
+  const kpi         = useKpiData(restaurantId, startISO, endISO);
+  const chartData   = useChartData(restaurantId, startISO, endISO, preset);
+  const menuItems   = useMenuItems(restaurantId, startISO, endISO);
   const tables      = useTables(restaurantId);
   const kotStats    = useKotStats(restaurantId);
-  const cancelStats = useCancelStats(restaurantId, start, end);
+  const cancelStats = useCancelStats(restaurantId, startISO, endISO);
 
   const rangeLabel = (customStart && customEnd) ? `Custom · ${fmtDate(customStart)} – ${fmtDate(customEnd)}` : { today: "Today", yesterday: "Yesterday", "7d": "Last 7 days", "30d": "Last 30 days" }[preset];
 
