@@ -299,7 +299,7 @@ function TopMenuItems({ items }) {
             <tr key={i} style={{ borderBottom: "0.5px solid #F7F7F5" }}>
               <td style={{ padding: "7px 0", color: "#666" }}>{i + 1}. {it.name}</td>
               <td style={{ padding: "7px 0", textAlign: "right" }}>{it.qty}</td>
-              <td style={{ padding: "7px 0", textAlign: "right", fontWeight: 500 }}>₹{it.revenue.toLocaleString("en-IN")*100}</td>
+              <td style={{ padding: "7px 0", textAlign: "right", fontWeight: 500 }}>₹{it.revenue.toLocaleString("en-IN")}</td>
               <td style={{ padding: "7px 0 7px 8px" }}>
                 <div style={{ background: "#F0F0EE", borderRadius: 3, height: 5, overflow: "hidden" }}>
                   <div style={{ width: `${Math.round(it.revenue / maxRev * 100)}%`, background: "#378ADD", height: "100%", borderRadius: 3 }} />
@@ -845,7 +845,7 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
   const rangeLabel = (customStart && customEnd) ? `Custom · ${fmtDate(customStart)} – ${fmtDate(customEnd)}` : { today: "Today", yesterday: "Yesterday", "7d": "Last 7 days", "30d": "Last 30 days" }[preset];
 
   const row1 = [
-    { icon: "₹",  label: "Total revenue",   value: kpi ? fmtINR(kpi.totalRevenue*100) : "—", badge: null, sub: "selected period" },
+    { icon: "₹",  label: "Total revenue",   value: kpi ? fmtINR(kpi.totalRevenue) : "—", badge: null, sub: "selected period" },
     { icon: "🛒", label: "Orders",           value: kpi?.totalOrders ?? "—",               badge: null, sub: "selected period" },
     { icon: "🧾", label: "Avg order value",  value: kpi ? `₹${kpi.aov}` : "—",             badge: null, sub: "selected period", tooltip: "Total revenue ÷ orders. Excludes cancelled orders." },
     { icon: "👥", label: "Total covers",     value: kpi?.totalCovers ?? "—",                neutral: true, sub: "selected period", tooltip: "Total orders placed. Each order = 1 cover (one dining transaction)." },
