@@ -312,20 +312,27 @@ function OrderCard({ group, onAdvanceItem, onAdvanceAll, onCancel }) {
 
 function HistoryView({ items }) {
   // Show cancelled + ready items from today
-  const histNow = Date.now();
-  const hist = items.filter(i => {
-    if (!isTodayIST(i.created_at)) return false;
-    if (i.status === 'cancelled') return true;
-    if (i.status === 'ready') {
-      // Show in history: either timed out (> READY_TIMEOUT_MINS) or all items in order are ready
-      const readyAt = i.completed_at ?? i.updated_at ?? i.created_at;
-      const minsReady = (histNow - new Date(readyAt)) / 60000;
+  // History shows today's cancelled items + ready items that have timed out
+  // of the live board (> READY_TIMEOUT_MINS since marked ready).
+  // We group first, then filter by timeout at group level — same logic as live board.
+  const histAllGroups = groupItemsByOrder(
+    items.filter(i =>
+      isTodayIST(i.created_at) &&
+      ['ready', 'cancelled'].includes(i.status)
+    )
+  );
+  const histNowMs = Date.now();
+  const hist = histAllGroups.filter(g => {
+    const s = deriveOrderStatus(g.items);
+    if (s === 'cancelled') return true;
+    // For ready groups: only show in history once they've timed out of live board
+    if (s === 'ready' && g.readyAt) {
+      const minsReady = (histNowMs - new Date(g.readyAt)) / 60000;
       return minsReady > READY_TIMEOUT_MINS;
     }
     return false;
   });
-  const groups = groupItemsByOrder(hist);
-  groups.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const groups = [...hist].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
   return (
     <div className="kds-history">
@@ -446,31 +453,42 @@ export default function KDSScreen() {
   }
 
   // ── Derive today's live groups ────────────────────────────────────────────
-  const now = Date.now();
-  const todayActive = allItems.filter(i => {
-    if (!isTodayIST(i.created_at)) return false;
-    if (!['pending', 'in_progress', 'ready'].includes(i.status)) return false;
-    // Auto-retire ready orders after READY_TIMEOUT_MINS
-    if (i.status === 'ready') {
-      const readyAt = i.completed_at ?? i.updated_at ?? i.created_at;
-      const minsReady = (now - new Date(readyAt)) / 60000;
-      if (minsReady > READY_TIMEOUT_MINS) return false;
-    }
-    return true;
-  });
+  // todayActive: all kds_items from today (any active status).
+  // Timeout check is done AFTER grouping at the group level,
+  // using group.readyAt which is reliably computed from the last
+  // item's updated_at — not the potentially-stale individual item timestamp.
+  const todayActive = allItems.filter(i =>
+    isTodayIST(i.created_at) &&
+    ['pending', 'in_progress', 'ready'].includes(i.status)
+  );
 
   const allGroups = groupItemsByOrder(todayActive);
   allGroups.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
+  const nowMs = Date.now();
+
+  // Auto-retire: exclude ready groups whose readyAt exceeds the timeout.
+  // readyAt is set in groupItemsByOrder() as the max updated_at of ready items,
+  // so this check is reliable — it uses actual "time since marked ready"
+  // not the order's original created_at.
+  const isTimedOut = (group) => {
+    if (deriveOrderStatus(group.items) !== 'ready') return false;
+    if (!group.readyAt) return false; // readyAt not set → not fully ready yet
+    const minsReady = (nowMs - new Date(group.readyAt)) / 60000;
+    return minsReady > READY_TIMEOUT_MINS;
+  };
+
+  const liveGroups = allGroups.filter(g => !isTimedOut(g));
+
   const filterGroups = (f) => {
-    if (f === 'all') return allGroups;
-    return allGroups.filter(g => deriveOrderStatus(g.items) === f);
+    if (f === 'all') return liveGroups;
+    return liveGroups.filter(g => deriveOrderStatus(g.items) === f);
   };
 
   const displayGroups = filterGroups(filter);
 
   const counts = {
-    all:         allGroups.length,
+    all:         liveGroups.length,
     pending:     filterGroups('pending').length,
     in_progress: filterGroups('in_progress').length,
     ready:       filterGroups('ready').length,
@@ -478,6 +496,8 @@ export default function KDSScreen() {
 
   // ── Item-level advance ────────────────────────────────────────────────────
   const advanceItem = async (kdsId, currentStatus) => {
+    // Guard: don't advance beyond ready (prevents any double-tap race)
+    if (currentStatus === 'ready' || currentStatus === 'cancelled') return;
     const nextStatus = currentStatus === 'pending' ? 'in_progress' : 'ready';
     // Optimistic update
     setAllItems(prev =>
