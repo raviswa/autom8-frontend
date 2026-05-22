@@ -133,9 +133,20 @@ const IST_OFFSET_MS    = 5.5 * 60 * 60 * 1000; // 330 min in ms
 // Ready orders auto-move to History after this many minutes.
 const READY_TIMEOUT_MINS = 20;
 
+// Supabase returns timestamps as "2026-05-22 08:19:09.68241" —
+// space separator, no Z, no +00:00. JS parses these inconsistently:
+// IST browsers treat them as local (IST) time, UTC browsers as UTC.
+// We normalise to a proper UTC ISO string before any Date() call.
+function toUTC(iso) {
+  if (!iso) return iso;
+  // Replace space separator with T, strip trailing timezone if any,
+  // then append Z to force UTC interpretation.
+  return iso.toString().replace(' ', 'T').replace(/([+-]\d{2}:\d{2}|Z)$/, '') + 'Z';
+}
+
 // Returns "YYYY-MM-DD" as it appears on a clock in India for any UTC timestamp.
 function getISTDateStr(iso) {
-  const istMs = new Date(iso).getTime() + IST_OFFSET_MS;
+  const istMs = new Date(toUTC(iso)).getTime() + IST_OFFSET_MS;
   return new Date(istMs).toISOString().slice(0, 10);
 }
 
@@ -146,7 +157,7 @@ function todayISTStr() {
 
 // Elapsed time in minutes. Pure UTC ms difference — always correct.
 function minutesAgo(iso) {
-  return Math.floor((Date.now() - new Date(iso)) / 60000);
+  return Math.floor((Date.now() - new Date(toUTC(iso))) / 60000);
 }
 
 // True if the UTC timestamp falls on today's IST calendar date.
@@ -219,7 +230,7 @@ function TimerLabel({ createdAt, status, readyAt }) {
 
   // For ready orders: show how long until auto-retirement
   if (status === 'ready' && readyAt) {
-    const minsReady   = Math.floor((Date.now() - new Date(readyAt)) / 60000);
+    const minsReady   = Math.floor((Date.now() - new Date(toUTC(readyAt))) / 60000);
     const minsLeft    = READY_TIMEOUT_MINS - minsReady;
     if (minsLeft <= 5 && minsLeft > 0) {
       return (
@@ -327,7 +338,7 @@ function HistoryView({ items }) {
     if (s === 'cancelled') return true;
     // For ready groups: only show in history once they've timed out of live board
     if (s === 'ready' && g.readyAt) {
-      const minsReady = (histNowMs - new Date(g.readyAt)) / 60000;
+      const minsReady = (histNowMs - new Date(toUTC(g.readyAt))) / 60000;
       return minsReady > READY_TIMEOUT_MINS;
     }
     return false;
@@ -372,7 +383,7 @@ function HistoryView({ items }) {
                     </div>
                   </td>
                   <td className="td-time">
-                    {new Date(g.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                    {new Date(toUTC(g.createdAt)).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' })}
                   </td>
                   <td>
                     <StatusBadge status={deriveOrderStatus(g.items)} isServed={true} />
@@ -474,7 +485,7 @@ export default function KDSScreen() {
   const isTimedOut = (group) => {
     if (deriveOrderStatus(group.items) !== 'ready') return false;
     if (!group.readyAt) return false; // readyAt not set → not fully ready yet
-    const minsReady = (nowMs - new Date(group.readyAt)) / 60000;
+    const minsReady = (nowMs - new Date(toUTC(group.readyAt))) / 60000;
     return minsReady > READY_TIMEOUT_MINS;
   };
 
