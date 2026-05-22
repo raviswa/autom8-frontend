@@ -29,6 +29,9 @@ function ProtectedRoute({ children, allowedRoles }) {
 // ── Feature-gated route ───────────────────────────────────────────────────────
 function FeatureRoute({ feature, children }) {
   const { hasFeature, loading } = useSubscription();
+  // FIX: never show FeatureWall while the subscription fetch is still in flight.
+  // Without this guard, features=[] → hasFeature=false → FeatureWall flashes
+  // for ~200ms before the response arrives and the real page renders.
   if (loading) return <Spinner />;
   if (!hasFeature(feature)) return <FeatureWall feature={feature} />;
   return children;
@@ -49,8 +52,10 @@ function Spinner() {
 // ── Routes ────────────────────────────────────────────────────────────────────
 function AppRoutes() {
   const { user, loading, logout, apiClient } = useAuth();
-  const { hasFeature, hasAnyOf }             = useSubscription();
-  if (loading) return <Spinner />;
+  // FIX: also pull loading from subscription so inline hasAnyOf checks
+  // never run against an empty features array.
+  const { hasFeature, hasAnyOf, loading: subLoading } = useSubscription();
+  if (loading || subLoading) return <Spinner />;
 
   const restaurantId   = user?.restaurant_id ?? user?.restaurantId ?? '46fb9b9e-431a-43c9-9edb-d316b0fef216';
   const restaurantName = user?.restaurant_name ?? user?.restaurantName ?? 'Hotel Munafe';
