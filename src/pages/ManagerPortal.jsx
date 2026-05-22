@@ -696,7 +696,7 @@ export default function ManagerPortal() {
                         </div>
                         <div>
                           <p className="text-sm font-semibold text-gray-700 mb-2">Total</p>
-                          <p className="text-2xl font-bold text-blue-600">₹{order.total_amount*100?.toFixed(2)}</p>
+                          <p className="text-2xl font-bold text-blue-600">₹{order.total_amount?.toFixed(1)*100}</p>
                           <p className="text-xs text-gray-500 mt-1">Status: <span className="font-semibold capitalize">{order.status}</span></p>
                         </div>
                         <div className="flex flex-col gap-2">
