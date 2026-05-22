@@ -66,11 +66,12 @@ function groupItemsByOrder(rawItems) {
     if (!groups.has(orderNum)) {
       groups.set(orderNum, {
         orderNumber:  orderNum,
-        orderId:      item.order_item?.order_id ?? null, // ← used by /complete endpoint
+        orderId:      item.order_item?.order_id ?? null,
         tableNumber:  item.order_item?.order?.table?.table_number ?? item.table_number ?? null,
         tableSection: item.order_item?.order?.table?.section ?? null,
         serviceType:  item.service_type ?? null,
         createdAt:    item.created_at,
+        readyAt:      null, // set below when all items are ready
         specialNotes: item.special_instructions ?? null,
         items:        [],
       });
@@ -98,31 +99,59 @@ function groupItemsByOrder(rawItems) {
     });
   }
 
+  // For groups where all items are ready, set readyAt to the latest
+  // updated_at among items — this is when the last item was marked ready.
+  for (const g of groups.values()) {
+    if (g.items.length > 0 && g.items.every(i => i.status === 'ready' || i.status === 'cancelled')) {
+      // Use updated_at from the raw items if available, else fall back to createdAt
+      const readyTimes = g.items
+        .filter(i => i.status === 'ready')
+        .map(i => {
+          // Find the raw item to get updated_at
+          const raw = rawItems.find(r => r.id === i.kdsId);
+          return raw?.updated_at ?? raw?.created_at ?? g.createdAt;
+        })
+        .filter(Boolean);
+      if (readyTimes.length > 0) {
+        g.readyAt = readyTimes.reduce((latest, t) => t > latest ? t : latest);
+      }
+    }
+  }
+
   return Array.from(groups.values());
 }
 
-// IST = UTC+5:30 = 330 min ahead of UTC.
-// Supabase timestamps are UTC; we convert to IST for all display
-// comparisons so timers and the "today" filter are correct.
-const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+// ── Timezone helpers ────────────────────────────────────────────────────────
+// Supabase always returns timestamps in UTC (Z or +00:00 suffix).
+// We NEVER use Date.getTimezoneOffset() — it varies per browser locale and
+// caused a double-offset bug in IST browsers (returns -330, so subtracting
+// it added 330 again = +660 mins instead of +330).
+// Instead we always add a fixed 5.5 hr constant to UTC ms.
 
-function toIST(date) {
-  // Shift UTC date into IST wall-clock time
-  return new Date(date.getTime() + IST_OFFSET_MS - date.getTimezoneOffset() * 60000);
+const IST_OFFSET_MS    = 5.5 * 60 * 60 * 1000; // 330 min in ms
+
+// Ready orders auto-move to History after this many minutes.
+const READY_TIMEOUT_MINS = 20;
+
+// Returns "YYYY-MM-DD" as it appears on a clock in India for any UTC timestamp.
+function getISTDateStr(iso) {
+  const istMs = new Date(iso).getTime() + IST_OFFSET_MS;
+  return new Date(istMs).toISOString().slice(0, 10);
 }
 
+// Today's IST date string — browser-timezone-agnostic.
+function todayISTStr() {
+  return getISTDateStr(new Date().toISOString());
+}
+
+// Elapsed time in minutes. Pure UTC ms difference — always correct.
 function minutesAgo(iso) {
   return Math.floor((Date.now() - new Date(iso)) / 60000);
 }
 
+// True if the UTC timestamp falls on today's IST calendar date.
 function isTodayIST(iso) {
-  const nowIST  = toIST(new Date());
-  const itemIST = toIST(new Date(iso));
-  return (
-    itemIST.getFullYear() === nowIST.getFullYear() &&
-    itemIST.getMonth()    === nowIST.getMonth()    &&
-    itemIST.getDate()     === nowIST.getDate()
-  );
+  return getISTDateStr(iso) === todayISTStr();
 }
 
 function serviceLabel(group) {
@@ -144,12 +173,12 @@ function serviceIcon(group) {
 
 // ─── sub-components ──────────────────────────────────────────────────────────
 
-function StatusBadge({ status }) {
+function StatusBadge({ status, isServed }) {
   const map = {
-    pending:     { label: 'New order',   cls: 'badge-pending'     },
-    in_progress: { label: 'Cooking',     cls: 'badge-in-progress' },
-    ready:       { label: 'All ready',   cls: 'badge-ready'       },
-    cancelled:   { label: 'Cancelled',   cls: 'badge-cancelled'   },
+    pending:     { label: 'New order',  cls: 'badge-pending'     },
+    in_progress: { label: 'Cooking',    cls: 'badge-in-progress' },
+    ready:       { label: isServed ? 'Served' : 'All ready', cls: 'badge-ready' },
+    cancelled:   { label: 'Cancelled',  cls: 'badge-cancelled'   },
   };
   const { label, cls } = map[status] ?? { label: status, cls: 'badge-pending' };
   return <span className={`kds-badge ${cls}`}>{label}</span>;
@@ -184,10 +213,27 @@ function ItemRow({ item, onAdvance }) {
   );
 }
 
-function TimerLabel({ createdAt }) {
+function TimerLabel({ createdAt, status, readyAt }) {
   const mins = minutesAgo(createdAt);
-  const cls  = mins > 20 ? 'timer-danger' : mins > 12 ? 'timer-warn' : 'timer-ok';
   const txt  = mins === 0 ? 'Just now' : mins === 1 ? '1 min ago' : `${mins} mins ago`;
+
+  // For ready orders: show how long until auto-retirement
+  if (status === 'ready' && readyAt) {
+    const minsReady   = Math.floor((Date.now() - new Date(readyAt)) / 60000);
+    const minsLeft    = READY_TIMEOUT_MINS - minsReady;
+    if (minsLeft <= 5 && minsLeft > 0) {
+      return (
+        <span className="kds-timer timer-warn">
+          {txt} · clears in {minsLeft}m
+        </span>
+      );
+    }
+    if (minsLeft <= 0) {
+      return <span className="kds-timer timer-ok">{txt} · clearing…</span>;
+    }
+  }
+
+  const cls = mins > 20 ? 'timer-danger' : mins > 12 ? 'timer-warn' : 'timer-ok';
   return <span className={`kds-timer ${cls}`}>{txt}</span>;
 }
 
@@ -212,8 +258,12 @@ function OrderCard({ group, onAdvanceItem, onAdvanceAll, onCancel }) {
           </div>
         </div>
         <div className="kds-card-head-right">
-          <StatusBadge status={orderStatus} />
-          <TimerLabel createdAt={group.createdAt} />
+          <StatusBadge status={orderStatus} isServed={false} />
+          <TimerLabel
+            createdAt={group.createdAt}
+            status={orderStatus}
+            readyAt={group.readyAt}
+          />
         </div>
       </div>
 
@@ -262,9 +312,18 @@ function OrderCard({ group, onAdvanceItem, onAdvanceAll, onCancel }) {
 
 function HistoryView({ items }) {
   // Show cancelled + ready items from today
-  const hist = items.filter(
-    i => (i.status === 'ready' || i.status === 'cancelled') && isTodayIST(i.created_at)
-  );
+  const histNow = Date.now();
+  const hist = items.filter(i => {
+    if (!isTodayIST(i.created_at)) return false;
+    if (i.status === 'cancelled') return true;
+    if (i.status === 'ready') {
+      // Show in history: either timed out (> READY_TIMEOUT_MINS) or all items in order are ready
+      const readyAt = i.completed_at ?? i.updated_at ?? i.created_at;
+      const minsReady = (histNow - new Date(readyAt)) / 60000;
+      return minsReady > READY_TIMEOUT_MINS;
+    }
+    return false;
+  });
   const groups = groupItemsByOrder(hist);
   groups.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
@@ -309,7 +368,7 @@ function HistoryView({ items }) {
                     {new Date(g.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
                   </td>
                   <td>
-                    <StatusBadge status={deriveOrderStatus(g.items)} />
+                    <StatusBadge status={deriveOrderStatus(g.items)} isServed={true} />
                   </td>
                 </tr>
               ))}
@@ -387,10 +446,18 @@ export default function KDSScreen() {
   }
 
   // ── Derive today's live groups ────────────────────────────────────────────
-  const todayActive = allItems.filter(i =>
-    isTodayIST(i.created_at) &&
-    ['pending', 'in_progress', 'ready'].includes(i.status)
-  );
+  const now = Date.now();
+  const todayActive = allItems.filter(i => {
+    if (!isTodayIST(i.created_at)) return false;
+    if (!['pending', 'in_progress', 'ready'].includes(i.status)) return false;
+    // Auto-retire ready orders after READY_TIMEOUT_MINS
+    if (i.status === 'ready') {
+      const readyAt = i.completed_at ?? i.updated_at ?? i.created_at;
+      const minsReady = (now - new Date(readyAt)) / 60000;
+      if (minsReady > READY_TIMEOUT_MINS) return false;
+    }
+    return true;
+  });
 
   const allGroups = groupItemsByOrder(todayActive);
   allGroups.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
