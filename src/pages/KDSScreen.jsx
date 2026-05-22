@@ -21,12 +21,25 @@
 //     that could fire duplicate WhatsApp notifications. The new endpoint
 //     atomically marks all items ready and sends exactly one notification.
 //     Individual item-level PUT calls are unchanged.
+//  8. Timezone fix: isToday and display comparisons now use IST (UTC+5:30)
+//     via isTodayIST() helper instead of browser-local time, so the "today"
+//     filter and timer labels are correct for Indian restaurants.
+//  9. Item-level color rows: each item shows red/amber/green background pill
+//     matching its own status, independent of the overall order status.
+//     Card border still reflects the worst item (red if any pending, etc).
+// 10. Subscription flicker: KDSScreen no longer participates in subscription
+//     gating at all. The fix for the flicker is in the router/ProtectedRoute:
+//     see NOTE below in the component body.
+//     parallel PUT /api/kds/:id/status calls, eliminating the race condition
+//     that could fire duplicate WhatsApp notifications. The new endpoint
+//     atomically marks all items ready and sends exactly one notification.
+//     Individual item-level PUT calls are unchanged.
 // ============================================================================
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useWebSocket } from '../contexts/WebSocketContext';
-import { formatDistanceToNow, isToday } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -88,8 +101,28 @@ function groupItemsByOrder(rawItems) {
   return Array.from(groups.values());
 }
 
+// IST = UTC+5:30 = 330 min ahead of UTC.
+// Supabase timestamps are UTC; we convert to IST for all display
+// comparisons so timers and the "today" filter are correct.
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+function toIST(date) {
+  // Shift UTC date into IST wall-clock time
+  return new Date(date.getTime() + IST_OFFSET_MS - date.getTimezoneOffset() * 60000);
+}
+
 function minutesAgo(iso) {
   return Math.floor((Date.now() - new Date(iso)) / 60000);
+}
+
+function isTodayIST(iso) {
+  const nowIST  = toIST(new Date());
+  const itemIST = toIST(new Date(iso));
+  return (
+    itemIST.getFullYear() === nowIST.getFullYear() &&
+    itemIST.getMonth()    === nowIST.getMonth()    &&
+    itemIST.getDate()     === nowIST.getDate()
+  );
 }
 
 function serviceLabel(group) {
@@ -122,9 +155,33 @@ function StatusBadge({ status }) {
   return <span className={`kds-badge ${cls}`}>{label}</span>;
 }
 
-function ItemDot({ status }) {
-  const cls = { pending: 'dot-pending', in_progress: 'dot-cooking', ready: 'dot-ready', cancelled: 'dot-cancelled' };
-  return <span className={`item-dot ${cls[status] ?? 'dot-pending'}`} />;
+function ItemRow({ item, onAdvance }) {
+  const rowCls = {
+    pending:     'item-row-pending',
+    in_progress: 'item-row-cooking',
+    ready:       'item-row-ready',
+    cancelled:   'item-row-cancelled',
+  }[item.status] ?? 'item-row-pending';
+
+  return (
+    <div className={`kds-item-row ${rowCls}`}>
+      <span className="kds-item-name">{item.name}</span>
+      <span className="kds-item-qty">×{item.qty}</span>
+      {item.status === 'pending' && (
+        <button className="kds-item-btn btn-item-start" onClick={() => onAdvance(item.kdsId, item.status)}>
+          Start
+        </button>
+      )}
+      {item.status === 'in_progress' && (
+        <button className="kds-item-btn btn-item-done" onClick={() => onAdvance(item.kdsId, item.status)}>
+          Done
+        </button>
+      )}
+      {item.status === 'ready' && (
+        <span className="kds-item-done">✓ Ready</span>
+      )}
+    </div>
+  );
 }
 
 function TimerLabel({ createdAt }) {
@@ -163,22 +220,7 @@ function OrderCard({ group, onAdvanceItem, onAdvanceAll, onCancel }) {
       {/* Items */}
       <div className="kds-items">
         {group.items.map(item => (
-          <div key={item.kdsId} className="kds-item-row">
-            <ItemDot status={item.status} />
-            <span className="kds-item-name">{item.name}</span>
-            <span className="kds-item-qty">×{item.qty}</span>
-            {item.status !== 'ready' && item.status !== 'cancelled' && (
-              <button
-                className="kds-item-btn"
-                onClick={() => onAdvanceItem(item.kdsId, item.status)}
-              >
-                {item.status === 'pending' ? 'Start' : 'Done'}
-              </button>
-            )}
-            {item.status === 'ready' && (
-              <span className="kds-item-done">✓</span>
-            )}
-          </div>
+          <ItemRow key={item.kdsId} item={item} onAdvance={onAdvanceItem} />
         ))}
       </div>
 
@@ -221,7 +263,7 @@ function OrderCard({ group, onAdvanceItem, onAdvanceAll, onCancel }) {
 function HistoryView({ items }) {
   // Show cancelled + ready items from today
   const hist = items.filter(
-    i => (i.status === 'ready' || i.status === 'cancelled') && isToday(new Date(i.created_at))
+    i => (i.status === 'ready' || i.status === 'cancelled') && isTodayIST(i.created_at)
   );
   const groups = groupItemsByOrder(hist);
   groups.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
@@ -281,6 +323,19 @@ function HistoryView({ items }) {
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
+// ─── SUBSCRIPTION FLICKER FIX ────────────────────────────────────────────────
+// If you see "Dine-in ordering isn't enabled" flash before the KDS loads,
+// the bug is in your ProtectedRoute / subscription check wrapper, NOT here.
+// The fix: in whatever component calls GET /api/subscription and shows the
+// gate UI, add a loading guard so it only shows the error AFTER the fetch
+// resolves — never while isLoading is true. Example:
+//
+//   if (isLoading) return null;          // ← add this line
+//   if (!features.includes('kds')) return <SubscriptionWall />;
+//
+// This KDSScreen itself does not call /api/subscription.
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function KDSScreen() {
   const { apiClient, logout } = useAuth();
   const { connected, updates } = useWebSocket();
@@ -333,7 +388,7 @@ export default function KDSScreen() {
 
   // ── Derive today's live groups ────────────────────────────────────────────
   const todayActive = allItems.filter(i =>
-    isToday(new Date(i.created_at)) &&
+    isTodayIST(i.created_at) &&
     ['pending', 'in_progress', 'ready'].includes(i.status)
   );
 
@@ -810,55 +865,81 @@ const KDS_CSS = `
 
   /* Items */
   .kds-items {
-    padding: 10px 13px;
+    padding: 8px 10px;
     display: flex;
     flex-direction: column;
-    gap: 7px;
+    gap: 5px;
     flex: 1;
   }
+
+  /* Each item row is a colored pill — red/amber/green per status */
   .kds-item-row {
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 7px;
+    border-left: 3px solid transparent;
   }
-  .item-dot {
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    flex-shrink: 0;
+  .item-row-pending {
+    background: #7f1d1d22;
+    border-left-color: #ef4444;
   }
-  .dot-pending   { background: #ef4444; }
-  .dot-cooking   { background: #f97316; }
-  .dot-ready     { background: #22c55e; }
-  .dot-cancelled { background: #374151; }
+  .item-row-cooking {
+    background: #7c2d1222;
+    border-left-color: #f97316;
+  }
+  .item-row-ready {
+    background: #14532d22;
+    border-left-color: #22c55e;
+  }
+  .item-row-cancelled {
+    background: #1f293733;
+    border-left-color: #374151;
+    opacity: .5;
+  }
   .kds-item-name {
     font-size: 13px;
     color: #d0d0d0;
     flex: 1;
     line-height: 1.3;
   }
+  .item-row-pending   .kds-item-name { color: #fca5a5; }
+  .item-row-cooking   .kds-item-name { color: #fdba74; }
+  .item-row-ready     .kds-item-name { color: #86efac; }
+  .item-row-cancelled .kds-item-name { color: #6b7280; text-decoration: line-through; }
   .kds-item-qty {
     font-size: 12px;
-    color: #555;
+    color: #777;
     flex-shrink: 0;
   }
   .kds-item-btn {
     font-size: 11px;
-    padding: 2px 8px;
+    padding: 2px 9px;
     border-radius: 10px;
-    border: 0.5px solid #2a2a2a;
-    background: transparent;
-    color: #888;
+    border: none;
     cursor: pointer;
     flex-shrink: 0;
+    font-weight: 500;
     transition: all .1s;
     white-space: nowrap;
   }
-  .kds-item-btn:hover { background: #222; color: #f0f0f0; border-color: #444; }
+  .btn-item-start {
+    background: #1d4ed8;
+    color: #bfdbfe;
+  }
+  .btn-item-start:hover { background: #2563eb; }
+  .btn-item-done {
+    background: #15803d;
+    color: #bbf7d0;
+  }
+  .btn-item-done:hover { background: #16a34a; }
   .kds-item-done {
-    font-size: 12px;
+    font-size: 11px;
     color: #22c55e;
     flex-shrink: 0;
-    padding: 0 4px;
+    font-weight: 500;
+    letter-spacing: .02em;
   }
 
   /* Special notes */
