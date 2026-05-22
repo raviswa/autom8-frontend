@@ -183,18 +183,24 @@ function serviceIcon(group) {
 }
 
 // ─── sub-components ──────────────────────────────────────────────────────────
+// Industry standard KDS UX (Toast, Square, TouchBistro):
+//   • 3 states: NEW → COOKING → SERVED
+//   • Tap the whole card/button to advance — large touch targets for kitchens
+//   • Items show strikethrough when done (TouchBistro style)
+//   • Color: red=new, amber=cooking, green=ready
 
 function StatusBadge({ status, isServed }) {
   const map = {
-    pending:     { label: 'New order',  cls: 'badge-pending'     },
-    in_progress: { label: 'Cooking',    cls: 'badge-in-progress' },
-    ready:       { label: isServed ? 'Served' : 'All ready', cls: 'badge-ready' },
-    cancelled:   { label: 'Cancelled',  cls: 'badge-cancelled'   },
+    pending:     { label: 'New',      cls: 'badge-pending'     },
+    in_progress: { label: 'Cooking',  cls: 'badge-in-progress' },
+    ready:       { label: isServed ? 'Served' : 'Ready',  cls: 'badge-ready' },
+    cancelled:   { label: 'Void',     cls: 'badge-cancelled'   },
   };
   const { label, cls } = map[status] ?? { label: status, cls: 'badge-pending' };
   return <span className={`kds-badge ${cls}`}>{label}</span>;
 }
 
+// Item row: tappable to advance individually, strikethrough when done
 function ItemRow({ item, onAdvance }) {
   const rowCls = {
     pending:     'item-row-pending',
@@ -203,23 +209,21 @@ function ItemRow({ item, onAdvance }) {
     cancelled:   'item-row-cancelled',
   }[item.status] ?? 'item-row-pending';
 
+  const canTap = item.status === 'pending' || item.status === 'in_progress';
+
   return (
-    <div className={`kds-item-row ${rowCls}`}>
-      <span className="kds-item-name">{item.name}</span>
+    <div
+      className={`kds-item-row ${rowCls} ${canTap ? 'item-row-tappable' : ''}`}
+      onClick={canTap ? () => onAdvance(item.kdsId, item.status) : undefined}
+    >
+      {/* Checkbox-style indicator */}
+      <span className={`item-check ${item.status === 'ready' ? 'item-check-done' : ''}`}>
+        {item.status === 'ready' ? '✓' : item.status === 'in_progress' ? '▶' : '○'}
+      </span>
+      <span className={`kds-item-name ${item.status === 'ready' ? 'item-name-done' : ''}`}>
+        {item.name}
+      </span>
       <span className="kds-item-qty">×{item.qty}</span>
-      {item.status === 'pending' && (
-        <button className="kds-item-btn btn-item-start" onClick={() => onAdvance(item.kdsId, item.status)}>
-          Start
-        </button>
-      )}
-      {item.status === 'in_progress' && (
-        <button className="kds-item-btn btn-item-done" onClick={() => onAdvance(item.kdsId, item.status)}>
-          Done
-        </button>
-      )}
-      {item.status === 'ready' && (
-        <span className="kds-item-done">✓ Ready</span>
-      )}
     </div>
   );
 }
@@ -249,17 +253,27 @@ function TimerLabel({ createdAt, status, readyAt }) {
 }
 
 // ─── Order card ──────────────────────────────────────────────────────────────
+// Touch-first design:
+//   • BIG action button at the bottom — easy to tap with a finger
+//   • Action label changes with state: START COOKING → MARK READY → SERVED ✓
+//   • Items tappable individually to advance one at a time
+//   • Void (cancel) is a small secondary link, not equal weight to the action
 
 function OrderCard({ group, onAdvanceItem, onAdvanceAll, onCancel }) {
   const orderStatus = deriveOrderStatus(group.items);
   const cardCls     = `kds-card status-${orderStatus}`;
 
-  const advanceAllLabel = orderStatus === 'pending' ? '▶ Start all' : '✓ Mark all ready';
-  const advanceAllCls   = orderStatus === 'pending' ? 'btn-start' : 'btn-ready';
+  // Primary action config per state
+  const actionMap = {
+    pending:     { label: 'START COOKING',  cls: 'btn-action-start',  icon: '▶' },
+    in_progress: { label: 'MARK READY',     cls: 'btn-action-ready',  icon: '✓' },
+    ready:       { label: 'SERVED ✓',       cls: 'btn-action-served', icon: ''  },
+  };
+  const action = actionMap[orderStatus] ?? actionMap.pending;
 
   return (
     <div className={cardCls}>
-      {/* Header */}
+      {/* Header — service type + timer */}
       <div className="kds-card-head">
         <div className="kds-card-head-left">
           <span className="kds-service-icon">{serviceIcon(group)}</span>
@@ -278,7 +292,7 @@ function OrderCard({ group, onAdvanceItem, onAdvanceAll, onCancel }) {
         </div>
       </div>
 
-      {/* Items */}
+      {/* Items — tap individually to advance */}
       <div className="kds-items">
         {group.items.map(item => (
           <ItemRow key={item.kdsId} item={item} onAdvance={onAdvanceItem} />
@@ -292,29 +306,27 @@ function OrderCard({ group, onAdvanceItem, onAdvanceAll, onCancel }) {
         </div>
       )}
 
-      {/* Actions */}
+      {/* Primary action — large touch target */}
       <div className="kds-card-actions">
-        {orderStatus !== 'ready' && orderStatus !== 'cancelled' && (
-          <button
-            className={`kds-btn-main ${advanceAllCls}`}
-            onClick={() => onAdvanceAll(group)}
-          >
-            {advanceAllLabel}
-          </button>
-        )}
-        {orderStatus === 'ready' && (
-          <button className="kds-btn-main btn-served" disabled>
-            ✨ Ready for pickup
-          </button>
-        )}
         <button
-          className="kds-btn-cancel"
-          onClick={() => onCancel(group.orderNumber)}
-          title="Cancel order"
+          className={`kds-btn-action ${action.cls} ${orderStatus === 'ready' ? 'btn-action-disabled' : ''}`}
+          onClick={() => orderStatus !== 'ready' && onAdvanceAll(group)}
+          disabled={orderStatus === 'ready'}
         >
-          ✕
+          {action.icon && <span className="btn-action-icon">{action.icon}</span>}
+          {action.label}
         </button>
       </div>
+
+      {/* Void — small secondary, below main action */}
+      {orderStatus !== 'ready' && (
+        <button
+          className="kds-btn-void"
+          onClick={() => onCancel(group.orderNumber)}
+        >
+          Void order
+        </button>
+      )}
     </div>
   );
 }
@@ -775,15 +787,10 @@ const KDS_CSS = `
     gap: 7px;
     color: #f0f0f0;
   }
-  .kds-ws-dot {
-    width: 7px; height: 7px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
+  .kds-ws-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
   .dot-live    { background: #22c55e; }
   .dot-offline { background: #ef4444; }
   .kds-ws-label { font-size: 12px; color: #555; font-weight: 400; }
-
   .kds-header-tabs {
     display: flex;
     gap: 2px;
@@ -803,17 +810,8 @@ const KDS_CSS = `
     font-weight: 400;
     transition: all .15s;
   }
-  .kds-tab-active {
-    background: #2a2a2a;
-    color: #f0f0f0;
-    font-weight: 500;
-  }
-  .kds-header-right {
-    margin-left: auto;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
+  .kds-tab-active { background: #2a2a2a; color: #f0f0f0; font-weight: 500; }
+  .kds-header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
   .kds-sound-btn {
     padding: 5px 12px;
     border-radius: 6px;
@@ -824,10 +822,7 @@ const KDS_CSS = `
     cursor: pointer;
     transition: all .15s;
   }
-  .kds-sound-btn.sound-on {
-    color: #22c55e;
-    border-color: #22c55e44;
-  }
+  .kds-sound-btn.sound-on { color: #22c55e; border-color: #22c55e44; }
   .kds-logout-btn {
     padding: 5px 12px;
     border-radius: 6px;
@@ -836,7 +831,6 @@ const KDS_CSS = `
     background: transparent;
     color: #666;
     cursor: pointer;
-    transition: all .15s;
   }
   .kds-logout-btn:hover { color: #f0f0f0; border-color: #444; }
 
@@ -874,11 +868,7 @@ const KDS_CSS = `
     color: #aaa;
   }
   .pill-active .pill-count { background: #333; color: #f0f0f0; }
-  .kds-sort-hint {
-    margin-left: auto;
-    font-size: 11px;
-    color: #444;
-  }
+  .kds-sort-hint { margin-left: auto; font-size: 11px; color: #444; }
 
   /* Board */
   .kds-board {
@@ -886,8 +876,8 @@ const KDS_CSS = `
     overflow-y: auto;
     padding: 16px 20px;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
-    gap: 12px;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 14px;
     align-content: start;
   }
 
@@ -905,145 +895,117 @@ const KDS_CSS = `
   .kds-empty p   { font-size: 16px; color: #555; }
   .kds-empty-sub { font-size: 13px; color: #383838; }
 
-  /* Order card */
+  /* ── Order card ─────────────────────────────────────────────────────────── */
   .kds-card {
     background: #141414;
-    border-radius: 10px;
-    border: 1px solid #252525;
+    border-radius: 12px;
+    border: 2px solid #252525;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    /* Slightly larger shadow on new orders so they pop */
+    box-shadow: 0 0 0 0 transparent;
+    transition: border-color .2s;
   }
-  .kds-card.status-pending     { border-color: #7f1d1d88; }
-  .kds-card.status-in_progress { border-color: #7c2d1288; }
-  .kds-card.status-ready       { border-color: #14532d88; }
-  .kds-card.status-cancelled   { opacity: .5; }
+  /* Color-coded left border by status — industry standard */
+  .kds-card.status-pending     { border-color: #ef4444; }
+  .kds-card.status-in_progress { border-color: #f97316; }
+  .kds-card.status-ready       { border-color: #22c55e; }
+  .kds-card.status-cancelled   { opacity: .4; border-color: #374151; }
 
   /* Card head */
   .kds-card-head {
-    padding: 10px 13px;
+    padding: 12px 14px 10px;
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
     border-bottom: 1px solid #1a1a1a;
   }
-  .kds-card-head-left {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-  }
-  .kds-service-icon { font-size: 18px; line-height: 1; }
-  .kds-service-label { font-size: 15px; font-weight: 500; color: #f0f0f0; }
-  .kds-order-id      { font-size: 11px; color: #555; margin-top: 1px; }
-  .kds-card-head-right {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 4px;
-  }
+  .kds-card-head-left { display: flex; align-items: center; gap: 9px; }
+  .kds-service-icon   { font-size: 20px; line-height: 1; }
+  .kds-service-label  { font-size: 16px; font-weight: 500; color: #f0f0f0; }
+  .kds-order-id       { font-size: 11px; color: #555; margin-top: 2px; }
+  .kds-card-head-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 
   /* Status badge */
   .kds-badge {
     font-size: 11px;
-    padding: 2px 8px;
+    padding: 3px 9px;
     border-radius: 12px;
-    font-weight: 500;
+    font-weight: 600;
     white-space: nowrap;
+    letter-spacing: .04em;
+    text-transform: uppercase;
   }
-  .badge-pending     { background: #7f1d1d33; color: #fca5a5; border: 0.5px solid #7f1d1d; }
-  .badge-in-progress { background: #7c2d1233; color: #fdba74; border: 0.5px solid #7c2d12; }
-  .badge-ready       { background: #14532d33; color: #86efac; border: 0.5px solid #14532d; }
-  .badge-cancelled   { background: #1f2937;   color: #6b7280; border: 0.5px solid #374151; }
+  .badge-pending     { background: #ef444422; color: #fca5a5; border: 1px solid #ef444466; }
+  .badge-in-progress { background: #f9731622; color: #fdba74; border: 1px solid #f9731666; }
+  .badge-ready       { background: #22c55e22; color: #86efac; border: 1px solid #22c55e66; }
+  .badge-cancelled   { background: #1f2937;   color: #6b7280; border: 1px solid #374151; }
 
   /* Timer */
   .kds-timer    { font-size: 11px; }
-  .timer-danger { color: #ef4444; font-weight: 500; }
+  .timer-danger { color: #ef4444; font-weight: 600; }
   .timer-warn   { color: #f97316; }
   .timer-ok     { color: #555; }
 
-  /* Items */
+  /* ── Item rows ─────────────────────────────────────────────────────────── */
   .kds-items {
     padding: 8px 10px;
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 4px;
     flex: 1;
   }
-
-  /* Each item row is a colored pill — red/amber/green per status */
   .kds-item-row {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 6px 10px;
-    border-radius: 7px;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
     border-left: 3px solid transparent;
+    transition: background .1s;
+    min-height: 44px; /* touch-friendly minimum */
   }
-  .item-row-pending {
-    background: #7f1d1d22;
-    border-left-color: #ef4444;
+  /* Tappable rows get a clear active state */
+  .item-row-tappable { cursor: pointer; }
+  .item-row-tappable:active { opacity: 0.7; transform: scale(0.98); }
+
+  .item-row-pending     { background: #ef444418; border-left-color: #ef4444; }
+  .item-row-cooking     { background: #f9731618; border-left-color: #f97316; }
+  .item-row-ready       { background: #22c55e18; border-left-color: #22c55e; }
+  .item-row-cancelled   { background: #1f293733; border-left-color: #374151; opacity: .5; }
+
+  /* Checkbox-style indicator */
+  .item-check {
+    font-size: 14px;
+    width: 18px;
+    text-align: center;
+    flex-shrink: 0;
+    color: #555;
   }
-  .item-row-cooking {
-    background: #7c2d1222;
-    border-left-color: #f97316;
-  }
-  .item-row-ready {
-    background: #14532d22;
-    border-left-color: #22c55e;
-  }
-  .item-row-cancelled {
-    background: #1f293733;
-    border-left-color: #374151;
-    opacity: .5;
-  }
+  .item-row-pending .item-check   { color: #ef4444; }
+  .item-row-cooking .item-check   { color: #f97316; }
+  .item-check-done                { color: #22c55e !important; }
+
   .kds-item-name {
-    font-size: 13px;
-    color: #d0d0d0;
+    font-size: 14px;
+    color: #e0e0e0;
     flex: 1;
     line-height: 1.3;
   }
-  .item-row-pending   .kds-item-name { color: #fca5a5; }
-  .item-row-cooking   .kds-item-name { color: #fdba74; }
-  .item-row-ready     .kds-item-name { color: #86efac; }
+  .item-row-pending .kds-item-name   { color: #fca5a5; }
+  .item-row-cooking .kds-item-name   { color: #fdba74; }
+  .item-row-ready   .kds-item-name   { color: #86efac; }
   .item-row-cancelled .kds-item-name { color: #6b7280; text-decoration: line-through; }
-  .kds-item-qty {
-    font-size: 12px;
-    color: #777;
-    flex-shrink: 0;
-  }
-  .kds-item-btn {
-    font-size: 11px;
-    padding: 2px 9px;
-    border-radius: 10px;
-    border: none;
-    cursor: pointer;
-    flex-shrink: 0;
-    font-weight: 500;
-    transition: all .1s;
-    white-space: nowrap;
-  }
-  .btn-item-start {
-    background: #1d4ed8;
-    color: #bfdbfe;
-  }
-  .btn-item-start:hover { background: #2563eb; }
-  .btn-item-done {
-    background: #15803d;
-    color: #bbf7d0;
-  }
-  .btn-item-done:hover { background: #16a34a; }
-  .kds-item-done {
-    font-size: 11px;
-    color: #22c55e;
-    flex-shrink: 0;
-    font-weight: 500;
-    letter-spacing: .02em;
-  }
+  /* Strikethrough when item is done */
+  .item-name-done { text-decoration: line-through; color: #86efac !important; }
+
+  .kds-item-qty { font-size: 13px; color: #666; flex-shrink: 0; font-weight: 500; }
 
   /* Special notes */
   .kds-notes {
-    margin: 0 13px 10px;
-    padding: 7px 10px;
+    margin: 2px 12px 8px;
+    padding: 8px 10px;
     border-radius: 6px;
     border-left: 3px solid #eab308;
     background: #eab30810;
@@ -1052,42 +1014,51 @@ const KDS_CSS = `
     line-height: 1.4;
   }
 
-  /* Card actions */
-  .kds-card-actions {
-    padding: 10px 13px;
-    border-top: 1px solid #1a1a1a;
-    display: flex;
-    gap: 8px;
-  }
-  .kds-btn-main {
-    flex: 1;
-    padding: 7px;
-    border-radius: 7px;
-    font-size: 13px;
-    font-weight: 500;
+  /* ── Primary action button — BIG, touch-friendly ────────────────────────── */
+  .kds-card-actions { padding: 10px 12px 4px; }
+
+  .kds-btn-action {
+    width: 100%;
+    padding: 16px;           /* tall = easy to tap */
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: .06em;
     border: none;
     cursor: pointer;
-    transition: all .1s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: opacity .1s, transform .1s;
+    -webkit-tap-highlight-color: transparent;
   }
-  .btn-start  { background: #1d4ed8; color: #bfdbfe; }
-  .btn-start:hover { background: #2563eb; }
-  .btn-ready  { background: #15803d; color: #bbf7d0; }
-  .btn-ready:hover { background: #16a34a; }
-  .btn-served { background: #1a1a1a; color: #555; cursor: default; }
-  .kds-btn-cancel {
-    padding: 7px 11px;
-    border-radius: 7px;
-    font-size: 13px;
-    border: 0.5px solid #2a2a2a;
-    background: transparent;
-    color: #555;
-    cursor: pointer;
-    transition: all .1s;
-    flex-shrink: 0;
-  }
-  .kds-btn-cancel:hover { color: #ef4444; border-color: #ef444466; }
+  .kds-btn-action:active { opacity: 0.85; transform: scale(0.98); }
 
-  /* History */
+  .btn-action-start  { background: #1d4ed8; color: #fff; }
+  .btn-action-ready  { background: #15803d; color: #fff; }
+  .btn-action-served { background: #1a2e1a; color: #22c55e; cursor: default; }
+  .btn-action-disabled { opacity: 1; }
+
+  .btn-action-icon { font-size: 16px; }
+
+  /* Void — small, secondary, below the main action */
+  .kds-btn-void {
+    width: 100%;
+    padding: 10px;
+    background: transparent;
+    border: none;
+    color: #3f3f3f;
+    font-size: 12px;
+    cursor: pointer;
+    text-align: center;
+    transition: color .15s;
+    margin-bottom: 4px;
+  }
+  .kds-btn-void:hover { color: #ef4444; }
+  .kds-btn-void:active { color: #dc2626; }
+
+  /* ── History ─────────────────────────────────────────────────────────────── */
   .kds-history {
     flex: 1;
     display: flex;
@@ -1103,16 +1074,8 @@ const KDS_CSS = `
     color: #666;
   }
   .kds-history-count { margin-left: auto; font-size: 12px; color: #444; }
-  .kds-history-scroll {
-    flex: 1;
-    overflow-y: auto;
-    padding: 0 20px 20px;
-  }
-  .kds-hist-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-  }
+  .kds-history-scroll { flex: 1; overflow-y: auto; padding: 0 20px 20px; }
+  .kds-hist-table { width: 100%; border-collapse: collapse; font-size: 13px; }
   .kds-hist-table th {
     text-align: left;
     padding: 10px 12px;
