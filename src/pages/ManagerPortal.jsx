@@ -7,9 +7,18 @@
 //      available, which prevented the entire component from mounting —
 //      including the Queue tab. No subscription gating needed in the manager
 //      portal; all features are available to authenticated managers.
+//
+// MENU TAB: Added Excel catalog upload flow.
+//   - Manager downloads the template, edits prices/names, re-uploads.
+//   - xlsx (SheetJS) parses the file in-browser — no server round-trip for
+//     parsing, so large files never time out.
+//   - Preview table shows all rows before confirming.
+//   - On confirm, rows are POSTed to POST /api/menu/upload (new endpoint).
+//   - Backend upserts into menu_items and triggers slot-availability refresh.
 // ============================================================================
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import { useAuth } from '../contexts/AuthContext';
 import { format, parseISO } from 'date-fns';
 
@@ -44,6 +53,37 @@ function safeFormat(dateVal, fmt) {
 // ─── Active order statuses — the ONLY statuses that keep a table "occupied" ──
 const ACTIVE_ORDER_STATUSES = ['pending', 'confirmed', 'in_progress'];
 
+// ─── Excel column → DB field mapping ─────────────────────────────────────────
+// Matches the columns in the catalog Excel template (WhatsApp Catalog sheet).
+const SLOT_LABEL_TO_DB = {
+  'morning tiffin': 'morning_tiffin',
+  'lunch':          'lunch',
+  'evening snacks': 'evening_snacks',
+  'dinner tiffin':  'dinner_tiffin',
+};
+
+function mapExcelRowToMenuItem(row) {
+  // Support both the template column names and lowercase variants
+  const id          = String(row['id']          || row['ID']          || '').trim();
+  const name        = String(row['title']        || row['name']        || row['Title'] || row['Name'] || '').trim();
+  const description = String(row['description']  || row['Description'] || '').trim();
+  const priceRaw    = row['price']               || row['Price']       || 0;
+  const price       = parseFloat(String(priceRaw).replace(/[^0-9.]/g, '')) || 0;
+  const slotRaw     = String(row['custom_label_0'] || row['time_slot'] || row['category'] || '').trim().toLowerCase();
+  const time_slot   = SLOT_LABEL_TO_DB[slotRaw] || 'morning_tiffin';
+  const image_url   = String(row['image_link']   || row['image_url']   || '').trim();
+
+  return { id, name, description, price, time_slot, image_url };
+}
+
+function validateRow(row, index) {
+  const errors = [];
+  if (!row.id)    errors.push(`Row ${index + 1}: missing id`);
+  if (!row.name)  errors.push(`Row ${index + 1}: missing name/title`);
+  if (row.price <= 0) errors.push(`Row ${index + 1} (${row.name || row.id}): price must be > 0`);
+  return errors;
+}
+
 export default function ManagerPortal() {
   const { user, apiClient, logout } = useAuth();
 
@@ -62,11 +102,20 @@ export default function ManagerPortal() {
   const [tokens,         setTokens]         = useState([]);
   const [assigningToken, setAssigningToken] = useState(null);
   const [assignTableSel, setAssignTableSel] = useState({});
-  const [activeTab,      setActiveTab]      = useState('queue'); // default to queue
+  const [activeTab,      setActiveTab]      = useState('queue');
   const [toastMsg,       setToastMsg]       = useState('');
 
   // ── "free table" modal ─────────────────────────────────────────────────────
   const [freeTableModal, setFreeTableModal] = useState(null);
+
+  // ── menu upload state ──────────────────────────────────────────────────────
+  const [uploadFile,      setUploadFile]      = useState(null);   // File object
+  const [uploadRows,      setUploadRows]       = useState([]);    // parsed rows
+  const [uploadErrors,    setUploadErrors]     = useState([]);    // validation errors
+  const [uploadDragOver,  setUploadDragOver]   = useState(false);
+  const [uploadStatus,    setUploadStatus]     = useState('idle'); // idle|parsing|preview|uploading|done|error
+  const [uploadResult,    setUploadResult]     = useState(null);  // { upserted, skipped, errors }
+  const fileInputRef = useRef(null);
 
   // ─── toast helper ──────────────────────────────────────────────────────────
   const showToast = (msg) => {
@@ -299,6 +348,104 @@ export default function ManagerPortal() {
     }
   };
 
+  // ─── menu upload helpers ───────────────────────────────────────────────────
+
+  const parseExcelFile = (file) => {
+    setUploadStatus('parsing');
+    setUploadErrors([]);
+    setUploadRows([]);
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const workbook  = XLSX.read(e.target.result, { type: 'array' });
+
+        // Try "WhatsApp Catalog" sheet first, then fall back to first sheet
+        const sheetName = workbook.SheetNames.includes('WhatsApp Catalog')
+          ? 'WhatsApp Catalog'
+          : workbook.SheetNames[0];
+
+        const sheet     = workbook.Sheets[sheetName];
+        const rawRows   = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+        if (rawRows.length === 0) {
+          setUploadErrors(['The selected sheet appears to be empty. Make sure you are uploading the correct file.']);
+          setUploadStatus('idle');
+          return;
+        }
+
+        const mapped = rawRows.map(mapExcelRowToMenuItem);
+
+        // Filter out completely empty rows (id and name both blank)
+        const nonEmpty = mapped.filter(r => r.id || r.name);
+
+        const allErrors = nonEmpty.flatMap((r, i) => validateRow(r, i));
+
+        setUploadRows(nonEmpty);
+        setUploadErrors(allErrors);
+        setUploadStatus('preview');
+      } catch (err) {
+        console.error('Excel parse error:', err);
+        setUploadErrors([`Could not read the file: ${err.message}`]);
+        setUploadStatus('idle');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleFileSelect = (file) => {
+    if (!file) return;
+    const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls') || file.name.endsWith('.csv');
+    if (!isExcel) {
+      setUploadErrors(['Please upload an Excel file (.xlsx or .xls) or CSV.']);
+      return;
+    }
+    setUploadFile(file);
+    parseExcelFile(file);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setUploadDragOver(false);
+    const file = e.dataTransfer.files[0];
+    handleFileSelect(file);
+  };
+
+  const handleConfirmUpload = async () => {
+    if (uploadErrors.length > 0) {
+      showToast('Fix the errors before uploading');
+      return;
+    }
+    setUploadStatus('uploading');
+    try {
+      const res = await apiClient.post('/api/menu/upload', { items: uploadRows });
+      setUploadResult(res.data);
+      setUploadStatus('done');
+      await fetchMenuItems();
+      showToast(`✅ Menu updated — ${res.data.upserted} items saved`);
+    } catch (err) {
+      console.error('Menu upload failed:', err);
+      setUploadErrors([`Upload failed: ${err.response?.data?.error || err.message}`]);
+      setUploadStatus('preview');
+    }
+  };
+
+  const handleResetUpload = () => {
+    setUploadFile(null);
+    setUploadRows([]);
+    setUploadErrors([]);
+    setUploadStatus('idle');
+    setUploadResult(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const SLOT_DB_TO_LABEL = {
+    morning_tiffin: 'Morning Tiffin',
+    lunch:          'Lunch',
+    evening_snacks: 'Evening Snacks',
+    dinner_tiffin:  'Dinner Tiffin',
+  };
+
   // ─── loading screen ────────────────────────────────────────────────────────
   if (loading) {
     return (
@@ -445,6 +592,7 @@ export default function ManagerPortal() {
             { key: 'queue',  label: `Queue${waitingTokens.length ? ` (${waitingTokens.length})` : ''}` },
             { key: 'tables', label: 'Tables' },
             { key: 'orders', label: 'Active Orders' },
+            { key: 'menu',   label: 'Menu' },
           ].map(tab => (
             <button
               key={tab.key}
@@ -481,7 +629,7 @@ export default function ManagerPortal() {
               ) : (
                 <div className="grid gap-4">
                   {waitingTokens.map(token => {
-                    const avail      = availableTablesFor(token.pax);
+                    const avail       = availableTablesFor(token.pax);
                     const isAssigning = assigningToken === token.id;
                     return (
                       <div key={token.id} className="bg-white rounded-xl shadow-sm p-5 border border-orange-100">
@@ -714,6 +862,250 @@ export default function ManagerPortal() {
                 <div className="bg-white rounded-xl p-10 text-center text-gray-400 shadow-sm">No active orders.</div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* ════════════════════════════════════════════════════════════════════
+            TAB: MENU
+        ════════════════════════════════════════════════════════════════════ */}
+        {activeTab === 'menu' && (
+          <div className="space-y-8">
+
+            {/* ── Section header ─────────────────────────────────────────── */}
+            <div className="flex items-start justify-between flex-wrap gap-4">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900">Menu Management</h2>
+                <p className="text-gray-500 text-sm mt-1">
+                  Upload the catalog Excel file to update prices, names, or add new items.
+                  Changes go live within 60 seconds.
+                </p>
+              </div>
+              <a
+                href="/catalog_template.xlsx"
+                download
+                className="flex items-center gap-2 bg-white border border-gray-300 hover:border-blue-500 text-gray-700 hover:text-blue-600 font-semibold text-sm px-4 py-2.5 rounded-lg transition"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Download template
+              </a>
+            </div>
+
+            {/* ── Upload zone ────────────────────────────────────────────── */}
+            {uploadStatus === 'idle' && (
+              <div
+                onDragOver={e => { e.preventDefault(); setUploadDragOver(true); }}
+                onDragLeave={() => setUploadDragOver(false)}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+                className={`cursor-pointer border-2 border-dashed rounded-2xl px-8 py-14 text-center transition ${
+                  uploadDragOver
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-gray-300 bg-white hover:border-blue-400 hover:bg-blue-50'
+                }`}
+              >
+                <svg className="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <p className="text-gray-700 font-semibold text-lg mb-1">
+                  Drop your catalog Excel file here
+                </p>
+                <p className="text-gray-400 text-sm">or click to browse — .xlsx, .xls, or .csv</p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  className="hidden"
+                  onChange={e => handleFileSelect(e.target.files[0])}
+                />
+              </div>
+            )}
+
+            {/* ── Parsing spinner ────────────────────────────────────────── */}
+            {uploadStatus === 'parsing' && (
+              <div className="bg-white rounded-2xl p-12 text-center shadow-sm">
+                <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+                <p className="text-gray-600 font-medium">Reading file…</p>
+              </div>
+            )}
+
+            {/* ── Preview ────────────────────────────────────────────────── */}
+            {uploadStatus === 'preview' && (
+              <div className="space-y-4">
+
+                {/* file name pill + reset */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 text-blue-700 text-sm font-semibold px-4 py-2 rounded-full">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    {uploadFile?.name} &mdash; {uploadRows.length} rows found
+                  </div>
+                  <button
+                    onClick={handleResetUpload}
+                    className="text-sm text-gray-400 hover:text-red-500 transition"
+                  >
+                    ✕ Choose different file
+                  </button>
+                </div>
+
+                {/* validation errors */}
+                {uploadErrors.length > 0 && (
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                    <p className="text-red-700 font-semibold text-sm mb-2">
+                      ⚠️ {uploadErrors.length} issue{uploadErrors.length !== 1 ? 's' : ''} found — fix in the Excel file and re-upload
+                    </p>
+                    <ul className="list-disc list-inside space-y-1">
+                      {uploadErrors.map((e, i) => (
+                        <li key={i} className="text-red-600 text-xs">{e}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* preview table */}
+                <div className="bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-100">
+                          <th className="text-left px-4 py-3 font-semibold text-gray-600 w-20">ID</th>
+                          <th className="text-left px-4 py-3 font-semibold text-gray-600">Name</th>
+                          <th className="text-left px-4 py-3 font-semibold text-gray-600 w-32">Slot</th>
+                          <th className="text-right px-4 py-3 font-semibold text-gray-600 w-24">Price</th>
+                          <th className="text-left px-4 py-3 font-semibold text-gray-600 hidden md:table-cell">Description</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {uploadRows.map((row, i) => {
+                          const hasError = uploadErrors.some(e => e.includes(`Row ${i + 1}`));
+                          return (
+                            <tr
+                              key={i}
+                              className={hasError ? 'bg-red-50' : 'hover:bg-gray-50'}
+                            >
+                              <td className="px-4 py-3 font-mono text-xs text-gray-500">{row.id}</td>
+                              <td className="px-4 py-3 font-medium text-gray-900">{row.name}</td>
+                              <td className="px-4 py-3">
+                                <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">
+                                  {SLOT_DB_TO_LABEL[row.time_slot] || row.time_slot}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-right font-semibold text-gray-900">
+                                ₹{row.price.toFixed(2)}
+                              </td>
+                              <td className="px-4 py-3 text-gray-400 text-xs hidden md:table-cell max-w-xs truncate">
+                                {row.description}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* action buttons */}
+                <div className="flex gap-3 justify-end">
+                  <button
+                    onClick={handleResetUpload}
+                    className="px-5 py-2.5 rounded-lg border border-gray-300 text-gray-600 font-semibold text-sm hover:bg-gray-50 transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleConfirmUpload}
+                    disabled={uploadErrors.length > 0}
+                    className="px-6 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-semibold text-sm transition flex items-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                    </svg>
+                    Confirm & Upload {uploadRows.length} items
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ── Uploading spinner ──────────────────────────────────────── */}
+            {uploadStatus === 'uploading' && (
+              <div className="bg-white rounded-2xl p-12 text-center shadow-sm">
+                <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+                <p className="text-gray-700 font-semibold">Saving to database…</p>
+                <p className="text-gray-400 text-sm mt-1">This usually takes a few seconds</p>
+              </div>
+            )}
+
+            {/* ── Done ──────────────────────────────────────────────────── */}
+            {uploadStatus === 'done' && uploadResult && (
+              <div className="bg-green-50 border border-green-200 rounded-2xl p-8 text-center">
+                <p className="text-4xl mb-3">✅</p>
+                <p className="text-green-800 font-bold text-xl mb-1">Menu updated successfully</p>
+                <p className="text-green-600 text-sm mb-4">
+                  {uploadResult.upserted} item{uploadResult.upserted !== 1 ? 's' : ''} saved
+                  {uploadResult.skipped > 0 ? ` · ${uploadResult.skipped} skipped` : ''}
+                  {' '}· Changes go live within 60 seconds
+                </p>
+                <button
+                  onClick={handleResetUpload}
+                  className="px-5 py-2 rounded-lg bg-green-700 hover:bg-green-800 text-white font-semibold text-sm transition"
+                >
+                  Upload another file
+                </button>
+              </div>
+            )}
+
+            {/* ── Current menu (live view) ───────────────────────────────── */}
+            <div>
+              <h3 className="text-lg font-bold text-gray-900 mb-4">
+                Current menu
+                <span className="ml-2 text-sm font-normal text-gray-400">({menuItems.length} items)</span>
+              </h3>
+
+              {menuItems.length === 0 ? (
+                <div className="bg-white rounded-xl p-8 text-center text-gray-400 shadow-sm">
+                  No menu items yet. Upload the catalog Excel to get started.
+                </div>
+              ) : (
+                <div className="bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-100">
+                          <th className="text-left px-4 py-3 font-semibold text-gray-600">Name</th>
+                          <th className="text-left px-4 py-3 font-semibold text-gray-600 w-36">Slot</th>
+                          <th className="text-right px-4 py-3 font-semibold text-gray-600 w-24">Price</th>
+                          <th className="text-center px-4 py-3 font-semibold text-gray-600 w-28">Available</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {menuItems.map(item => (
+                          <tr key={item.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 font-medium text-gray-900">{item.name}</td>
+                            <td className="px-4 py-3">
+                              <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">
+                                {SLOT_DB_TO_LABEL[item.time_slot] || item.time_slot}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-right font-semibold text-gray-900">
+                              ₹{Number(item.price).toFixed(2)}
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              {item.is_available
+                                ? <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold">Now</span>
+                                : <span className="text-xs bg-gray-100 text-gray-400 px-2 py-0.5 rounded-full font-semibold">Off</span>
+                              }
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+
           </div>
         )}
 
