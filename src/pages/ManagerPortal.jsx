@@ -4,7 +4,10 @@
 //
 // FIX: Removed all useSubscription / hasFeature / hasAnyOf / FEATURES usage.
 //
-// MENU TAB: Added Excel catalog upload flow.
+// MENU TAB: Added Excel catalog upload flow + real-time availability toggle.
+//   - Toggle switch on each menu item → PUT /api/menu-items/:id/availability
+//   - Updates is_stocked in DB + pushes to Meta catalog immediately
+//   - Excel is_available column now passed through to backend
 //
 // Fix 22 — Large Party Approval:
 //   A new "🟣 Pending Approval" section in the Queue tab shows large_party
@@ -63,7 +66,13 @@ function mapExcelRowToMenuItem(row) {
   const slotRaw     = String(row['custom_label_0'] || row['time_slot'] || row['category'] || '').trim().toLowerCase();
   const time_slot   = SLOT_LABEL_TO_DB[slotRaw] || 'morning_tiffin';
   const image_url   = String(row['image_link']   || row['image_url']   || '').trim();
-  return { id, name, description, price, time_slot, image_url };
+  // PATCH: read is_available from Excel → is_stocked in DB (permanent OOS flag)
+  // Accepts TRUE/FALSE, 1/0, yes/no (case-insensitive). Absent column = omit (defaults to true).
+  const availRaw    = row['is_available'] ?? row['Is Available'] ?? row['is_stocked'] ?? '';
+  const is_available = availRaw === '' ? undefined
+    : !['false', '0', 'no'].includes(String(availRaw).toLowerCase().trim());
+  return { id, name, description, price, time_slot, image_url,
+           ...(is_available !== undefined ? { is_available } : {}) };
 }
 
 function validateRow(row, index) {
@@ -95,10 +104,9 @@ export default function ManagerPortal() {
 
   const [freeTableModal, setFreeTableModal] = useState(null);
 
-  // ── Large party reject modal state ────────────────────────────────────────
-  const [rejectModal,    setRejectModal]    = useState(null);  // { tokenId, tokenName, pax }
+  const [rejectModal,    setRejectModal]    = useState(null);
   const [rejectReason,   setRejectReason]   = useState('');
-  const [processingId,   setProcessingId]   = useState(null);  // token being approved/rejected
+  const [processingId,   setProcessingId]   = useState(null);
 
   const [uploadFile,      setUploadFile]      = useState(null);
   const [uploadRows,      setUploadRows]       = useState([]);
@@ -107,6 +115,9 @@ export default function ManagerPortal() {
   const [uploadStatus,    setUploadStatus]     = useState('idle');
   const [uploadResult,    setUploadResult]     = useState(null);
   const fileInputRef = useRef(null);
+
+  // PATCH: toggle state for mid-service availability changes
+  const [togglingId, setTogglingId] = useState(null);
 
   const showToast = (msg) => {
     setToastMsg(msg);
@@ -142,7 +153,9 @@ export default function ManagerPortal() {
 
   const fetchMenuItems = useCallback(async () => {
     try {
-      const res = await apiClient.get('/api/menu-items');
+      // PATCH: ignore_slot=true so ALL items show in the menu table,
+      // not just those matching the current time slot
+      const res = await apiClient.get('/api/menu-items?ignore_slot=true');
       setMenuItems(res.data.items || res.data || []);
     } catch (err) {
       console.error('Failed to fetch menu items:', err.message);
@@ -194,12 +207,12 @@ export default function ManagerPortal() {
     meta:         t.meta || {},
   });
 
-  const normalisedTokens    = tokens.map(normaliseToken);
-  const waitingTokens       = normalisedTokens.filter(t => t.status === 'waiting');
-  const seatedTokens        = normalisedTokens.filter(t => t.status === 'seated');
-  const takeawayTokens      = normalisedTokens.filter(t => t.status === 'takeaway');
+  const normalisedTokens      = tokens.map(normaliseToken);
+  const waitingTokens         = normalisedTokens.filter(t => t.status === 'waiting');
+  const seatedTokens          = normalisedTokens.filter(t => t.status === 'seated');
+  const takeawayTokens        = normalisedTokens.filter(t => t.status === 'takeaway');
   const pendingApprovalTokens = normalisedTokens.filter(t => t.status === 'pending_approval');
-  const freeTablesCount     = tables.filter(t => getTableStatus(t).status === 'available').length;
+  const freeTablesCount       = tables.filter(t => getTableStatus(t).status === 'available').length;
 
   const openFreeTableModal = (table) => {
     const { order, token } = getTableStatus(table);
@@ -263,7 +276,7 @@ export default function ManagerPortal() {
     }
   };
 
-  // ─── Token helpers ─────────────────────────────────────────────────────────
+  // ─── Token helpers ──────────────────────────────────────────────────────────
 
   const assignTable = async (token) => {
     const tableId = assignTableSel[token.id];
@@ -303,7 +316,33 @@ export default function ManagerPortal() {
     }
   };
 
-  // ─── Order helpers ─────────────────────────────────────────────────────────
+  // ─── Menu availability toggle (PATCH) ─────────────────────────────────────
+  // Real-time mid-service: when an item runs out, manager taps the toggle.
+  // Calls PUT /api/menu-items/:id/availability → updates is_stocked in DB
+  // + immediately pushes to Meta catalog (single item, ~2 seconds).
+  // No Excel upload or restart needed.
+
+  const toggleAvailability = async (item) => {
+    setTogglingId(item.id);
+    const newValue = !(item.is_stocked ?? item.is_available);
+    try {
+      await apiClient.put(`/api/menu-items/${item.id}/availability`, { is_available: newValue });
+      // Optimistic update so the toggle flips immediately in the UI
+      setMenuItems(prev => prev.map(m =>
+        m.id === item.id ? { ...m, is_stocked: newValue, is_available: newValue } : m
+      ));
+      showToast(newValue
+        ? `✅ ${item.name} is back in stock`
+        : `⛔ ${item.name} marked out of stock — WhatsApp catalog updated`
+      );
+    } catch (err) {
+      showToast(`❌ Failed to update ${item.name}: ${err.message}`);
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
+  // ─── Order helpers ──────────────────────────────────────────────────────────
 
   const createOrder = async () => {
     if (!selectedTable || selectedItems.length === 0) { showToast('Please select a table and items'); return; }
@@ -342,7 +381,7 @@ export default function ManagerPortal() {
     }
   };
 
-  // ─── Menu upload helpers ───────────────────────────────────────────────────
+  // ─── Menu upload helpers ────────────────────────────────────────────────────
 
   const parseExcelFile = (file) => {
     setUploadStatus('parsing'); setUploadErrors([]); setUploadRows([]);
@@ -412,56 +451,40 @@ export default function ManagerPortal() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100">
 
-      {/* ── Toast ─────────────────────────────────────────────────────────── */}
+      {/* ── Toast ──────────────────────────────────────────────────────────── */}
       {toastMsg && (
         <div className="fixed bottom-6 right-6 z-50 bg-gray-900 text-white text-sm font-medium px-5 py-3 rounded-xl shadow-xl">
           {toastMsg}
         </div>
       )}
 
-      {/* ── Reject reason modal ────────────────────────────────────────────── */}
+      {/* ── Reject reason modal ─────────────────────────────────────────────── */}
       {rejectModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden">
             <div className="bg-red-600 text-white px-6 py-5">
               <h3 className="text-lg font-bold">Reject Large Party Request</h3>
-              <p className="text-red-100 text-sm mt-0.5">
-                {rejectModal.tokenName} · {rejectModal.pax} people
-              </p>
+              <p className="text-red-100 text-sm mt-0.5">{rejectModal.tokenName} · {rejectModal.pax} people</p>
             </div>
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">
                   Reason <span className="text-gray-400 font-normal">(optional — sent to customer)</span>
                 </label>
-                <textarea
-                  value={rejectReason}
-                  onChange={e => setRejectReason(e.target.value)}
+                <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)}
                   placeholder="e.g. Not enough space tonight, try reserving for tomorrow"
-                  rows={3}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400 resize-none"
-                />
+                  rows={3} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400 resize-none" />
               </div>
               <div className="flex gap-3">
-                <button
-                  onClick={() => setRejectModal(null)}
-                  className="flex-1 px-4 py-2.5 rounded-lg border border-gray-300 text-gray-600 font-semibold text-sm hover:bg-gray-50 transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={confirmReject}
-                  className="flex-1 px-4 py-2.5 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold text-sm transition"
-                >
-                  Reject & Notify
-                </button>
+                <button onClick={() => setRejectModal(null)} className="flex-1 px-4 py-2.5 rounded-lg border border-gray-300 text-gray-600 font-semibold text-sm hover:bg-gray-50 transition">Cancel</button>
+                <button onClick={confirmReject} className="flex-1 px-4 py-2.5 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold text-sm transition">Reject & Notify</button>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── Free Table Modal ───────────────────────────────────────────────── */}
+      {/* ── Free Table Modal ────────────────────────────────────────────────── */}
       {freeTableModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden">
@@ -498,7 +521,7 @@ export default function ManagerPortal() {
         </div>
       )}
 
-      {/* ── Header ────────────────────────────────────────────────────────── */}
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="bg-white shadow-lg">
         <div className="max-w-7xl mx-auto px-6 py-6">
           <div className="flex justify-between items-center">
@@ -528,7 +551,7 @@ export default function ManagerPortal() {
 
       <div className="max-w-7xl mx-auto px-6 py-8">
 
-        {/* ── Stats bar ─────────────────────────────────────────────────────── */}
+        {/* ── Stats bar ──────────────────────────────────────────────────────── */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
           {[
             { label: 'Approval Needed', value: pendingApprovalTokens.length, colour: 'bg-purple-50 border-purple-200 text-purple-700' },
@@ -544,7 +567,7 @@ export default function ManagerPortal() {
           ))}
         </div>
 
-        {/* ── Tab bar ───────────────────────────────────────────────────────── */}
+        {/* ── Tab bar ────────────────────────────────────────────────────────── */}
         <div className="flex gap-2 mb-6 bg-white rounded-xl p-1.5 shadow-sm w-fit">
           {[
             { key: 'queue',  label: `Queue${(waitingTokens.length + pendingApprovalTokens.length) ? ` (${waitingTokens.length + pendingApprovalTokens.length})` : ''}` },
@@ -559,13 +582,12 @@ export default function ManagerPortal() {
           ))}
         </div>
 
-        {/* ════════════════════════════════════════════════════════════════════
+        {/* ══════════════════════════════════════════════════════════════════════
             TAB: QUEUE
-        ════════════════════════════════════════════════════════════════════ */}
+        ══════════════════════════════════════════════════════════════════════ */}
         {activeTab === 'queue' && (
           <div className="space-y-10">
 
-            {/* ── Fix 22: Pending Approval section ─────────────────────────── */}
             {pendingApprovalTokens.length > 0 && (
               <section>
                 <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
@@ -581,7 +603,6 @@ export default function ManagerPortal() {
                     const tableLines = combo.length > 0
                       ? combo.map(t => `Table ${t[0]} (${t[2]}/${t[1]} seats)`).join(' + ')
                       : `${token.pax} seats across multiple tables`;
-
                     return (
                       <div key={token.id} className="bg-white rounded-xl shadow-sm p-5 border border-purple-200">
                         <div className="flex items-start gap-4">
@@ -591,35 +612,22 @@ export default function ManagerPortal() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-bold text-gray-900 text-lg">{token.id}</span>
-                              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${TOKEN_PILL.pending_approval}`}>
-                                Needs Approval
-                              </span>
+                              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${TOKEN_PILL.pending_approval}`}>Needs Approval</span>
                             </div>
                             <p className="text-gray-600 text-sm mt-0.5">
                               {token.name} · <strong>{token.pax} people</strong> · Arrived {safeFormat(token.arrived_at, 'HH:mm')}
                             </p>
                             {token.phone && <p className="text-gray-400 text-xs mt-0.5">📱 +{token.phone}</p>}
-
-                            {/* Table combination suggestion */}
                             <div className="mt-2 bg-purple-50 border border-purple-100 rounded-lg px-3 py-2 text-xs text-purple-800">
                               <span className="font-semibold">Proposed split: </span>{tableLines}
                             </div>
-
                             <div className="flex items-center gap-2 mt-3 flex-wrap">
-                              <button
-                                onClick={() => approveToken(token)}
-                                disabled={isProcessing}
-                                className="bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-1"
-                              >
-                                {isProcessing
-                                  ? <><span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" /> Processing...</>
-                                  : '✅ Approve'}
+                              <button onClick={() => approveToken(token)} disabled={isProcessing}
+                                className="bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-1">
+                                {isProcessing ? <><span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" /> Processing...</> : '✅ Approve'}
                               </button>
-                              <button
-                                onClick={() => openRejectModal(token)}
-                                disabled={isProcessing}
-                                className="bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 text-sm font-semibold px-4 py-2 rounded-lg transition disabled:opacity-50"
-                              >
+                              <button onClick={() => openRejectModal(token)} disabled={isProcessing}
+                                className="bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 text-sm font-semibold px-4 py-2 rounded-lg transition disabled:opacity-50">
                                 ❌ Reject
                               </button>
                             </div>
@@ -632,20 +640,17 @@ export default function ManagerPortal() {
               </section>
             )}
 
-            {/* ── Waiting for Table ─────────────────────────────────────────── */}
             <section>
               <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
                 🟠 Waiting for Table
-                <span className="text-sm font-normal text-gray-500">
-                  ({waitingTokens.length} token{waitingTokens.length !== 1 ? 's' : ''})
-                </span>
+                <span className="text-sm font-normal text-gray-500">({waitingTokens.length} token{waitingTokens.length !== 1 ? 's' : ''})</span>
               </h2>
               {waitingTokens.length === 0 ? (
                 <div className="bg-white rounded-xl p-8 text-center text-gray-400 shadow-sm">No customers waiting right now.</div>
               ) : (
                 <div className="grid gap-4">
                   {waitingTokens.map(token => {
-                    const avail       = availableTablesFor(token.pax);
+                    const avail = availableTablesFor(token.pax);
                     const isAssigning = assigningToken === token.id;
                     return (
                       <div key={token.id} className="bg-white rounded-xl shadow-sm p-5 border border-orange-100">
@@ -663,12 +668,8 @@ export default function ManagerPortal() {
                             </p>
                             {token.phone && <p className="text-gray-400 text-xs mt-0.5">📱 +{token.phone}</p>}
                             <div className="flex items-center gap-2 mt-3 flex-wrap">
-                              <select
-                                value={assignTableSel[token.id] || ''}
-                                onChange={e => setAssignTableSel(prev => ({ ...prev, [token.id]: e.target.value }))}
-                                disabled={avail.length === 0}
-                                className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:opacity-50"
-                              >
+                              <select value={assignTableSel[token.id] || ''} onChange={e => setAssignTableSel(prev => ({ ...prev, [token.id]: e.target.value }))}
+                                disabled={avail.length === 0} className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:opacity-50">
                                 <option value="">{avail.length === 0 ? 'No tables available' : '— assign table —'}</option>
                                 {avail.map(t => (
                                   <option key={t.id} value={t.id}>
@@ -676,14 +677,9 @@ export default function ManagerPortal() {
                                   </option>
                                 ))}
                               </select>
-                              <button
-                                onClick={() => assignTable(token)}
-                                disabled={!assignTableSel[token.id] || isAssigning}
-                                className="bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-1"
-                              >
-                                {isAssigning
-                                  ? <><span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" /> Assigning...</>
-                                  : '✓ Assign + Notify'}
+                              <button onClick={() => assignTable(token)} disabled={!assignTableSel[token.id] || isAssigning}
+                                className="bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-1">
+                                {isAssigning ? <><span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" /> Assigning...</> : '✓ Assign + Notify'}
                               </button>
                               <button onClick={() => dismissToken(token.id)} className="text-gray-400 hover:text-red-500 text-sm px-2 py-2 transition" title="Dismiss token">✕</button>
                             </div>
@@ -743,9 +739,9 @@ export default function ManagerPortal() {
           </div>
         )}
 
-        {/* ════════════════════════════════════════════════════════════════════
+        {/* ══════════════════════════════════════════════════════════════════════
             TAB: TABLES
-        ════════════════════════════════════════════════════════════════════ */}
+        ══════════════════════════════════════════════════════════════════════ */}
         {activeTab === 'tables' && (
           <div>
             <h2 className="text-2xl font-bold text-gray-900 mb-6">Table Allocation</h2>
@@ -759,11 +755,9 @@ export default function ManagerPortal() {
                     <p className="capitalize text-sm mb-2">{status}</p>
                     {token && <p className="text-xs opacity-90 bg-black bg-opacity-20 px-2 py-1 rounded mb-1">Token: {token.id}</p>}
                     {order && <p className="text-xs opacity-80 bg-black bg-opacity-20 px-2 py-1 rounded mb-3">Order: {order.order_number?.slice(-4)}</p>}
-                    {status === 'occupied' ? (
-                      <button onClick={() => openFreeTableModal(table)} className="mt-auto text-xs bg-white bg-opacity-25 hover:bg-opacity-40 border border-white border-opacity-50 px-3 py-1.5 rounded-lg font-semibold transition w-full">Mark Available</button>
-                    ) : (
-                      <button onClick={() => { setSelectedTable(table.id); setShowNewOrder(true); }} className="mt-auto text-xs bg-white bg-opacity-25 hover:bg-opacity-40 border border-white border-opacity-50 px-3 py-1.5 rounded-lg font-semibold transition w-full">+ New Order</button>
-                    )}
+                    {status === 'occupied'
+                      ? <button onClick={() => openFreeTableModal(table)} className="mt-auto text-xs bg-white bg-opacity-25 hover:bg-opacity-40 border border-white border-opacity-50 px-3 py-1.5 rounded-lg font-semibold transition w-full">Mark Available</button>
+                      : <button onClick={() => { setSelectedTable(table.id); setShowNewOrder(true); }} className="mt-auto text-xs bg-white bg-opacity-25 hover:bg-opacity-40 border border-white border-opacity-50 px-3 py-1.5 rounded-lg font-semibold transition w-full">+ New Order</button>}
                   </div>
                 );
               })}
@@ -778,9 +772,9 @@ export default function ManagerPortal() {
           </div>
         )}
 
-        {/* ════════════════════════════════════════════════════════════════════
+        {/* ══════════════════════════════════════════════════════════════════════
             TAB: ORDERS
-        ════════════════════════════════════════════════════════════════════ */}
+        ══════════════════════════════════════════════════════════════════════ */}
         {activeTab === 'orders' && (
           <div>
             <h2 className="text-2xl font-bold text-gray-900 mb-6">Active Orders</h2>
@@ -827,15 +821,17 @@ export default function ManagerPortal() {
           </div>
         )}
 
-        {/* ════════════════════════════════════════════════════════════════════
+        {/* ══════════════════════════════════════════════════════════════════════
             TAB: MENU
-        ════════════════════════════════════════════════════════════════════ */}
+        ══════════════════════════════════════════════════════════════════════ */}
         {activeTab === 'menu' && (
           <div className="space-y-8">
             <div className="flex items-start justify-between flex-wrap gap-4">
               <div>
                 <h2 className="text-2xl font-bold text-gray-900">Menu Management</h2>
-                <p className="text-gray-500 text-sm mt-1">Upload the catalog Excel file to update prices, names, or add new items. Changes go live within 60 seconds.</p>
+                <p className="text-gray-500 text-sm mt-1">
+                  Toggle items in/out of stock instantly, or upload the catalog Excel to update prices, names, or add new items.
+                </p>
               </div>
               <a href="/catalog_template.xlsx" download className="flex items-center gap-2 bg-white border border-gray-300 hover:border-blue-500 text-gray-700 hover:text-blue-600 font-semibold text-sm px-4 py-2.5 rounded-lg transition">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
@@ -916,7 +912,7 @@ export default function ManagerPortal() {
               <div className="bg-white rounded-2xl p-12 text-center shadow-sm">
                 <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
                 <p className="text-gray-700 font-semibold">Saving to database…</p>
-                <p className="text-gray-400 text-sm mt-1">This usually takes a few seconds</p>
+                <p className="text-gray-400 text-sm mt-1">Updating Meta catalog in the background</p>
               </div>
             )}
 
@@ -927,16 +923,20 @@ export default function ManagerPortal() {
                 <p className="text-green-600 text-sm mb-4">
                   {uploadResult.upserted} item{uploadResult.upserted !== 1 ? 's' : ''} saved
                   {uploadResult.skipped > 0 ? ` · ${uploadResult.skipped} skipped` : ''}
-                  {' '}· Changes go live within 60 seconds
+                  {' '}· WhatsApp catalog updated · Slot scheduler syncs within 60s
                 </p>
                 <button onClick={handleResetUpload} className="px-5 py-2 rounded-lg bg-green-700 hover:bg-green-800 text-white font-semibold text-sm transition">Upload another file</button>
               </div>
             )}
 
+            {/* ── Current menu table with availability toggles (PATCH) ───── */}
             <div>
-              <h3 className="text-lg font-bold text-gray-900 mb-4">
-                Current menu <span className="ml-2 text-sm font-normal text-gray-400">({menuItems.length} items)</span>
-              </h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-gray-900">
+                  Current menu <span className="ml-2 text-sm font-normal text-gray-400">({menuItems.length} items · all slots)</span>
+                </h3>
+                <p className="text-xs text-gray-400">Toggle to mark items in/out of stock instantly</p>
+              </div>
               {menuItems.length === 0 ? (
                 <div className="bg-white rounded-xl p-8 text-center text-gray-400 shadow-sm">No menu items yet. Upload the catalog Excel to get started.</div>
               ) : (
@@ -947,21 +947,45 @@ export default function ManagerPortal() {
                         <th className="text-left px-4 py-3 font-semibold text-gray-600">Name</th>
                         <th className="text-left px-4 py-3 font-semibold text-gray-600 w-36">Slot</th>
                         <th className="text-right px-4 py-3 font-semibold text-gray-600 w-24">Price</th>
-                        <th className="text-center px-4 py-3 font-semibold text-gray-600 w-28">Available</th>
+                        <th className="text-center px-4 py-3 font-semibold text-gray-600 w-32">In Stock</th>
                       </tr></thead>
                       <tbody className="divide-y divide-gray-50">
-                        {menuItems.map(item => (
-                          <tr key={item.id} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 font-medium text-gray-900">{item.name}</td>
-                            <td className="px-4 py-3"><span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">{SLOT_DB_TO_LABEL[item.time_slot] || item.time_slot}</span></td>
-                            <td className="px-4 py-3 text-right font-semibold text-gray-900">₹{Number(item.price).toFixed(2)}</td>
-                            <td className="px-4 py-3 text-center">
-                              {item.is_available
-                                ? <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold">Now</span>
-                                : <span className="text-xs bg-gray-100 text-gray-400 px-2 py-0.5 rounded-full font-semibold">Off</span>}
-                            </td>
-                          </tr>
-                        ))}
+                        {menuItems.map(item => {
+                          const inStock = item.is_stocked ?? item.is_available;
+                          const isToggling = togglingId === item.id;
+                          return (
+                            <tr key={item.id} className={`hover:bg-gray-50 ${!inStock ? 'opacity-60' : ''}`}>
+                              <td className="px-4 py-3">
+                                <span className="font-medium text-gray-900">{item.name}</span>
+                                {!inStock && <span className="ml-2 text-xs text-red-500 font-semibold">Out of stock</span>}
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">
+                                  {SLOT_DB_TO_LABEL[item.time_slot] || item.time_slot}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-right font-semibold text-gray-900">₹{Number(item.price).toFixed(2)}</td>
+                              <td className="px-4 py-3 text-center">
+                                {/* PATCH: toggle switch — tap to flip in/out of stock */}
+                                <button
+                                  onClick={() => toggleAvailability(item)}
+                                  disabled={isToggling}
+                                  title={inStock ? 'In stock — tap to mark out of stock' : 'Out of stock — tap to mark in stock'}
+                                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 disabled:opacity-50
+                                    ${inStock ? 'bg-green-500' : 'bg-gray-300'}`}
+                                >
+                                  {isToggling
+                                    ? <span className="absolute inset-0 flex items-center justify-center">
+                                        <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                      </span>
+                                    : <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform
+                                        ${inStock ? 'translate-x-6' : 'translate-x-1'}`} />
+                                  }
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -973,7 +997,7 @@ export default function ManagerPortal() {
 
       </div>
 
-      {/* ── Order Detail Modal ─────────────────────────────────────────────── */}
+      {/* ── Order Detail Modal ───────────────────────────────────────────────── */}
       {selectedOrder && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-2xl max-w-lg w-full">
@@ -1016,7 +1040,7 @@ export default function ManagerPortal() {
         </div>
       )}
 
-      {/* ── New Order Modal ─────────────────────────────────────────────────── */}
+      {/* ── New Order Modal ──────────────────────────────────────────────────── */}
       {showNewOrder && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-2xl max-w-2xl w-full max-h-96 overflow-y-auto">
