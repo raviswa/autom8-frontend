@@ -950,7 +950,15 @@ export default function ManagerPortal() {
                         <th className="text-center px-4 py-3 font-semibold text-gray-600 w-32">In Stock</th>
                       </tr></thead>
                       <tbody className="divide-y divide-gray-50">
-                        {menuItems.map(item => {
+                        {[...menuItems].sort((a, b) => {
+                          // OOS items always at the bottom regardless of slot
+                          const aStock = a.is_stocked ?? a.is_available ?? true;
+                          const bStock = b.is_stocked ?? b.is_available ?? true;
+                          if (aStock !== bStock) return aStock ? -1 : 1;
+                          // Within same stock state: sort by slot then name
+                          if (a.time_slot !== b.time_slot) return (a.time_slot || '').localeCompare(b.time_slot || '');
+                          return (a.name || '').localeCompare(b.name || '');
+                        }).map(item => {
                           const inStock = item.is_stocked ?? item.is_available;
                           const isToggling = togglingId === item.id;
                           return (
