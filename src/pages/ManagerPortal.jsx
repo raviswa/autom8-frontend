@@ -244,8 +244,9 @@ export default function ManagerPortal() {
     setProcessingId(token.id);
     try {
       await apiClient.put(`/api/tokens/${token.id}/approve`);
-      showToast(`✅ ${token.id} approved — customer notified`);
-      await fetchTokens();
+      showToast(`✅ ${token.id} approved — tables assigned, customer notified`);
+      // Fetch both — approval marks tables as occupied so Tables tab must refresh too
+      await Promise.all([fetchTokens(), fetchTables()]);
     } catch (err) {
       console.error('Failed to approve token:', err);
       showToast(`❌ Approve failed: ${err.message}`);
