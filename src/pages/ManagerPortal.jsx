@@ -56,19 +56,6 @@ const TOKEN_PILL = {
   pending_approval: 'bg-purple-100 text-purple-700',
 };
 
-function safeFormat(dateVal, fmt) {
-  if (!dateVal) return '—';
-  try {
-    const d = typeof dateVal === 'string' ? parseISO(dateVal) : new Date(dateVal);
-    if (isNaN(d.getTime())) return '—';
-    return format(d, fmt);
-  } catch {
-    return '—';
-  }
-}
-
-
-
 
 const ACTIVE_ORDER_STATUSES = ['pending', 'confirmed', 'in_progress'];
 
