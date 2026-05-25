@@ -355,6 +355,12 @@ export default function ManagerPortal() {
     setShowNewOrder(false);
     const tableId = selectedTable;
     const items = selectedItems.map(item => ({ menu_item_id: item.id, quantity: item.quantity || 1, special_instructions: item.special_instructions }));
+    const itemsForKOT = selectedItems.map(item => ({
+      kdsId: item.id,
+      name:  item.name,
+      qty:   item.quantity || 1,
+      note:  item.special_instructions || null,
+    }));
     setSelectedItems([]); setSelectedTable(null);
     try {
       const res = await apiClient.post('/api/orders', { table_id: tableId, items, notes: '' });
