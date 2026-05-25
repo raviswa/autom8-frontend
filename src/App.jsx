@@ -7,6 +7,8 @@ import { AuthProvider, useAuth }                            from './contexts/Aut
 import { WebSocketProvider }                                from './contexts/WebSocketContext';
 import { SubscriptionProvider, useSubscription, FEATURES }  from './contexts/SubscriptionContext';
 
+import { KOTPrintTemplate } from './components/KOTPrint';
+export const kotRef = React.createRef();
 import LoginPage          from './pages/LoginPage';
 import OwnerDashboard     from './pages/OwnerDashboard';
 import MarketingDashboard from './pages/MarketingDashboard';
