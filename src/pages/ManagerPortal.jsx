@@ -20,6 +20,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { useAuth } from '../contexts/AuthContext';
+import { useKOTPrint } from '../components/KOTPrint';
+import { kotRef } from '../App';
 import { format, parseISO } from 'date-fns';
 
 const TABLE_COLOURS = {
@@ -85,7 +87,8 @@ function validateRow(row, index) {
 
 export default function ManagerPortal() {
   const { user, apiClient, logout } = useAuth();
-
+  const { printConsolidated } = useKOTPrint(kotRef);
+  
   const [tables,        setTables]        = useState([]);
   const [orders,        setOrders]        = useState([]);
   const [menuItems,     setMenuItems]     = useState([]);
@@ -354,8 +357,21 @@ export default function ManagerPortal() {
     const items = selectedItems.map(item => ({ menu_item_id: item.id, quantity: item.quantity || 1, special_instructions: item.special_instructions }));
     setSelectedItems([]); setSelectedTable(null);
     try {
-      await apiClient.post('/api/orders', { table_id: tableId, items, notes: '' });
+      const res = await apiClient.post('/api/orders', { table_id: tableId, items, notes: '' });
+      const newOrder = res.data.order;
       await fetchOrders(); await fetchTables();
+
+      // Auto-print KOT to kitchen printer
+      const table = tables.find(t => t.id === tableId);
+      printConsolidated({
+        orderNumber:  newOrder.order_number,
+        tableNumber:  table?.table_number ?? null,
+        tableSection: table?.section ?? null,
+        serviceType:  'Dine-in',
+        captainName:  user?.full_name ?? null,
+        specialNotes: null,
+        items: itemsForKOT,
+      });
     } catch (err) {
       showToast('Error creating order: ' + err.message);
     } finally {
