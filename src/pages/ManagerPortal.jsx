@@ -232,7 +232,19 @@ export default function ManagerPortal() {
         try { await apiClient.put(`/api/tokens/${token.id}/complete`); }
         catch (tokErr) { console.warn('Could not complete token:', tokErr.message); }
       }
+    
       await apiClient.put(`/api/tables/${tableId}/status`, { status: 'available' });
+
+      // Queue feedback request — backend will send WhatsApp after 2 hours
+      if (token?.phone) {
+        await apiClient.post('/api/feedback/queue', {
+          customer_phone: token.phone,
+          customer_name:  token.name,
+          token_number:   token.id,
+          table_number:   String(tableNumber),
+        }).catch(e => console.warn('[feedback-queue] Non-fatal:', e.message));
+      }
+
       await fetchTables(); await fetchOrders(); await fetchTokens();
       showToast(`✅ Table ${tableNumber} is now available`);
     } catch (err) {
