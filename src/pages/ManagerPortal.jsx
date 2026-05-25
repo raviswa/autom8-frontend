@@ -15,6 +15,13 @@
 //   and proposed table split. Two buttons: Approve and Reject (with optional
 //   reason). On Approve the bot notifies the customer and the token moves to
 //   the normal waiting queue. On Reject the customer is offered a reservation.
+//
+// Fix 23 — Menu Tab:
+//   - Download template now generates the .xlsx client-side via SheetJS
+//     (avoids the broken static-file fallback that served index.html).
+//   - Upload preview table now shows the image_link / image_url column so
+//     managers can verify image URLs before confirming the upload.
+//   - Current menu table also shows a truncated image URL per row.
 // ============================================================================
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -22,10 +29,10 @@ import * as XLSX from 'xlsx';
 import { useAuth } from '../contexts/AuthContext';
 import { useKOTPrint } from '../components/KOTPrint';
 import { kotRef } from '../App';
-import { format, parseISO } from 'date-fns';
+import { format } from 'date-fns';
 
 
-// ── Add near the top of the file, alongside other helpers ──────────────────
+// ── Date helpers ────────────────────────────────────────────────────────────
 function toUTC(iso) {
   if (!iso) return iso;
   return iso.toString().replace(' ', 'T').replace(/([+-]\d{2}:\d{2}|Z)$/, '') + 'Z';
@@ -34,13 +41,51 @@ function toUTC(iso) {
 function safeFormat(dateVal, fmt) {
   if (!dateVal) return '—';
   try {
-    const d = new Date(toUTC(dateVal));           // ← was parseISO(dateVal)
+    const d = new Date(toUTC(dateVal));
     if (isNaN(d.getTime())) return '—';
     return format(d, fmt);
   } catch {
     return '—';
   }
 }
+
+// ── Fix 23: generate catalog template client-side via SheetJS ───────────────
+// Avoids the React SPA serving index.html for unknown static paths.
+function downloadCatalogTemplate() {
+  const headers = [
+    'id',
+    'title',
+    'description',
+    'price',
+    'custom_label_0',
+    'image_link',
+    'is_available',
+  ];
+  const exampleRows = [
+    ['D001', 'Idli (2 pcs)', 'Soft steamed idlis served with sambar and chutney', 30, 'Morning Tiffin', 'https://example.com/idli.jpg', 'TRUE'],
+    ['D002', 'Ghee Rice + Kurma', 'Fragrant ghee rice with vegetable kurma', 90, 'Lunch', 'https://example.com/ghee-rice.jpg', 'TRUE'],
+    ['E001', 'Bajji (4 pcs)', 'Crispy vegetable bajjis', 30, 'Evening Snacks', '', 'TRUE'],
+  ];
+
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...exampleRows]);
+
+  // Column widths for readability
+  ws['!cols'] = [
+    { wch: 8  },  // id
+    { wch: 28 },  // title
+    { wch: 45 },  // description
+    { wch: 8  },  // price
+    { wch: 16 },  // custom_label_0
+    { wch: 48 },  // image_link
+    { wch: 14 },  // is_available
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'WhatsApp Catalog');
+  XLSX.writeFile(wb, 'catalog_template.xlsx');
+}
+
+// ── Constants ───────────────────────────────────────────────────────────────
 const TABLE_COLOURS = {
   available: 'bg-green-500',
   occupied:  'bg-blue-500',
@@ -56,7 +101,6 @@ const TOKEN_PILL = {
   pending_approval: 'bg-purple-100 text-purple-700',
 };
 
-
 const ACTIVE_ORDER_STATUSES = ['pending', 'confirmed', 'in_progress'];
 
 const SLOT_LABEL_TO_DB = {
@@ -66,36 +110,54 @@ const SLOT_LABEL_TO_DB = {
   'dinner tiffin':  'dinner_tiffin',
 };
 
+const SLOT_DB_TO_LABEL = {
+  morning_tiffin: 'Morning Tiffin',
+  lunch:          'Lunch',
+  evening_snacks: 'Evening Snacks',
+  dinner_tiffin:  'Dinner Tiffin',
+};
+
+// ── Excel row mapper ─────────────────────────────────────────────────────────
 function mapExcelRowToMenuItem(row) {
-  const id          = String(row['id']          || row['ID']          || '').trim();
-  const name        = String(row['title']        || row['name']        || row['Title'] || row['Name'] || '').trim();
-  const description = String(row['description']  || row['Description'] || '').trim();
-  const priceRaw    = row['price']               || row['Price']       || 0;
+  const id          = String(row['id']           || row['ID']          || '').trim();
+  const name        = String(row['title']         || row['name']        || row['Title'] || row['Name'] || '').trim();
+  const description = String(row['description']   || row['Description'] || '').trim();
+  const priceRaw    = row['price']                || row['Price']       || 0;
   const price       = parseFloat(String(priceRaw).replace(/[^0-9.]/g, '')) || 0;
   const slotRaw     = String(row['custom_label_0'] || row['time_slot'] || row['category'] || '').trim().toLowerCase();
   const time_slot   = SLOT_LABEL_TO_DB[slotRaw] || 'morning_tiffin';
-  const image_url   = String(row['image_link']   || row['image_url']   || '').trim();
-  // PATCH: read is_available from Excel → is_stocked in DB (permanent OOS flag)
+  // Fix 23: read image_link / image_url column so it appears in preview + gets sent to backend
+  const image_url   = String(row['image_link']    || row['image_url']   || row['Image Link'] || row['Image URL'] || '').trim();
+
+  // is_available → is_stocked in DB (permanent OOS flag)
   // Accepts TRUE/FALSE, 1/0, yes/no (case-insensitive). Absent column = omit (defaults to true).
   const availRaw    = row['is_available'] ?? row['Is Available'] ?? row['is_stocked'] ?? '';
-  const is_available = availRaw === '' ? undefined
+  const is_available = availRaw === ''
+    ? undefined
     : !['false', '0', 'no'].includes(String(availRaw).toLowerCase().trim());
-  return { id, name, description, price, time_slot, image_url,
-           ...(is_available !== undefined ? { is_available } : {}) };
+
+  return {
+    id, name, description, price, time_slot, image_url,
+    ...(is_available !== undefined ? { is_available } : {}),
+  };
 }
 
 function validateRow(row, index) {
   const errors = [];
-  if (!row.id)    errors.push(`Row ${index + 1}: missing id`);
-  if (!row.name)  errors.push(`Row ${index + 1}: missing name/title`);
+  if (!row.id)        errors.push(`Row ${index + 1}: missing id`);
+  if (!row.name)      errors.push(`Row ${index + 1}: missing name/title`);
   if (row.price <= 0) errors.push(`Row ${index + 1} (${row.name || row.id}): price must be > 0`);
   return errors;
 }
 
+// ============================================================================
+// COMPONENT
+// ============================================================================
+
 export default function ManagerPortal() {
   const { user, apiClient, logout } = useAuth();
   const { printConsolidated } = useKOTPrint(kotRef);
-  
+
   const [tables,        setTables]        = useState([]);
   const [orders,        setOrders]        = useState([]);
   const [menuItems,     setMenuItems]     = useState([]);
@@ -114,25 +176,27 @@ export default function ManagerPortal() {
 
   const [freeTableModal, setFreeTableModal] = useState(null);
 
-  const [rejectModal,    setRejectModal]    = useState(null);
-  const [rejectReason,   setRejectReason]   = useState('');
-  const [processingId,   setProcessingId]   = useState(null);
+  const [rejectModal,  setRejectModal]  = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [processingId, setProcessingId] = useState(null);
 
-  const [uploadFile,      setUploadFile]      = useState(null);
-  const [uploadRows,      setUploadRows]       = useState([]);
-  const [uploadErrors,    setUploadErrors]     = useState([]);
-  const [uploadDragOver,  setUploadDragOver]   = useState(false);
-  const [uploadStatus,    setUploadStatus]     = useState('idle');
-  const [uploadResult,    setUploadResult]     = useState(null);
+  const [uploadFile,     setUploadFile]     = useState(null);
+  const [uploadRows,     setUploadRows]     = useState([]);
+  const [uploadErrors,   setUploadErrors]   = useState([]);
+  const [uploadDragOver, setUploadDragOver] = useState(false);
+  const [uploadStatus,   setUploadStatus]   = useState('idle');
+  const [uploadResult,   setUploadResult]   = useState(null);
   const fileInputRef = useRef(null);
 
-  // PATCH: toggle state for mid-service availability changes
+  // toggle state for mid-service availability changes
   const [togglingId, setTogglingId] = useState(null);
 
   const showToast = (msg) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(''), 3500);
   };
+
+  // ── Data fetchers ──────────────────────────────────────────────────────────
 
   const fetchTokens = useCallback(async () => {
     try {
@@ -163,8 +227,7 @@ export default function ManagerPortal() {
 
   const fetchMenuItems = useCallback(async () => {
     try {
-      // PATCH: ignore_slot=true so ALL items show in the menu table,
-      // not just those matching the current time slot
+      // ignore_slot=true → manager view: all items across all slots + all stock states
       const res = await apiClient.get('/api/menu-items?ignore_slot=true');
       setMenuItems(res.data.items || res.data || []);
     } catch (err) {
@@ -191,9 +254,11 @@ export default function ManagerPortal() {
     };
   }, [fetchData, fetchTokens, fetchTables, fetchOrders]);
 
+  // ── Table helpers ──────────────────────────────────────────────────────────
+
   const getTableStatus = (table) => {
-    const order = orders.find(o => o.table_id === table.id && ACTIVE_ORDER_STATUSES.includes(o.status));
-    const token = tokens.find(t => t.table_id === table.id && t.status === 'seated');
+    const order    = orders.find(o => o.table_id === table.id && ACTIVE_ORDER_STATUSES.includes(o.status));
+    const token    = tokens.find(t => t.table_id === table.id && t.status === 'seated');
     const dbStatus = table.status || 'available';
     return { status: (order || token) ? 'occupied' : dbStatus, order, token };
   };
@@ -203,6 +268,8 @@ export default function ManagerPortal() {
       const { status } = getTableStatus(t);
       return status === 'available' && (t.capacity == null || t.capacity >= pax);
     });
+
+  // ── Token normaliser ───────────────────────────────────────────────────────
 
   const normaliseToken = (t) => ({
     ...t,
@@ -224,6 +291,8 @@ export default function ManagerPortal() {
   const pendingApprovalTokens = normalisedTokens.filter(t => t.status === 'pending_approval');
   const freeTablesCount       = tables.filter(t => getTableStatus(t).status === 'available').length;
 
+  // ── Free table modal ───────────────────────────────────────────────────────
+
   const openFreeTableModal = (table) => {
     const { order, token } = getTableStatus(table);
     setFreeTableModal({ tableId: table.id, tableNumber: table.table_number, order: order || null, token: token || null });
@@ -239,10 +308,7 @@ export default function ManagerPortal() {
         try { await apiClient.put(`/api/tokens/${token.id}/complete`); }
         catch (tokErr) { console.warn('Could not complete token:', tokErr.message); }
       }
-    
       await apiClient.put(`/api/tables/${tableId}/status`, { status: 'available' });
-
-      // Queue feedback request — backend will send WhatsApp after 2 hours
       if (token?.phone) {
         await apiClient.post('/api/feedback/queue', {
           customer_phone: token.phone,
@@ -251,7 +317,6 @@ export default function ManagerPortal() {
           table_number:   String(tableNumber),
         }).catch(e => console.warn('[feedback-queue] Non-fatal:', e.message));
       }
-
       await fetchTables(); await fetchOrders(); await fetchTokens();
       showToast(`✅ Table ${tableNumber} is now available`);
     } catch (err) {
@@ -260,14 +325,13 @@ export default function ManagerPortal() {
     }
   };
 
-  // ─── Large party approval helpers ─────────────────────────────────────────
+  // ── Large party approval ───────────────────────────────────────────────────
 
   const approveToken = async (token) => {
     setProcessingId(token.id);
     try {
       await apiClient.put(`/api/tokens/${token.id}/approve`);
       showToast(`✅ ${token.id} approved — tables assigned, customer notified`);
-      // Fetch both — approval marks tables as occupied so Tables tab must refresh too
       await Promise.all([fetchTokens(), fetchTables()]);
     } catch (err) {
       console.error('Failed to approve token:', err);
@@ -299,7 +363,7 @@ export default function ManagerPortal() {
     }
   };
 
-  // ─── Token helpers ──────────────────────────────────────────────────────────
+  // ── Token helpers ──────────────────────────────────────────────────────────
 
   const assignTable = async (token) => {
     const tableId = assignTableSel[token.id];
@@ -310,7 +374,7 @@ export default function ManagerPortal() {
     try {
       await apiClient.put(`/api/tokens/${token.id}/assign`, { table_id: table.id, table_number: table.table_number });
       showToast(`✅ Token ${token.id} → Table ${table.table_number} · WhatsApp sent`);
-      setAssignTableSel(prev => { const n = {...prev}; delete n[token.id]; return n; });
+      setAssignTableSel(prev => { const n = { ...prev }; delete n[token.id]; return n; });
       await fetchTokens(); await fetchTables();
     } catch (err) {
       console.error('Failed to assign table:', err);
@@ -339,18 +403,15 @@ export default function ManagerPortal() {
     }
   };
 
-  // ─── Menu availability toggle (PATCH) ─────────────────────────────────────
-  // Real-time mid-service: when an item runs out, manager taps the toggle.
-  // Calls PUT /api/menu-items/:id/availability → updates is_stocked in DB
-  // + immediately pushes to Meta catalog (single item, ~2 seconds).
-  // No Excel upload or restart needed.
+  // ── Menu availability toggle ───────────────────────────────────────────────
+  // Real-time mid-service: PUT /api/menu-items/:id/availability
+  // Updates is_stocked in DB + immediately pushes to Meta catalog.
 
   const toggleAvailability = async (item) => {
     setTogglingId(item.id);
     const newValue = !(item.is_stocked ?? item.is_available);
     try {
       await apiClient.put(`/api/menu-items/${item.id}/availability`, { is_available: newValue });
-      // Optimistic update so the toggle flips immediately in the UI
       setMenuItems(prev => prev.map(m =>
         m.id === item.id ? { ...m, is_stocked: newValue, is_available: newValue } : m
       ));
@@ -365,7 +426,7 @@ export default function ManagerPortal() {
     }
   };
 
-  // ─── Order helpers ──────────────────────────────────────────────────────────
+  // ── Order helpers ──────────────────────────────────────────────────────────
 
   const createOrder = async () => {
     if (!selectedTable || selectedItems.length === 0) { showToast('Please select a table and items'); return; }
@@ -373,29 +434,24 @@ export default function ManagerPortal() {
     setIsSubmitting(true);
     setShowNewOrder(false);
     const tableId = selectedTable;
-    const items = selectedItems.map(item => ({ menu_item_id: item.id, quantity: item.quantity || 1, special_instructions: item.special_instructions }));
+    const items = selectedItems.map(item => ({
+      menu_item_id: item.id, quantity: item.quantity || 1,
+      special_instructions: item.special_instructions,
+    }));
     const itemsForKOT = selectedItems.map(item => ({
-      kdsId: item.id,
-      name:  item.name,
-      qty:   item.quantity || 1,
-      note:  item.special_instructions || null,
+      kdsId: item.id, name: item.name, qty: item.quantity || 1,
+      note: item.special_instructions || null,
     }));
     setSelectedItems([]); setSelectedTable(null);
     try {
       const res = await apiClient.post('/api/orders', { table_id: tableId, items, notes: '' });
       const newOrder = res.data.order;
       await fetchOrders(); await fetchTables();
-
-      // Auto-print KOT to kitchen printer
       const table = tables.find(t => t.id === tableId);
       printConsolidated({
-        orderNumber:  newOrder.order_number,
-        tableNumber:  table?.table_number ?? null,
-        tableSection: table?.section ?? null,
-        serviceType:  'Dine-in',
-        captainName:  user?.full_name ?? null,
-        specialNotes: null,
-        items: itemsForKOT,
+        orderNumber: newOrder.order_number, tableNumber: table?.table_number ?? null,
+        tableSection: table?.section ?? null, serviceType: 'Dine-in',
+        captainName: user?.full_name ?? null, specialNotes: null, items: itemsForKOT,
       });
     } catch (err) {
       showToast('Error creating order: ' + err.message);
@@ -423,7 +479,7 @@ export default function ManagerPortal() {
     }
   };
 
-  // ─── Menu upload helpers ────────────────────────────────────────────────────
+  // ── Menu upload helpers ────────────────────────────────────────────────────
 
   const parseExcelFile = (file) => {
     setUploadStatus('parsing'); setUploadErrors([]); setUploadRows([]);
@@ -431,12 +487,18 @@ export default function ManagerPortal() {
     reader.onload = (e) => {
       try {
         const workbook  = XLSX.read(e.target.result, { type: 'array' });
-        const sheetName = workbook.SheetNames.includes('WhatsApp Catalog') ? 'WhatsApp Catalog' : workbook.SheetNames[0];
-        const sheet     = workbook.Sheets[sheetName];
-        const rawRows   = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-        if (rawRows.length === 0) { setUploadErrors(['The selected sheet appears to be empty.']); setUploadStatus('idle'); return; }
-        const mapped   = rawRows.map(mapExcelRowToMenuItem);
-        const nonEmpty = mapped.filter(r => r.id || r.name);
+        const sheetName = workbook.SheetNames.includes('WhatsApp Catalog')
+          ? 'WhatsApp Catalog'
+          : workbook.SheetNames[0];
+        const sheet    = workbook.Sheets[sheetName];
+        const rawRows  = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+        if (rawRows.length === 0) {
+          setUploadErrors(['The selected sheet appears to be empty.']);
+          setUploadStatus('idle');
+          return;
+        }
+        const mapped    = rawRows.map(mapExcelRowToMenuItem);
+        const nonEmpty  = mapped.filter(r => r.id || r.name);
         const allErrors = nonEmpty.flatMap((r, i) => validateRow(r, i));
         setUploadRows(nonEmpty); setUploadErrors(allErrors); setUploadStatus('preview');
       } catch (err) {
@@ -464,7 +526,8 @@ export default function ManagerPortal() {
       await fetchMenuItems();
       showToast(`✅ Menu updated — ${res.data.upserted} items saved`);
     } catch (err) {
-      setUploadErrors([`Upload failed: ${err.response?.data?.error || err.message}`]); setUploadStatus('preview');
+      setUploadErrors([`Upload failed: ${err.response?.data?.error || err.message}`]);
+      setUploadStatus('preview');
     }
   };
 
@@ -474,10 +537,7 @@ export default function ManagerPortal() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const SLOT_DB_TO_LABEL = {
-    morning_tiffin: 'Morning Tiffin', lunch: 'Lunch',
-    evening_snacks: 'Evening Snacks', dinner_tiffin: 'Dinner Tiffin',
-  };
+  // ── Loading screen ─────────────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -489,6 +549,10 @@ export default function ManagerPortal() {
       </div>
     );
   }
+
+  // ============================================================================
+  // RENDER
+  // ============================================================================
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100">
@@ -872,19 +936,33 @@ export default function ManagerPortal() {
               <div>
                 <h2 className="text-2xl font-bold text-gray-900">Menu Management</h2>
                 <p className="text-gray-500 text-sm mt-1">
-                  Toggle items in/out of stock instantly, or upload the catalog Excel to update prices, names, or add new items.
+                  Toggle items in/out of stock instantly, or upload the catalog Excel to update prices, names, images, or add new items.
                 </p>
               </div>
-              <a href="/catalog_template.xlsx" download className="flex items-center gap-2 bg-white border border-gray-300 hover:border-blue-500 text-gray-700 hover:text-blue-600 font-semibold text-sm px-4 py-2.5 rounded-lg transition">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+
+              {/* Fix 23: generate template client-side so it never falls through to index.html */}
+              <button
+                onClick={downloadCatalogTemplate}
+                className="flex items-center gap-2 bg-white border border-gray-300 hover:border-blue-500 text-gray-700 hover:text-blue-600 font-semibold text-sm px-4 py-2.5 rounded-lg transition"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
                 Download template
-              </a>
+              </button>
             </div>
 
             {uploadStatus === 'idle' && (
-              <div onDragOver={e => { e.preventDefault(); setUploadDragOver(true); }} onDragLeave={() => setUploadDragOver(false)} onDrop={handleDrop} onClick={() => fileInputRef.current?.click()}
-                className={`cursor-pointer border-2 border-dashed rounded-2xl px-8 py-14 text-center transition ${uploadDragOver ? 'border-blue-500 bg-blue-50' : 'border-gray-300 bg-white hover:border-blue-400 hover:bg-blue-50'}`}>
-                <svg className="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              <div
+                onDragOver={e => { e.preventDefault(); setUploadDragOver(true); }}
+                onDragLeave={() => setUploadDragOver(false)}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+                className={`cursor-pointer border-2 border-dashed rounded-2xl px-8 py-14 text-center transition ${uploadDragOver ? 'border-blue-500 bg-blue-50' : 'border-gray-300 bg-white hover:border-blue-400 hover:bg-blue-50'}`}
+              >
+                <svg className="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
                 <p className="text-gray-700 font-semibold text-lg mb-1">Drop your catalog Excel file here</p>
                 <p className="text-gray-400 text-sm">or click to browse — .xlsx, .xls, or .csv</p>
                 <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => handleFileSelect(e.target.files[0])} />
@@ -902,27 +980,39 @@ export default function ManagerPortal() {
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 text-blue-700 text-sm font-semibold px-4 py-2 rounded-full">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
                     {uploadFile?.name} &mdash; {uploadRows.length} rows found
                   </div>
                   <button onClick={handleResetUpload} className="text-sm text-gray-400 hover:text-red-500 transition">✕ Choose different file</button>
                 </div>
+
                 {uploadErrors.length > 0 && (
                   <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-                    <p className="text-red-700 font-semibold text-sm mb-2">⚠️ {uploadErrors.length} issue{uploadErrors.length !== 1 ? 's' : ''} found — fix in the Excel file and re-upload</p>
-                    <ul className="list-disc list-inside space-y-1">{uploadErrors.map((e, i) => <li key={i} className="text-red-600 text-xs">{e}</li>)}</ul>
+                    <p className="text-red-700 font-semibold text-sm mb-2">
+                      ⚠️ {uploadErrors.length} issue{uploadErrors.length !== 1 ? 's' : ''} found — fix in the Excel file and re-upload
+                    </p>
+                    <ul className="list-disc list-inside space-y-1">
+                      {uploadErrors.map((e, i) => <li key={i} className="text-red-600 text-xs">{e}</li>)}
+                    </ul>
                   </div>
                 )}
+
+                {/* Fix 23: preview table now includes Image URL column */}
                 <div className="bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
-                      <thead><tr className="bg-gray-50 border-b border-gray-100">
-                        <th className="text-left px-4 py-3 font-semibold text-gray-600 w-20">ID</th>
-                        <th className="text-left px-4 py-3 font-semibold text-gray-600">Name</th>
-                        <th className="text-left px-4 py-3 font-semibold text-gray-600 w-32">Slot</th>
-                        <th className="text-right px-4 py-3 font-semibold text-gray-600 w-24">Price</th>
-                        <th className="text-left px-4 py-3 font-semibold text-gray-600 hidden md:table-cell">Description</th>
-                      </tr></thead>
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-100">
+                          <th className="text-left px-4 py-3 font-semibold text-gray-600 w-20">ID</th>
+                          <th className="text-left px-4 py-3 font-semibold text-gray-600">Name</th>
+                          <th className="text-left px-4 py-3 font-semibold text-gray-600 w-32">Slot</th>
+                          <th className="text-right px-4 py-3 font-semibold text-gray-600 w-24">Price</th>
+                          <th className="text-left px-4 py-3 font-semibold text-gray-600 hidden md:table-cell">Description</th>
+                          <th className="text-left px-4 py-3 font-semibold text-gray-600 hidden lg:table-cell w-48">Image URL</th>
+                        </tr>
+                      </thead>
                       <tbody className="divide-y divide-gray-50">
                         {uploadRows.map((row, i) => {
                           const hasError = uploadErrors.some(e => e.includes(`Row ${i + 1}`));
@@ -930,9 +1020,30 @@ export default function ManagerPortal() {
                             <tr key={i} className={hasError ? 'bg-red-50' : 'hover:bg-gray-50'}>
                               <td className="px-4 py-3 font-mono text-xs text-gray-500">{row.id}</td>
                               <td className="px-4 py-3 font-medium text-gray-900">{row.name}</td>
-                              <td className="px-4 py-3"><span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">{SLOT_DB_TO_LABEL[row.time_slot] || row.time_slot}</span></td>
+                              <td className="px-4 py-3">
+                                <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">
+                                  {SLOT_DB_TO_LABEL[row.time_slot] || row.time_slot}
+                                </span>
+                              </td>
                               <td className="px-4 py-3 text-right font-semibold text-gray-900">₹{row.price.toFixed(2)}</td>
                               <td className="px-4 py-3 text-gray-400 text-xs hidden md:table-cell max-w-xs truncate">{row.description}</td>
+                              {/* Fix 23: image URL cell — clickable link so manager can verify */}
+                              <td className="px-4 py-3 hidden lg:table-cell max-w-xs">
+                                {row.image_url ? (
+                                  <a
+                                    href={row.image_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-500 hover:underline text-xs truncate block max-w-xs"
+                                    title={row.image_url}
+                                    onClick={e => e.stopPropagation()}
+                                  >
+                                    {row.image_url.replace(/^https?:\/\//, '').slice(0, 40)}{row.image_url.length > 48 ? '…' : ''}
+                                  </a>
+                                ) : (
+                                  <span className="text-gray-300 text-xs">—</span>
+                                )}
+                              </td>
                             </tr>
                           );
                         })}
@@ -940,10 +1051,14 @@ export default function ManagerPortal() {
                     </table>
                   </div>
                 </div>
+
                 <div className="flex gap-3 justify-end">
                   <button onClick={handleResetUpload} className="px-5 py-2.5 rounded-lg border border-gray-300 text-gray-600 font-semibold text-sm hover:bg-gray-50 transition">Cancel</button>
-                  <button onClick={handleConfirmUpload} disabled={uploadErrors.length > 0} className="px-6 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-semibold text-sm transition flex items-center gap-2">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                  <button onClick={handleConfirmUpload} disabled={uploadErrors.length > 0}
+                    className="px-6 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-semibold text-sm transition flex items-center gap-2">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                    </svg>
                     Confirm & Upload {uploadRows.length} items
                   </button>
                 </div>
@@ -971,7 +1086,7 @@ export default function ManagerPortal() {
               </div>
             )}
 
-            {/* ── Current menu table with availability toggles (PATCH) ───── */}
+            {/* ── Current menu table with availability toggles ───────────── */}
             <div>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-bold text-gray-900">
@@ -985,23 +1100,25 @@ export default function ManagerPortal() {
                 <div className="bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
-                      <thead><tr className="bg-gray-50 border-b border-gray-100">
-                        <th className="text-left px-4 py-3 font-semibold text-gray-600">Name</th>
-                        <th className="text-left px-4 py-3 font-semibold text-gray-600 w-36">Slot</th>
-                        <th className="text-right px-4 py-3 font-semibold text-gray-600 w-24">Price</th>
-                        <th className="text-center px-4 py-3 font-semibold text-gray-600 w-32">In Stock</th>
-                      </tr></thead>
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-100">
+                          <th className="text-left px-4 py-3 font-semibold text-gray-600">Name</th>
+                          <th className="text-left px-4 py-3 font-semibold text-gray-600 w-36">Slot</th>
+                          <th className="text-right px-4 py-3 font-semibold text-gray-600 w-24">Price</th>
+                          {/* Fix 23: image URL column in current menu table */}
+                          <th className="text-left px-4 py-3 font-semibold text-gray-600 hidden lg:table-cell w-48">Image</th>
+                          <th className="text-center px-4 py-3 font-semibold text-gray-600 w-32">In Stock</th>
+                        </tr>
+                      </thead>
                       <tbody className="divide-y divide-gray-50">
                         {[...menuItems].sort((a, b) => {
-                          // OOS items always at the bottom regardless of slot
                           const aStock = a.is_stocked ?? a.is_available ?? true;
                           const bStock = b.is_stocked ?? b.is_available ?? true;
                           if (aStock !== bStock) return aStock ? -1 : 1;
-                          // Within same stock state: sort by slot then name
                           if (a.time_slot !== b.time_slot) return (a.time_slot || '').localeCompare(b.time_slot || '');
                           return (a.name || '').localeCompare(b.name || '');
                         }).map(item => {
-                          const inStock = item.is_stocked ?? item.is_available;
+                          const inStock    = item.is_stocked ?? item.is_available;
                           const isToggling = togglingId === item.id;
                           return (
                             <tr key={item.id} className={`hover:bg-gray-50 ${!inStock ? 'opacity-60' : ''}`}>
@@ -1015,21 +1132,42 @@ export default function ManagerPortal() {
                                 </span>
                               </td>
                               <td className="px-4 py-3 text-right font-semibold text-gray-900">₹{Number(item.price).toFixed(2)}</td>
+                              {/* Fix 23: show thumbnail + link for image_url */}
+                              <td className="px-4 py-3 hidden lg:table-cell">
+                                {item.image_url ? (
+                                  <div className="flex items-center gap-2">
+                                    <img
+                                      src={item.image_url}
+                                      alt={item.name}
+                                      className="w-8 h-8 rounded object-cover border border-gray-200 flex-shrink-0"
+                                      onError={e => { e.target.style.display = 'none'; }}
+                                    />
+                                    <a
+                                      href={item.image_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-blue-400 hover:text-blue-600 text-xs truncate max-w-[120px] block"
+                                      title={item.image_url}
+                                    >
+                                      {item.image_url.replace(/^https?:\/\//, '').slice(0, 30)}…
+                                    </a>
+                                  </div>
+                                ) : (
+                                  <span className="text-gray-300 text-xs">—</span>
+                                )}
+                              </td>
                               <td className="px-4 py-3 text-center">
-                                {/* PATCH: toggle switch — tap to flip in/out of stock */}
                                 <button
                                   onClick={() => toggleAvailability(item)}
                                   disabled={isToggling}
                                   title={inStock ? 'In stock — tap to mark out of stock' : 'Out of stock — tap to mark in stock'}
-                                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 disabled:opacity-50
-                                    ${inStock ? 'bg-green-500' : 'bg-gray-300'}`}
+                                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 disabled:opacity-50 ${inStock ? 'bg-green-500' : 'bg-gray-300'}`}
                                 >
                                   {isToggling
                                     ? <span className="absolute inset-0 flex items-center justify-center">
                                         <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
                                       </span>
-                                    : <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform
-                                        ${inStock ? 'translate-x-6' : 'translate-x-1'}`} />
+                                    : <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${inStock ? 'translate-x-6' : 'translate-x-1'}`} />
                                   }
                                 </button>
                               </td>
