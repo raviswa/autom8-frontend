@@ -24,6 +24,23 @@ import { useKOTPrint } from '../components/KOTPrint';
 import { kotRef } from '../App';
 import { format, parseISO } from 'date-fns';
 
+
+// ── Add near the top of the file, alongside other helpers ──────────────────
+function toUTC(iso) {
+  if (!iso) return iso;
+  return iso.toString().replace(' ', 'T').replace(/([+-]\d{2}:\d{2}|Z)$/, '') + 'Z';
+}
+
+function safeFormat(dateVal, fmt) {
+  if (!dateVal) return '—';
+  try {
+    const d = new Date(toUTC(dateVal));           // ← was parseISO(dateVal)
+    if (isNaN(d.getTime())) return '—';
+    return format(d, fmt);
+  } catch {
+    return '—';
+  }
+}
 const TABLE_COLOURS = {
   available: 'bg-green-500',
   occupied:  'bg-blue-500',
@@ -49,6 +66,9 @@ function safeFormat(dateVal, fmt) {
     return '—';
   }
 }
+
+
+
 
 const ACTIVE_ORDER_STATUSES = ['pending', 'confirmed', 'in_progress'];
 
