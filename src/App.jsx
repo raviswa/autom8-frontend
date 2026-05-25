@@ -170,10 +170,10 @@ export default function App() {
     <Router>
       <AuthProvider>
         <SubscriptionProvider>
-          <WebSocketProvider>
-            <AppRoutes />
-          </WebSocketProvider>
-        </SubscriptionProvider>
+            <WebSocketProvider>
+              <KOTPrintTemplate ref={kotRef} />
+              <AppRoutes />
+            </WebSocketProvider>        </SubscriptionProvider>
       </AuthProvider>
     </Router>
   );
