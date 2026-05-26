@@ -17,8 +17,9 @@
 //   the normal waiting queue. On Reject the customer is offered a reservation.
 //
 // Fix 23 — Menu Tab:
-//   - Download template now generates the .xlsx client-side via SheetJS
-//     (avoids the broken static-file fallback that served index.html).
+//   - Download template now fetches live catalog from GET /api/catalog/feed/template
+//     and builds the .xlsx client-side via SheetJS, so the manager always
+//     starts from real current data rather than dummy example rows.
 //   - Upload preview table now shows the image_link / image_url column so
 //     managers can verify image URLs before confirming the upload.
 //   - Current menu table also shows a truncated image URL per row.
@@ -49,40 +50,67 @@ function safeFormat(dateVal, fmt) {
   }
 }
 
-// ── Fix 23: generate catalog template client-side via SheetJS ───────────────
-// Avoids the React SPA serving index.html for unknown static paths.
-function downloadCatalogTemplate() {
-  const headers = [
-    'id',
-    'title',
-    'description',
-    'price',
-    'custom_label_0',
-    'image_link',
-    'is_available',
-  ];
-  const exampleRows = [
-    ['D001', 'Idli (2 pcs)', 'Soft steamed idlis served with sambar and chutney', 30, 'Morning Tiffin', 'https://example.com/idli.jpg', 'TRUE'],
-    ['D002', 'Ghee Rice + Kurma', 'Fragrant ghee rice with vegetable kurma', 90, 'Lunch', 'https://example.com/ghee-rice.jpg', 'TRUE'],
-    ['E001', 'Bajji (4 pcs)', 'Crispy vegetable bajjis', 30, 'Evening Snacks', '', 'TRUE'],
-  ];
+// ── Fix 23: Download template from live catalog feed ────────────────────────
+// Calls GET /api/catalog/feed/template which returns the current Supabase
+// menu_items as manager-friendly JSON (id, title, description, price, slot,
+// image_link, is_available). SheetJS then builds the .xlsx client-side.
+// Falls back to a minimal blank template if the endpoint is unreachable.
+async function downloadCatalogTemplate(apiClient, showToast) {
+  try {
+    showToast('⏳ Preparing template from live catalog…');
+    const res = await apiClient.get('/api/catalog/feed/template');
+    const { items } = res.data;
 
-  const ws = XLSX.utils.aoa_to_sheet([headers, ...exampleRows]);
+    if (!items || items.length === 0) throw new Error('No items returned');
 
-  // Column widths for readability
-  ws['!cols'] = [
-    { wch: 8  },  // id
-    { wch: 28 },  // title
-    { wch: 45 },  // description
-    { wch: 8  },  // price
-    { wch: 16 },  // custom_label_0
-    { wch: 48 },  // image_link
-    { wch: 14 },  // is_available
-  ];
+    const headers = [
+      'id',
+      'title',
+      'description',
+      'price',
+      'custom_label_0',
+      'image_link',
+      'is_available',
+    ];
 
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'WhatsApp Catalog');
-  XLSX.writeFile(wb, 'catalog_template.xlsx');
+    const rows = items.map(item => [
+      item.id,
+      item.title,
+      item.description,
+      item.price,
+      item.custom_label_0,
+      item.image_link,
+      item.is_available,
+    ]);
+
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+
+    ws['!cols'] = [
+      { wch: 8  },  // id
+      { wch: 28 },  // title
+      { wch: 48 },  // description
+      { wch: 8  },  // price
+      { wch: 16 },  // custom_label_0
+      { wch: 52 },  // image_link
+      { wch: 14 },  // is_available
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'WhatsApp Catalog');
+    XLSX.writeFile(wb, 'catalog_template.xlsx');
+    showToast(`✅ Template downloaded — ${items.length} items`);
+  } catch (err) {
+    console.error('[downloadCatalogTemplate] Failed, using blank fallback:', err.message);
+    // Fallback: blank template with headers + one example row
+    const headers = ['id', 'title', 'description', 'price', 'custom_label_0', 'image_link', 'is_available'];
+    const example = [['M001', 'Idli', 'Soft steamed idlis with sambar and chutney', 50, 'Morning Tiffin', '', 'TRUE']];
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...example]);
+    ws['!cols'] = [{ wch: 8 }, { wch: 28 }, { wch: 48 }, { wch: 8 }, { wch: 16 }, { wch: 52 }, { wch: 14 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'WhatsApp Catalog');
+    XLSX.writeFile(wb, 'catalog_template.xlsx');
+    showToast('⚠️ Could not fetch live catalog — blank template downloaded');
+  }
 }
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -126,11 +154,8 @@ function mapExcelRowToMenuItem(row) {
   const price       = parseFloat(String(priceRaw).replace(/[^0-9.]/g, '')) || 0;
   const slotRaw     = String(row['custom_label_0'] || row['time_slot'] || row['category'] || '').trim().toLowerCase();
   const time_slot   = SLOT_LABEL_TO_DB[slotRaw] || 'morning_tiffin';
-  // Fix 23: read image_link / image_url column so it appears in preview + gets sent to backend
   const image_url   = String(row['image_link']    || row['image_url']   || row['Image Link'] || row['Image URL'] || '').trim();
 
-  // is_available → is_stocked in DB (permanent OOS flag)
-  // Accepts TRUE/FALSE, 1/0, yes/no (case-insensitive). Absent column = omit (defaults to true).
   const availRaw    = row['is_available'] ?? row['Is Available'] ?? row['is_stocked'] ?? '';
   const is_available = availRaw === ''
     ? undefined
@@ -186,9 +211,9 @@ export default function ManagerPortal() {
   const [uploadDragOver, setUploadDragOver] = useState(false);
   const [uploadStatus,   setUploadStatus]   = useState('idle');
   const [uploadResult,   setUploadResult]   = useState(null);
+  const [downloadingTpl, setDownloadingTpl] = useState(false);
   const fileInputRef = useRef(null);
 
-  // toggle state for mid-service availability changes
   const [togglingId, setTogglingId] = useState(null);
 
   const showToast = (msg) => {
@@ -227,7 +252,6 @@ export default function ManagerPortal() {
 
   const fetchMenuItems = useCallback(async () => {
     try {
-      // ignore_slot=true → manager view: all items across all slots + all stock states
       const res = await apiClient.get('/api/menu-items?ignore_slot=true');
       setMenuItems(res.data.items || res.data || []);
     } catch (err) {
@@ -334,7 +358,6 @@ export default function ManagerPortal() {
       showToast(`✅ ${token.id} approved — tables assigned, customer notified`);
       await Promise.all([fetchTokens(), fetchTables()]);
     } catch (err) {
-      console.error('Failed to approve token:', err);
       showToast(`❌ Approve failed: ${err.message}`);
     } finally {
       setProcessingId(null);
@@ -355,7 +378,6 @@ export default function ManagerPortal() {
       showToast(`Token ${rejectModal.tokenId} rejected — customer offered reservation`);
       await fetchTokens();
     } catch (err) {
-      console.error('Failed to reject token:', err);
       showToast(`❌ Reject failed: ${err.message}`);
     } finally {
       setProcessingId(null);
@@ -377,7 +399,6 @@ export default function ManagerPortal() {
       setAssignTableSel(prev => { const n = { ...prev }; delete n[token.id]; return n; });
       await fetchTokens(); await fetchTables();
     } catch (err) {
-      console.error('Failed to assign table:', err);
       showToast('❌ Failed to assign table — check backend logs');
     } finally {
       setAssigningToken(null);
@@ -404,8 +425,6 @@ export default function ManagerPortal() {
   };
 
   // ── Menu availability toggle ───────────────────────────────────────────────
-  // Real-time mid-service: PUT /api/menu-items/:id/availability
-  // Updates is_stocked in DB + immediately pushes to Meta catalog.
 
   const toggleAvailability = async (item) => {
     setTogglingId(item.id);
@@ -940,15 +959,29 @@ export default function ManagerPortal() {
                 </p>
               </div>
 
-              {/* Fix 23: generate template client-side so it never falls through to index.html */}
+              {/* Fix 23: Download template from live catalog feed */}
               <button
-                onClick={downloadCatalogTemplate}
-                className="flex items-center gap-2 bg-white border border-gray-300 hover:border-blue-500 text-gray-700 hover:text-blue-600 font-semibold text-sm px-4 py-2.5 rounded-lg transition"
+                onClick={async () => {
+                  setDownloadingTpl(true);
+                  await downloadCatalogTemplate(apiClient, showToast);
+                  setDownloadingTpl(false);
+                }}
+                disabled={downloadingTpl}
+                className="flex items-center gap-2 bg-white border border-gray-300 hover:border-blue-500 text-gray-700 hover:text-blue-600 disabled:opacity-60 disabled:cursor-not-allowed font-semibold text-sm px-4 py-2.5 rounded-lg transition"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                Download template
+                {downloadingTpl ? (
+                  <>
+                    <span className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                    Preparing…
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    Download template
+                  </>
+                )}
               </button>
             </div>
 
@@ -999,7 +1032,6 @@ export default function ManagerPortal() {
                   </div>
                 )}
 
-                {/* Fix 23: preview table now includes Image URL column */}
                 <div className="bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
@@ -1027,17 +1059,11 @@ export default function ManagerPortal() {
                               </td>
                               <td className="px-4 py-3 text-right font-semibold text-gray-900">₹{row.price.toFixed(2)}</td>
                               <td className="px-4 py-3 text-gray-400 text-xs hidden md:table-cell max-w-xs truncate">{row.description}</td>
-                              {/* Fix 23: image URL cell — clickable link so manager can verify */}
                               <td className="px-4 py-3 hidden lg:table-cell max-w-xs">
                                 {row.image_url ? (
-                                  <a
-                                    href={row.image_url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
+                                  <a href={row.image_url} target="_blank" rel="noopener noreferrer"
                                     className="text-blue-500 hover:underline text-xs truncate block max-w-xs"
-                                    title={row.image_url}
-                                    onClick={e => e.stopPropagation()}
-                                  >
+                                    title={row.image_url} onClick={e => e.stopPropagation()}>
                                     {row.image_url.replace(/^https?:\/\//, '').slice(0, 40)}{row.image_url.length > 48 ? '…' : ''}
                                   </a>
                                 ) : (
@@ -1080,6 +1106,7 @@ export default function ManagerPortal() {
                 <p className="text-green-600 text-sm mb-4">
                   {uploadResult.upserted} item{uploadResult.upserted !== 1 ? 's' : ''} saved
                   {uploadResult.skipped > 0 ? ` · ${uploadResult.skipped} skipped` : ''}
+                  {uploadResult.purged > 0 ? ` · ${uploadResult.purged} removed` : ''}
                   {' '}· WhatsApp catalog updated · Slot scheduler syncs within 60s
                 </p>
                 <button onClick={handleResetUpload} className="px-5 py-2 rounded-lg bg-green-700 hover:bg-green-800 text-white font-semibold text-sm transition">Upload another file</button>
@@ -1105,7 +1132,6 @@ export default function ManagerPortal() {
                           <th className="text-left px-4 py-3 font-semibold text-gray-600">Name</th>
                           <th className="text-left px-4 py-3 font-semibold text-gray-600 w-36">Slot</th>
                           <th className="text-right px-4 py-3 font-semibold text-gray-600 w-24">Price</th>
-                          {/* Fix 23: image URL column in current menu table */}
                           <th className="text-left px-4 py-3 font-semibold text-gray-600 hidden lg:table-cell w-48">Image</th>
                           <th className="text-center px-4 py-3 font-semibold text-gray-600 w-32">In Stock</th>
                         </tr>
@@ -1132,23 +1158,15 @@ export default function ManagerPortal() {
                                 </span>
                               </td>
                               <td className="px-4 py-3 text-right font-semibold text-gray-900">₹{Number(item.price).toFixed(2)}</td>
-                              {/* Fix 23: show thumbnail + link for image_url */}
                               <td className="px-4 py-3 hidden lg:table-cell">
                                 {item.image_url ? (
                                   <div className="flex items-center gap-2">
-                                    <img
-                                      src={item.image_url}
-                                      alt={item.name}
+                                    <img src={item.image_url} alt={item.name}
                                       className="w-8 h-8 rounded object-cover border border-gray-200 flex-shrink-0"
-                                      onError={e => { e.target.style.display = 'none'; }}
-                                    />
-                                    <a
-                                      href={item.image_url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
+                                      onError={e => { e.target.style.display = 'none'; }} />
+                                    <a href={item.image_url} target="_blank" rel="noopener noreferrer"
                                       className="text-blue-400 hover:text-blue-600 text-xs truncate max-w-[120px] block"
-                                      title={item.image_url}
-                                    >
+                                      title={item.image_url}>
                                       {item.image_url.replace(/^https?:\/\//, '').slice(0, 30)}…
                                     </a>
                                   </div>
@@ -1157,12 +1175,9 @@ export default function ManagerPortal() {
                                 )}
                               </td>
                               <td className="px-4 py-3 text-center">
-                                <button
-                                  onClick={() => toggleAvailability(item)}
-                                  disabled={isToggling}
+                                <button onClick={() => toggleAvailability(item)} disabled={isToggling}
                                   title={inStock ? 'In stock — tap to mark out of stock' : 'Out of stock — tap to mark in stock'}
-                                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 disabled:opacity-50 ${inStock ? 'bg-green-500' : 'bg-gray-300'}`}
-                                >
+                                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 disabled:opacity-50 ${inStock ? 'bg-green-500' : 'bg-gray-300'}`}>
                                   {isToggling
                                     ? <span className="absolute inset-0 flex items-center justify-center">
                                         <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
