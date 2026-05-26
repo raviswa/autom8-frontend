@@ -657,16 +657,16 @@ function useKotStats(restaurantId) {
     const todayStartISO = istMidnightUTC(0).toISOString();
     console.log("[useKotStats] querying from", todayStartISO, "for restaurant", restaurantId);
 
+    // Select only columns that exist on kot_tickets — no join to kot_items
     const { data, error: qErr } = await supabase
       .from("kot_tickets")
-      .select("status, created_at, served_at, kot_items(item_name, created_at, served_at)")
+      .select("status, created_at, served_at")
       .eq("restaurant_id", restaurantId)
       .gte("created_at", todayStartISO);
 
     if (qErr) {
       console.error("[useKotStats] query error:", qErr.message, qErr.details, qErr.hint);
       setError(qErr.message);
-      // FIX: on error keep previous stats visible rather than zeroing out
       return;
     }
 
@@ -680,15 +680,9 @@ function useKotStats(restaurantId) {
 
     const times = data.filter(k => k.served_at).map(k => (new Date(k.served_at) - new Date(k.created_at)) / 60000);
 
-    // Item-level fastest/slowest — only if kot_items join returns data
-    let fastestItem = null, slowestItem = null;
-    const allItems = data.flatMap(k => (k.kot_items ?? []).filter(i => i.served_at));
-    if (allItems.length) {
-      const withTimes = allItems.map(i => ({ name: i.item_name, mins: (new Date(i.served_at) - new Date(i.created_at)) / 60000 }));
-      withTimes.sort((a, b) => a.mins - b.mins);
-      fastestItem = withTimes[0].name;
-      slowestItem  = withTimes[withTimes.length - 1].name;
-    }
+    // Fastest/slowest item requires item-level rows — not available in kot_tickets alone
+    const fastestItem = null;
+    const slowestItem  = null;
 
     setStats({
       open:        data.filter(k => k.status === "open").length,
