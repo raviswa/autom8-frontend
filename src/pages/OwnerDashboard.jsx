@@ -364,12 +364,11 @@ function KotStatus({ stats, error }) {
         <AlertBanner type="info">No KOT tickets raised today yet. They appear here once orders are sent to the kitchen.</AlertBanner>
       )}
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <MiniStat label="Open"        value={stats?.open        ?? 0} />
-        <MiniStat label="In progress" value={stats?.inProgress  ?? 0} color="#BA7517" />
-        <MiniStat label="Served"      value={stats?.served      ?? 0} color="#1D9E75" />
+        <MiniStat label="Pending"  value={stats?.open   ?? 0} color="#BA7517" />
+        <MiniStat label="Ready"    value={stats?.served ?? 0} color="#1D9E75" />
+        <MiniStat label="Delayed (>20 min)" value={stats?.delayed ?? 0} color={(stats?.delayed ?? 0) > 0 ? "#A32D2D" : "#111"} />
       </div>
-      <KRow label="Avg KOT time"       value={stats?.avgTime != null ? `${stats.avgTime} min` : <Tooltip text="Calculates once KOTs are served today.">—</Tooltip>} />
-      <KRow label="Delayed (>20 min)"  value={stats?.delayed != null ? `${stats.delayed} KOTs` : "—"} danger={(stats?.delayed ?? 0) > 0} />
+      <KRow label="Avg time in queue"   value={stats?.avgTime != null ? `${stats.avgTime} min` : <Tooltip text="Avg minutes from item entering queue to marked ready.">—</Tooltip>} />
       <KRow label="Fastest item"       value={stats?.fastestItem ?? <Tooltip text="Needs item-level KOT rows with served_at.">—</Tooltip>} />
       <KRow label="Slowest item"       value={stats?.slowestItem ?? <Tooltip text="Needs item-level KOT rows with served_at.">—</Tooltip>} warn />
     </StatCard>
@@ -647,30 +646,32 @@ function useTables(restaurantId) {
   return tables;
 }
 
+// KOT data lives in kds_items, not kot_tickets.
+// Real columns: id, restaurant_id, status, time_in_queue_seconds,
+//               item_name, created_at, updated_at, token_number, service_type
+// Real statuses: "pending" (in queue) | "ready" (served/completed)
 function useKotStats(restaurantId) {
   const [stats, setStats] = useState(null);
   const [error, setError] = useState(null);
 
-  const fetch = useCallback(async () => {
+  const doFetch = useCallback(async () => {
     if (!restaurantId) return;
-    // FIX: use IST-aware midnight so tickets from 12:00 AM–5:30 AM IST aren't missed
     const todayStartISO = istMidnightUTC(0).toISOString();
-    console.log("[useKotStats] querying from", todayStartISO, "for restaurant", restaurantId);
+    console.log("[useKotStats] querying kds_items from", todayStartISO);
 
-    // Select only columns that exist on kot_tickets — no join to kot_items
     const { data, error: qErr } = await supabase
-      .from("kot_tickets")
-      .select("status, created_at, served_at")
+      .from("kds_items")
+      .select("status, time_in_queue_seconds, item_name, created_at, updated_at")
       .eq("restaurant_id", restaurantId)
       .gte("created_at", todayStartISO);
 
     if (qErr) {
-      console.error("[useKotStats] query error:", qErr.message, qErr.details, qErr.hint);
+      console.error("[useKotStats]", qErr.message, qErr.details);
       setError(qErr.message);
       return;
     }
 
-    console.log("[useKotStats] rows returned:", data?.length ?? 0);
+    console.log("[useKotStats] rows:", data?.length ?? 0);
     setError(null);
 
     if (!data?.length) {
@@ -678,34 +679,57 @@ function useKotStats(restaurantId) {
       return;
     }
 
-    const times = data.filter(k => k.served_at).map(k => (new Date(k.served_at) - new Date(k.created_at)) / 60000);
+    const pending = data.filter(k => k.status === "pending");
+    const ready   = data.filter(k => k.status === "ready");
 
-    // Fastest/slowest item requires item-level rows — not available in kot_tickets alone
-    const fastestItem = null;
-    const slowestItem  = null;
+    // time_in_queue_seconds is only populated once item is ready
+    const readyTimes = ready
+      .map(k => (k.time_in_queue_seconds ?? 0) / 60)
+      .filter(t => t > 0);
+
+    const avgTime = readyTimes.length
+      ? Math.round(readyTimes.reduce((s, v) => s + v, 0) / readyTimes.length)
+      : null;
+
+    const delayed = readyTimes.filter(t => t > 20).length;
+
+    // Fastest / slowest by avg queue time per item name (ready items only)
+    const byItem = {};
+    ready.forEach(k => {
+      const secs = k.time_in_queue_seconds ?? 0;
+      if (!secs || !k.item_name) return;
+      if (!byItem[k.item_name]) byItem[k.item_name] = { total: 0, count: 0 };
+      byItem[k.item_name].total += secs;
+      byItem[k.item_name].count += 1;
+    });
+    const itemAvgs = Object.entries(byItem)
+      .map(([name, { total, count }]) => ({ name, avg: total / count }))
+      .sort((a, b) => a.avg - b.avg);
 
     setStats({
-      open:        data.filter(k => k.status === "open").length,
-      inProgress:  data.filter(k => k.status === "in_progress").length,
-      served:      data.filter(k => k.status === "served").length,
-      avgTime:     times.length ? Math.round(times.reduce((s, v) => s + v, 0) / times.length) : null,
-      delayed:     times.filter(t => t > 20).length,
-      fastestItem,
-      slowestItem,
+      open:        pending.length,   // "pending" = waiting in queue / being prepared
+      inProgress:  0,                // kds_items has no separate in-progress status
+      served:      ready.length,     // "ready" = completed
+      avgTime,
+      delayed,
+      fastestItem: itemAvgs[0]?.name ?? null,
+      slowestItem: itemAvgs[itemAvgs.length - 1]?.name ?? null,
     });
   }, [restaurantId]);
 
   useEffect(() => {
-    fetch();
-    // FIX: realtime subscription — re-fetch on any change so newly sent KOT tickets appear immediately
-    const ch = supabase.channel(`kot-${restaurantId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "kot_tickets", filter: `restaurant_id=eq.${restaurantId}` }, () => {
-        console.log("[useKotStats] realtime change — refetching");
-        fetch();
+    doFetch();
+    const ch = supabase.channel(`kds-${restaurantId}`)
+      .on("postgres_changes", {
+        event: "*", schema: "public", table: "kds_items",
+        filter: `restaurant_id=eq.${restaurantId}`,
+      }, () => {
+        console.log("[useKotStats] realtime update — refetching");
+        doFetch();
       })
       .subscribe();
     return () => supabase.removeChannel(ch);
-  }, [restaurantId, fetch]);
+  }, [restaurantId, doFetch]);
 
   return { stats, error };
 }
