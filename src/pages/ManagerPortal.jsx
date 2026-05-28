@@ -241,23 +241,12 @@ async function downloadCatalogTemplate(apiClient, showToast, currentMenuItems = 
 }
  
  
-// ════════════════════════════════════════════════════════════════════════════
-// PATCH 2 of 2 — Pass menuItems state to downloadCatalogTemplate call-site
-//
-// FIND this block inside the JSX (the Download template button onClick):
-// ════════════════════════════════════════════════════════════════════════════
- 
+onClick={async () => {
+  setDownloadingTpl(true);
+  await downloadCatalogTemplate(apiClient, showToast, menuItems);
+  setDownloadingTpl(false);
+}}
 
-    onClick={async () => {
-      setDownloadingTpl(true);
-      await downloadCatalogTemplate(apiClient, showToast, menuItems);  // ← pass state
-      setDownloadingTpl(false);
-    }}
- 
-// That's it — toggleAvailability requires no changes in the frontend.
-// It already correctly calls PUT /api/menu-items/:id/availability and
-// does an optimistic local state update. The backend route (server.js Patch 5)
-// is what was missing.
 
 // ─── Excel helpers ─────────────────────────────────────────────────────────────
 function mapExcelRowToMenuItem(row) {
