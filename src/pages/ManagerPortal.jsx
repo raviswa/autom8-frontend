@@ -162,7 +162,7 @@ const SLOT_DB_TO_LABEL_TMPL = {
   evening_snacks: 'Evening Snacks',
   dinner_tiffin:  'Dinner Tiffin',
 };
- 
+
 /**
  * Download catalog Excel template.
  *
@@ -170,16 +170,11 @@ const SLOT_DB_TO_LABEL_TMPL = {
  *  1. /api/catalog/feed/template  (API — clean upload-ready format)
  *  2. currentMenuItems            (React state — already loaded)
  *  3. Headers + 1 example stub    (last resort — always produces a valid file)
- *
- * @param {object}   apiClient        - axios instance
- * @param {function} showToast        - toast callback
- * @param {Array}    currentMenuItems - menuItems state from ManagerPortal
  */
 async function downloadCatalogTemplate(apiClient, showToast, currentMenuItems = []) {
   const HEADERS    = ['id', 'title', 'description', 'price', 'custom_label_0', 'image_link', 'is_available'];
   const COL_WIDTHS = [{ wch: 8 }, { wch: 28 }, { wch: 48 }, { wch: 8 }, { wch: 16 }, { wch: 52 }, { wch: 14 }];
- 
-  /** Convert /api/catalog/feed/template response items → sheet rows */
+
   const fromApiItems = (items) =>
     items.map(item => [
       item.id,
@@ -190,8 +185,7 @@ async function downloadCatalogTemplate(apiClient, showToast, currentMenuItems = 
       item.image_link,
       item.is_available,
     ]);
- 
-  /** Convert React menuItems state → sheet rows */
+
   const fromStateItems = (items) =>
     items.map(item => [
       item.retailer_id || item.id || '',
@@ -202,8 +196,7 @@ async function downloadCatalogTemplate(apiClient, showToast, currentMenuItems = 
       item.image_url   || '',
       (item.is_stocked ?? item.is_available ?? true) ? 'TRUE' : 'FALSE',
     ]);
- 
-  /** Write rows to Excel and trigger download */
+
   const writeAndDownload = (rows, count, source) => {
     const ws = XLSX.utils.aoa_to_sheet([HEADERS, ...rows]);
     ws['!cols'] = COL_WIDTHS;
@@ -212,8 +205,8 @@ async function downloadCatalogTemplate(apiClient, showToast, currentMenuItems = 
     XLSX.writeFile(wb, 'catalog_template.xlsx');
     showToast(`Template downloaded — ${count} item${count !== 1 ? 's' : ''} (${source})`);
   };
- 
-  // ── Tier 1: API ────────────────────────────────────────────────────────────
+
+  // Tier 1: API
   try {
     showToast('Preparing template from live catalog…');
     const res      = await apiClient.get('/api/catalog/feed/template');
@@ -226,27 +219,19 @@ async function downloadCatalogTemplate(apiClient, showToast, currentMenuItems = 
   } catch (err) {
     console.warn('[template-dl] API failed:', err.message, '— trying component state');
   }
- 
-  // ── Tier 2: Component state ────────────────────────────────────────────────
+
+  // Tier 2: Component state
   if (currentMenuItems && currentMenuItems.length > 0) {
     const rows = fromStateItems(currentMenuItems);
     writeAndDownload(rows, rows.length, 'local snapshot');
     return;
   }
- 
-  // ── Tier 3: Stub (never leaves user with nothing) ─────────────────────────
+
+  // Tier 3: Stub
   const stubRow = ['M001', 'Idli', 'Soft steamed idlis with sambar and chutney', 50, 'Morning Tiffin', '', 'TRUE'];
   writeAndDownload([stubRow], 0, 'blank template — fill in your items');
   showToast('No items in database yet — blank template downloaded');
 }
- 
- 
-onClick={async () => {
-  setDownloadingTpl(true);
-  await downloadCatalogTemplate(apiClient, showToast, menuItems);
-  setDownloadingTpl(false);
-}}
-
 
 // ─── Excel helpers ─────────────────────────────────────────────────────────────
 function mapExcelRowToMenuItem(row) {
@@ -947,7 +932,7 @@ export default function ManagerPortal() {
                 <p style={{ fontSize: 12, color: C.textMuted, margin: "4px 0 0" }}>Toggle items in/out of stock instantly, or upload the catalog Excel to update prices, names and images.</p>
               </div>
               <button
-                onClick={async () => { setDownloadingTpl(true); await downloadCatalogTemplate(apiClient, showToast); setDownloadingTpl(false); }}
+                onClick={async () => { setDownloadingTpl(true); await downloadCatalogTemplate(apiClient, showToast, menuItems); setDownloadingTpl(false); }}
                 disabled={downloadingTpl}
                 style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 500, padding: "7px 14px", borderRadius: 8, border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.textSub, cursor: "pointer" }}>
                 {downloadingTpl ? <Spinner size={14} /> : '↓'} Download template
