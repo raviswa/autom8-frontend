@@ -156,31 +156,116 @@ function AlertBanner({ type = "warn", children }) {
 }
 
 // ─── Live catalog template download ───────────────────────────────────────────
-async function downloadCatalogTemplate(apiClient, showToast) {
+const SLOT_DB_TO_LABEL_TMPL = {
+  morning_tiffin: 'Morning Tiffin',
+  lunch:          'Lunch',
+  evening_snacks: 'Evening Snacks',
+  dinner_tiffin:  'Dinner Tiffin',
+};
+ 
+/**
+ * Download catalog Excel template.
+ *
+ * 3-tier fallback:
+ *  1. /api/catalog/feed/template  (API — clean upload-ready format)
+ *  2. currentMenuItems            (React state — already loaded)
+ *  3. Headers + 1 example stub    (last resort — always produces a valid file)
+ *
+ * @param {object}   apiClient        - axios instance
+ * @param {function} showToast        - toast callback
+ * @param {Array}    currentMenuItems - menuItems state from ManagerPortal
+ */
+async function downloadCatalogTemplate(apiClient, showToast, currentMenuItems = []) {
+  const HEADERS    = ['id', 'title', 'description', 'price', 'custom_label_0', 'image_link', 'is_available'];
+  const COL_WIDTHS = [{ wch: 8 }, { wch: 28 }, { wch: 48 }, { wch: 8 }, { wch: 16 }, { wch: 52 }, { wch: 14 }];
+ 
+  /** Convert /api/catalog/feed/template response items → sheet rows */
+  const fromApiItems = (items) =>
+    items.map(item => [
+      item.id,
+      item.title,
+      item.description,
+      item.price,
+      item.custom_label_0,
+      item.image_link,
+      item.is_available,
+    ]);
+ 
+  /** Convert React menuItems state → sheet rows */
+  const fromStateItems = (items) =>
+    items.map(item => [
+      item.retailer_id || item.id || '',
+      item.name        || '',
+      item.description || '',
+      Number(item.price) || 0,
+      SLOT_DB_TO_LABEL_TMPL[item.time_slot] || item.time_slot || 'Morning Tiffin',
+      item.image_url   || '',
+      (item.is_stocked ?? item.is_available ?? true) ? 'TRUE' : 'FALSE',
+    ]);
+ 
+  /** Write rows to Excel and trigger download */
+  const writeAndDownload = (rows, count, source) => {
+    const ws = XLSX.utils.aoa_to_sheet([HEADERS, ...rows]);
+    ws['!cols'] = COL_WIDTHS;
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'WhatsApp Catalog');
+    XLSX.writeFile(wb, 'catalog_template.xlsx');
+    showToast(`Template downloaded — ${count} item${count !== 1 ? 's' : ''} (${source})`);
+  };
+ 
+  // ── Tier 1: API ────────────────────────────────────────────────────────────
   try {
     showToast('Preparing template from live catalog…');
-    const res = await apiClient.get('/api/catalog/feed/template');
-    const { items } = res.data;
-    if (!items || items.length === 0) throw new Error('No items returned');
-    const headers = ['id', 'title', 'description', 'price', 'custom_label_0', 'image_link', 'is_available'];
-    const rows = items.map(item => [item.id, item.title, item.description, item.price, item.custom_label_0, item.image_link, item.is_available]);
-    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-    ws['!cols'] = [{ wch: 8 }, { wch: 28 }, { wch: 48 }, { wch: 8 }, { wch: 16 }, { wch: 52 }, { wch: 14 }];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'WhatsApp Catalog');
-    XLSX.writeFile(wb, 'catalog_template.xlsx');
-    showToast(`Template downloaded — ${items.length} items`);
+    const res      = await apiClient.get('/api/catalog/feed/template');
+    const apiItems = res.data?.items ?? [];
+    if (apiItems.length > 0) {
+      writeAndDownload(fromApiItems(apiItems), apiItems.length, 'live catalog');
+      return;
+    }
+    console.warn('[template-dl] API returned 0 items — trying component state');
   } catch (err) {
-    const headers = ['id', 'title', 'description', 'price', 'custom_label_0', 'image_link', 'is_available'];
-    const example = [['M001', 'Idli', 'Soft steamed idlis with sambar and chutney', 50, 'Morning Tiffin', '', 'TRUE']];
-    const ws = XLSX.utils.aoa_to_sheet([headers, ...example]);
-    ws['!cols'] = [{ wch: 8 }, { wch: 28 }, { wch: 48 }, { wch: 8 }, { wch: 16 }, { wch: 52 }, { wch: 14 }];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'WhatsApp Catalog');
-    XLSX.writeFile(wb, 'catalog_template.xlsx');
-    showToast('Could not fetch live catalog — blank template downloaded');
+    console.warn('[template-dl] API failed:', err.message, '— trying component state');
   }
+ 
+  // ── Tier 2: Component state ────────────────────────────────────────────────
+  if (currentMenuItems && currentMenuItems.length > 0) {
+    const rows = fromStateItems(currentMenuItems);
+    writeAndDownload(rows, rows.length, 'local snapshot');
+    return;
+  }
+ 
+  // ── Tier 3: Stub (never leaves user with nothing) ─────────────────────────
+  const stubRow = ['M001', 'Idli', 'Soft steamed idlis with sambar and chutney', 50, 'Morning Tiffin', '', 'TRUE'];
+  writeAndDownload([stubRow], 0, 'blank template — fill in your items');
+  showToast('No items in database yet — blank template downloaded');
 }
+ 
+ 
+// ════════════════════════════════════════════════════════════════════════════
+// PATCH 2 of 2 — Pass menuItems state to downloadCatalogTemplate call-site
+//
+// FIND this block inside the JSX (the Download template button onClick):
+// ════════════════════════════════════════════════════════════════════════════
+ 
+/*  REMOVE THIS:
+    onClick={async () => {
+      setDownloadingTpl(true);
+      await downloadCatalogTemplate(apiClient, showToast);
+      setDownloadingTpl(false);
+    }}
+*/
+ 
+/*  REPLACE WITH: */
+    onClick={async () => {
+      setDownloadingTpl(true);
+      await downloadCatalogTemplate(apiClient, showToast, menuItems);  // ← pass state
+      setDownloadingTpl(false);
+    }}
+ 
+// That's it — toggleAvailability requires no changes in the frontend.
+// It already correctly calls PUT /api/menu-items/:id/availability and
+// does an optimistic local state update. The backend route (server.js Patch 5)
+// is what was missing.
 
 // ─── Excel helpers ─────────────────────────────────────────────────────────────
 function mapExcelRowToMenuItem(row) {
