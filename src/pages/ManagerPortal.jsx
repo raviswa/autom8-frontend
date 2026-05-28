@@ -1,8 +1,19 @@
 // ============================================================================
-// AUTOM8 — MANAGER PORTAL
-// Standardised to unified design system. All Tailwind color classes replaced
-// with inline token palette. Visual language matches OwnerDashboard and
-// MarketingDashboard exactly.
+// AUTOM8 — MANAGER PORTAL (ENHANCED)
+//
+// Changes in this revision:
+//   1. New-order modal: collects customer name + WhatsApp number BEFORE items.
+//      Step 1 = customer details, Step 2 = item selection. Modal has a proper
+//      max-height + overflow-y: auto scrollbar so long menus scroll.
+//   2. Table status management:
+//      - Available tables show a "Set status" menu (Reserved / Cleaning).
+//      - Reserved tables accept a duration (30 / 60 / 90 / 120 min).
+//      - Auto-release: a client-side interval ticks every 30 s and frees
+//        any reserved table whose reservation_expires timestamp has passed.
+//        The interval fires PUT /api/tables/:id/status → 'available'.
+//   3. Booking guard: occupied / reserved / cleaning tables block the
+//      "+ New order" button and show the appropriate action instead.
+//   4. All existing functionality (queue, orders, menu, tokens) preserved.
 // ============================================================================
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -44,7 +55,12 @@ const C = {
   textMuted:     "#999999",
 };
 
-const CARD = { background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: "20px 24px" };
+const CARD = {
+  background: C.cardBg,
+  border: `0.5px solid ${C.border}`,
+  borderRadius: 12,
+  padding: "20px 24px",
+};
 
 // ─── Table status palette ──────────────────────────────────────────────────────
 const TABLE_STATUS = {
@@ -54,7 +70,6 @@ const TABLE_STATUS = {
   dirty:     { bg: C.dangerLight,   text: C.dangerDark,   label: "Cleaning"  },
 };
 
-// ─── Token status palette ─────────────────────────────────────────────────────
 const TOKEN_STATUS = {
   waiting:          { bg: C.warningLight,  color: C.warningDark,  avatarBg: "#FAEEDA", avatarColor: C.warningDark  },
   seated:           { bg: C.successLight,  color: C.successDark,  avatarBg: "#E1F5EE", avatarColor: C.successDark  },
@@ -77,6 +92,9 @@ const SLOT_DB_TO_LABEL = {
   dinner_tiffin:  'Dinner Tiffin',
 };
 
+// Reservation duration options (minutes)
+const RESERVATION_DURATIONS = [30, 60, 90, 120];
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function toUTC(iso) {
   if (!iso) return iso;
@@ -84,12 +102,35 @@ function toUTC(iso) {
 }
 function safeFormat(dateVal, fmt) {
   if (!dateVal) return '—';
-  try { const d = new Date(toUTC(dateVal)); if (isNaN(d.getTime())) return '—'; return format(d, fmt); } catch { return '—'; }
+  try {
+    const d = new Date(toUTC(dateVal));
+    if (isNaN(d.getTime())) return '—';
+    return format(d, fmt);
+  } catch { return '—'; }
+}
+
+// Returns mm:ss remaining string, or null if expired
+function reservationCountdown(expiresAt) {
+  if (!expiresAt) return null;
+  const diff = new Date(expiresAt).getTime() - Date.now();
+  if (diff <= 0) return null;
+  const mins = Math.floor(diff / 60000);
+  const secs = Math.floor((diff % 60000) / 1000);
+  return `${mins}:${String(secs).padStart(2, '0')}`;
 }
 
 // ─── UI Primitives ────────────────────────────────────────────────────────────
 function Spinner({ size = 20 }) {
-  return <div style={{ width: size, height: size, border: `2px solid ${C.border}`, borderTop: `2px solid ${C.primary}`, borderRadius: "50%", animation: "spin .7s linear infinite", display: "inline-block", flexShrink: 0 }} />;
+  return (
+    <div style={{
+      width: size, height: size,
+      border: `2px solid ${C.border}`,
+      borderTop: `2px solid ${C.primary}`,
+      borderRadius: "50%",
+      animation: "spin .7s linear infinite",
+      display: "inline-block", flexShrink: 0,
+    }} />
+  );
 }
 
 const PILL_VARIANTS = {
@@ -103,7 +144,14 @@ const PILL_VARIANTS = {
 };
 function Pill({ label, variant = "gray" }) {
   const v = PILL_VARIANTS[variant] ?? PILL_VARIANTS.gray;
-  return <span style={{ fontSize: 10, fontWeight: 500, padding: "2px 8px", borderRadius: 20, letterSpacing: "0.03em", ...v }}>{label}</span>;
+  return (
+    <span style={{
+      fontSize: 10, fontWeight: 500, padding: "2px 8px",
+      borderRadius: 20, letterSpacing: "0.03em", ...v,
+    }}>
+      {label}
+    </span>
+  );
 }
 
 const BTN_VARIANTS = {
@@ -112,11 +160,21 @@ const BTN_VARIANTS = {
   danger:    { background: C.dangerLight,  color: C.danger,      border: `0.5px solid ${C.dangerBorder}` },
   success:   { background: C.successLight, color: C.successDark, border: `0.5px solid ${C.successBorder}`},
   ghost:     { background: "transparent",  color: C.textMuted,   border: `0.5px solid ${C.border}`       },
+  warning:   { background: C.warningLight, color: C.warningDark, border: `0.5px solid ${C.warningBorder}`},
 };
 function Btn({ children, onClick, variant = "primary", disabled, style }) {
   const v = BTN_VARIANTS[variant] ?? BTN_VARIANTS.primary;
   return (
-    <button style={{ fontSize: 12, padding: "7px 16px", borderRadius: 8, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, fontWeight: 500, transition: "opacity .15s", ...v, ...style }} onClick={onClick} disabled={disabled}>
+    <button
+      style={{
+        fontSize: 12, padding: "7px 16px", borderRadius: 8,
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.5 : 1, fontWeight: 500,
+        transition: "opacity .15s", ...v, ...style,
+      }}
+      onClick={onClick}
+      disabled={disabled}
+    >
       {children}
     </button>
   );
@@ -125,21 +183,40 @@ function Btn({ children, onClick, variant = "primary", disabled, style }) {
 function Toast({ msg }) {
   if (!msg) return null;
   return (
-    <div style={{ position: "fixed", bottom: 24, right: 24, zIndex: 50, background: "#1A1A18", color: "#fff", fontSize: 12, fontWeight: 500, padding: "10px 16px", borderRadius: 10, boxShadow: "0 4px 20px rgba(0,0,0,.2)", display: "flex", alignItems: "center", gap: 8 }}>
+    <div style={{
+      position: "fixed", bottom: 24, right: 24, zIndex: 50,
+      background: "#1A1A18", color: "#fff", fontSize: 12, fontWeight: 500,
+      padding: "10px 16px", borderRadius: 10,
+      boxShadow: "0 4px 20px rgba(0,0,0,.2)",
+      display: "flex", alignItems: "center", gap: 8,
+    }}>
       {msg}
     </div>
   );
 }
 
 function SectionLabel({ children }) {
-  return <div style={{ fontSize: 11, fontWeight: 500, color: C.textMuted, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 12 }}>{children}</div>;
+  return (
+    <div style={{
+      fontSize: 11, fontWeight: 500, color: C.textMuted,
+      letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 12,
+    }}>
+      {children}
+    </div>
+  );
 }
 
 function StatCard({ label, value, colorStyle }) {
   return (
-    <div style={{ borderRadius: 10, padding: "14px 16px", border: `0.5px solid ${colorStyle.border}`, background: colorStyle.bg }}>
+    <div style={{
+      borderRadius: 10, padding: "14px 16px",
+      border: `0.5px solid ${colorStyle.border}`,
+      background: colorStyle.bg,
+    }}>
       <div style={{ fontSize: 26, fontWeight: 500, color: colorStyle.color }}>{value}</div>
-      <div style={{ fontSize: 12, fontWeight: 500, color: colorStyle.color, opacity: 0.8, marginTop: 2 }}>{label}</div>
+      <div style={{ fontSize: 12, fontWeight: 500, color: colorStyle.color, opacity: 0.8, marginTop: 2 }}>
+        {label}
+      </div>
     </div>
   );
 }
@@ -152,7 +229,15 @@ function AlertBanner({ type = "warn", children }) {
     error: { bg: C.dangerLight,   border: C.dangerBorder,   color: C.dangerDark   },
   };
   const s = variants[type];
-  return <div style={{ fontSize: 12, background: s.bg, border: `0.5px solid ${s.border}`, borderRadius: 8, padding: "8px 12px", color: s.color, lineHeight: 1.6, marginBottom: 8 }}>{children}</div>;
+  return (
+    <div style={{
+      fontSize: 12, background: s.bg, border: `0.5px solid ${s.border}`,
+      borderRadius: 8, padding: "8px 12px", color: s.color,
+      lineHeight: 1.6, marginBottom: 8,
+    }}>
+      {children}
+    </div>
+  );
 }
 
 // ─── Live catalog template download ───────────────────────────────────────────
@@ -163,28 +248,12 @@ const SLOT_DB_TO_LABEL_TMPL = {
   dinner_tiffin:  'Dinner Tiffin',
 };
 
-/**
- * Download catalog Excel template.
- *
- * 3-tier fallback:
- *  1. /api/catalog/feed/template  (API — clean upload-ready format)
- *  2. currentMenuItems            (React state — already loaded)
- *  3. Headers + 1 example stub    (last resort — always produces a valid file)
- */
 async function downloadCatalogTemplate(apiClient, showToast, currentMenuItems = []) {
   const HEADERS    = ['id', 'title', 'description', 'price', 'custom_label_0', 'image_link', 'is_available'];
   const COL_WIDTHS = [{ wch: 8 }, { wch: 28 }, { wch: 48 }, { wch: 8 }, { wch: 16 }, { wch: 52 }, { wch: 14 }];
 
   const fromApiItems = (items) =>
-    items.map(item => [
-      item.id,
-      item.title,
-      item.description,
-      item.price,
-      item.custom_label_0,
-      item.image_link,
-      item.is_available,
-    ]);
+    items.map(item => [item.id, item.title, item.description, item.price, item.custom_label_0, item.image_link, item.is_available]);
 
   const fromStateItems = (items) =>
     items.map(item => [
@@ -206,28 +275,21 @@ async function downloadCatalogTemplate(apiClient, showToast, currentMenuItems = 
     showToast(`Template downloaded — ${count} item${count !== 1 ? 's' : ''} (${source})`);
   };
 
-  // Tier 1: API
   try {
     showToast('Preparing template from live catalog…');
-    const res      = await apiClient.get('/api/catalog/feed/template');
+    const res = await apiClient.get('/api/catalog/feed/template');
     const apiItems = res.data?.items ?? [];
-    if (apiItems.length > 0) {
-      writeAndDownload(fromApiItems(apiItems), apiItems.length, 'live catalog');
-      return;
-    }
-    console.warn('[template-dl] API returned 0 items — trying component state');
+    if (apiItems.length > 0) { writeAndDownload(fromApiItems(apiItems), apiItems.length, 'live catalog'); return; }
   } catch (err) {
-    console.warn('[template-dl] API failed:', err.message, '— trying component state');
+    console.warn('[template-dl] API failed:', err.message);
   }
 
-  // Tier 2: Component state
   if (currentMenuItems && currentMenuItems.length > 0) {
     const rows = fromStateItems(currentMenuItems);
     writeAndDownload(rows, rows.length, 'local snapshot');
     return;
   }
 
-  // Tier 3: Stub
   const stubRow = ['M001', 'Idli', 'Soft steamed idlis with sambar and chutney', 50, 'Morning Tiffin', '', 'TRUE'];
   writeAndDownload([stubRow], 0, 'blank template — fill in your items');
   showToast('No items in database yet — blank template downloaded');
@@ -272,16 +334,33 @@ export default function ManagerPortal() {
   const [isSubmitting,  setIsSubmitting]  = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
 
+  // Customer info for new order
+  const [orderStep,       setOrderStep]       = useState(1); // 1=customer details, 2=item selection
+  const [customerName,    setCustomerName]    = useState('');
+  const [customerPhone,   setCustomerPhone]   = useState('');
+  const [customerNameErr, setCustomerNameErr] = useState('');
+  const [customerPhoneErr,setCustomerPhoneErr]= useState('');
+
   const [tokens,         setTokens]         = useState([]);
   const [assigningToken, setAssigningToken] = useState(null);
   const [assignTableSel, setAssignTableSel] = useState({});
   const [activeTab,      setActiveTab]      = useState('queue');
   const [toastMsg,       setToastMsg]       = useState('');
 
-  const [freeTableModal, setFreeTableModal] = useState(null);
-  const [rejectModal,    setRejectModal]    = useState(null);
-  const [rejectReason,   setRejectReason]   = useState('');
-  const [processingId,   setProcessingId]   = useState(null);
+  const [freeTableModal,  setFreeTableModal]  = useState(null);
+  const [rejectModal,     setRejectModal]     = useState(null);
+  const [rejectReason,    setRejectReason]    = useState('');
+  const [processingId,    setProcessingId]    = useState(null);
+
+  // Table status management
+  const [tableStatusModal,    setTableStatusModal]    = useState(null); // { tableId, tableNumber, currentStatus }
+  const [pendingStatus,       setPendingStatus]       = useState('');   // 'reserved' | 'dirty'
+  const [reservationDuration, setReservationDuration] = useState(60);  // minutes
+  const [settingTableStatus,  setSettingTableStatus]  = useState(false);
+  // Local map of reservation expiry times { tableId: ISOString }
+  const [reservationExpiry,   setReservationExpiry]   = useState({});
+  // Countdown tick
+  const [, setTick] = useState(0);
 
   const [uploadFile,     setUploadFile]     = useState(null);
   const [uploadRows,     setUploadRows]     = useState([]);
@@ -309,6 +388,35 @@ export default function ManagerPortal() {
     return () => { clearInterval(full); clearInterval(quick); };
   }, [fetchData, fetchTokens, fetchTables, fetchOrders]);
 
+  // ── Countdown ticker — updates every second for reservation timers ────────
+  useEffect(() => {
+    const ticker = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(ticker);
+  }, []);
+
+  // ── Auto-release expired reservations (checks every 30s) ─────────────────
+  useEffect(() => {
+    const check = async () => {
+      const now = Date.now();
+      for (const [tableId, expiresAt] of Object.entries(reservationExpiry)) {
+        if (new Date(expiresAt).getTime() <= now) {
+          try {
+            await apiClient.put(`/api/tables/${tableId}/status`, { status: 'available' });
+            setReservationExpiry(prev => { const n = { ...prev }; delete n[tableId]; return n; });
+            await fetchTables();
+            const table = tables.find(t => String(t.id) === String(tableId));
+            showToast(`Table ${table?.table_number ?? tableId} reservation expired — now available`);
+          } catch(err) {
+            console.error('[auto-release] Failed for', tableId, err.message);
+          }
+        }
+      }
+    };
+    check();
+    const interval = setInterval(check, 30000);
+    return () => clearInterval(interval);
+  }, [reservationExpiry, apiClient, tables, fetchTables]);
+
   // ── Computed ──────────────────────────────────────────────────────────────
   const getTableStatus = (table) => {
     const order  = orders.find(o => o.table_id === table.id && ACTIVE_ORDER_STATUSES.includes(o.status));
@@ -316,7 +424,10 @@ export default function ManagerPortal() {
     const dbStatus = table.status || 'available';
     return { status: (order || token) ? 'occupied' : dbStatus, order, token };
   };
-  const availableTablesFor = (pax) => tables.filter(t => { const { status } = getTableStatus(t); return status === 'available' && (t.capacity == null || t.capacity >= pax); });
+  const availableTablesFor = (pax) => tables.filter(t => {
+    const { status } = getTableStatus(t);
+    return status === 'available' && (t.capacity == null || t.capacity >= pax);
+  });
 
   const normaliseToken = (t) => ({
     ...t,
@@ -338,6 +449,32 @@ export default function ManagerPortal() {
   const pendingApprTokens  = normTokens.filter(t => t.status === 'pending_approval');
   const freeTablesCount    = tables.filter(t => getTableStatus(t).status === 'available').length;
 
+  // ── Open new-order modal ──────────────────────────────────────────────────
+  const openNewOrderModal = (tableId = null) => {
+    setSelectedTable(tableId);
+    setSelectedItems([]);
+    setCustomerName('');
+    setCustomerPhone('');
+    setCustomerNameErr('');
+    setCustomerPhoneErr('');
+    setOrderStep(1);
+    setShowNewOrder(true);
+    setActiveTab('orders');
+  };
+
+  // ── Customer details validation (Step 1 → Step 2) ────────────────────────
+  const validateAndProceedToItems = () => {
+    let ok = true;
+    if (!customerName.trim()) { setCustomerNameErr('Customer name is required'); ok = false; }
+    else setCustomerNameErr('');
+
+    const digits = customerPhone.replace(/\D/g, '');
+    if (!digits || digits.length < 10) { setCustomerPhoneErr('Enter a valid 10-digit WhatsApp number'); ok = false; }
+    else setCustomerPhoneErr('');
+
+    if (ok) setOrderStep(2);
+  };
+
   // ── Free table ────────────────────────────────────────────────────────────
   const openFreeTableModal = (table) => {
     const { order, token } = getTableStatus(table);
@@ -354,9 +491,54 @@ export default function ManagerPortal() {
       if (token?.phone) {
         await apiClient.post('/api/feedback/queue', { customer_phone: token.phone, customer_name: token.name, token_number: token.id, table_number: String(tableNumber) }).catch(()=>{});
       }
+      // Clear any local reservation expiry
+      setReservationExpiry(prev => { const n = { ...prev }; delete n[tableId]; return n; });
       await fetchTables(); await fetchOrders(); await fetchTokens();
       showToast(`Table ${tableNumber} is now available`);
     } catch(err) { showToast(`Failed: ${err.message}`); }
+  };
+
+  // ── Table status management ───────────────────────────────────────────────
+  const openTableStatusModal = (table) => {
+    setTableStatusModal({ tableId: table.id, tableNumber: table.table_number });
+    setPendingStatus('reserved');
+    setReservationDuration(60);
+  };
+
+  const confirmTableStatus = async () => {
+    if (!tableStatusModal || !pendingStatus) return;
+    setSettingTableStatus(true);
+    const { tableId, tableNumber } = tableStatusModal;
+    try {
+      await apiClient.put(`/api/tables/${tableId}/status`, { status: pendingStatus });
+
+      if (pendingStatus === 'reserved') {
+        const expiresAt = new Date(Date.now() + reservationDuration * 60 * 1000).toISOString();
+        setReservationExpiry(prev => ({ ...prev, [tableId]: expiresAt }));
+        showToast(`Table ${tableNumber} reserved for ${reservationDuration} min — auto-releases at ${format(new Date(expiresAt), 'HH:mm')}`);
+      } else {
+        showToast(`Table ${tableNumber} marked as Cleaning`);
+      }
+
+      setTableStatusModal(null);
+      await fetchTables();
+    } catch(err) {
+      showToast(`Failed to update table: ${err.message}`);
+    } finally {
+      setSettingTableStatus(false);
+    }
+  };
+
+  // Release a reserved/cleaning table back to available manually
+  const releaseTable = async (table) => {
+    try {
+      await apiClient.put(`/api/tables/${table.id}/status`, { status: 'available' });
+      setReservationExpiry(prev => { const n = { ...prev }; delete n[table.id]; return n; });
+      await fetchTables();
+      showToast(`Table ${table.table_number} is now available`);
+    } catch(err) {
+      showToast(`Failed: ${err.message}`);
+    }
   };
 
   // ── Approve / Reject ──────────────────────────────────────────────────────
@@ -414,20 +596,46 @@ export default function ManagerPortal() {
   const createOrder = async () => {
     if (!selectedTable || selectedItems.length === 0) { showToast('Select a table and items'); return; }
     if (isSubmitting) return;
-    setIsSubmitting(true); setShowNewOrder(false);
+    setIsSubmitting(true);
+    setShowNewOrder(false);
     const tableId = selectedTable;
-    const items = selectedItems.map(item => ({ menu_item_id: item.id, quantity: item.quantity || 1, special_instructions: item.special_instructions }));
-    const itemsForKOT = selectedItems.map(item => ({ kdsId: item.id, name: item.name, qty: item.quantity || 1, note: item.special_instructions || null }));
+    const items = selectedItems.map(item => ({
+      menu_item_id: item.id,
+      quantity: item.quantity || 1,
+      special_instructions: item.special_instructions,
+    }));
+    const itemsForKOT = selectedItems.map(item => ({
+      kdsId: item.id, name: item.name, qty: item.quantity || 1,
+      note: item.special_instructions || null,
+    }));
+    const savedName  = customerName.trim();
+    const savedPhone = customerPhone.replace(/\D/g, '');
     setSelectedItems([]); setSelectedTable(null);
+    setCustomerName(''); setCustomerPhone('');
     try {
-      const res = await apiClient.post('/api/orders', { table_id: tableId, items, notes: '' });
+      const res = await apiClient.post('/api/orders', {
+        table_id: tableId,
+        items,
+        notes: '',
+        customer_name:  savedName  || undefined,
+        customer_phone: savedPhone || undefined,
+      });
       const newOrder = res.data.order;
       await fetchOrders(); await fetchTables();
       const table = tables.find(t => t.id === tableId);
-      printConsolidated({ orderNumber: newOrder.order_number, tableNumber: table?.table_number ?? null, tableSection: table?.section ?? null, serviceType: 'Dine-in', captainName: user?.full_name ?? null, specialNotes: null, items: itemsForKOT });
+      printConsolidated({
+        orderNumber:  newOrder.order_number,
+        tableNumber:  table?.table_number ?? null,
+        tableSection: table?.section ?? null,
+        serviceType:  'Dine-in',
+        captainName:  user?.full_name ?? null,
+        specialNotes: null,
+        items:        itemsForKOT,
+      });
     } catch(err) { showToast('Error creating order: ' + err.message); }
     finally { setIsSubmitting(false); }
   };
+
   const cancelOrder = async (orderId, tableId) => {
     try {
       await apiClient.delete(`/api/orders/${orderId}`);
@@ -446,13 +654,15 @@ export default function ManagerPortal() {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        const workbook = XLSX.read(e.target.result, { type: 'array' });
+        const workbook  = XLSX.read(e.target.result, { type: 'array' });
         const sheetName = workbook.SheetNames.includes('WhatsApp Catalog') ? 'WhatsApp Catalog' : workbook.SheetNames[0];
-        const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' });
+        const rawRows   = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' });
         if (rawRows.length === 0) { setUploadErrors(['The selected sheet appears to be empty.']); setUploadStatus('idle'); return; }
-        const mapped = rawRows.map(mapExcelRowToMenuItem);
+        const mapped   = rawRows.map(mapExcelRowToMenuItem);
         const nonEmpty = mapped.filter(r => r.id || r.name);
-        setUploadRows(nonEmpty); setUploadErrors(nonEmpty.flatMap((r, i) => validateRow(r, i))); setUploadStatus('preview');
+        setUploadRows(nonEmpty);
+        setUploadErrors(nonEmpty.flatMap((r, i) => validateRow(r, i)));
+        setUploadStatus('preview');
       } catch(err) { setUploadErrors([`Could not read the file: ${err.message}`]); setUploadStatus('idle'); }
     };
     reader.readAsArrayBuffer(file);
@@ -473,7 +683,11 @@ export default function ManagerPortal() {
       showToast(`Menu updated — ${res.data.upserted} items saved`);
     } catch(err) { setUploadErrors([`Upload failed: ${err.response?.data?.error || err.message}`]); setUploadStatus('preview'); }
   };
-  const handleResetUpload = () => { setUploadFile(null); setUploadRows([]); setUploadErrors([]); setUploadStatus('idle'); setUploadResult(null); if (fileInputRef.current) fileInputRef.current.value = ''; };
+  const handleResetUpload = () => {
+    setUploadFile(null); setUploadRows([]); setUploadErrors([]);
+    setUploadStatus('idle'); setUploadResult(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
 
   // ── Loading ───────────────────────────────────────────────────────────────
   if (loading) {
@@ -488,7 +702,11 @@ export default function ManagerPortal() {
   }
 
   // ── Shared styles ─────────────────────────────────────────────────────────
-  const inputStyle = { width: "100%", fontSize: 12, padding: "8px 10px", borderRadius: 8, border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.text, outline: "none", boxSizing: "border-box" };
+  const inputStyle = {
+    width: "100%", fontSize: 12, padding: "8px 10px", borderRadius: 8,
+    border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.text,
+    outline: "none", boxSizing: "border-box",
+  };
 
   return (
     <div style={{ minHeight: "100vh", background: C.pageBg }}>
@@ -505,8 +723,12 @@ export default function ManagerPortal() {
             </div>
             <div style={{ padding: "20px 20px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
               <div>
-                <label style={{ fontSize: 11, fontWeight: 500, color: C.textSub, marginBottom: 5, display: "block" }}>Reason <span style={{ color: C.textMuted, fontWeight: 400 }}>(optional — sent to customer)</span></label>
-                <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)} placeholder="e.g. Not enough space tonight, try reserving for tomorrow" rows={3} style={{ ...inputStyle, resize: "none", lineHeight: 1.6 }} />
+                <label style={{ fontSize: 11, fontWeight: 500, color: C.textSub, marginBottom: 5, display: "block" }}>
+                  Reason <span style={{ color: C.textMuted, fontWeight: 400 }}>(optional — sent to customer)</span>
+                </label>
+                <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)}
+                  placeholder="e.g. Not enough space tonight, try reserving for tomorrow"
+                  rows={3} style={{ ...inputStyle, resize: "none", lineHeight: 1.6 }} />
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <Btn variant="secondary" onClick={() => setRejectModal(null)} style={{ flex: 1 }}>Cancel</Btn>
@@ -549,6 +771,72 @@ export default function ManagerPortal() {
                 </button>
               )}
               <button onClick={() => setFreeTableModal(null)} style={{ fontSize: 12, color: C.textMuted, background: "none", border: "none", cursor: "pointer", padding: "6px 0", textAlign: "center" }}>Never mind</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Table status modal ────────────────────────────────────────────── */}
+      {tableStatusModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16 }}>
+          <div style={{ ...CARD, maxWidth: 400, width: "100%", padding: 0, overflow: "hidden" }}>
+            <div style={{ background: C.warningLight, borderBottom: `0.5px solid ${C.warningBorder}`, padding: "16px 20px" }}>
+              <h3 style={{ fontSize: 15, fontWeight: 500, color: C.warningDark, margin: 0 }}>Set status — Table {tableStatusModal.tableNumber}</h3>
+              <p style={{ fontSize: 12, color: C.warning, margin: "2px 0 0" }}>Choose the new status for this table</p>
+            </div>
+            <div style={{ padding: "20px 20px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
+              {/* Status selector */}
+              <div style={{ display: "flex", gap: 8 }}>
+                {[
+                  { value: 'reserved', label: '🔒 Reserved', color: C.warningDark, bg: C.warningLight, border: C.warningBorder },
+                  { value: 'dirty',    label: '🧹 Cleaning', color: C.dangerDark,  bg: C.dangerLight,  border: C.dangerBorder  },
+                ].map(opt => (
+                  <button key={opt.value} onClick={() => setPendingStatus(opt.value)}
+                    style={{
+                      flex: 1, padding: "10px 8px", borderRadius: 8, cursor: "pointer",
+                      fontSize: 12, fontWeight: 500, textAlign: "center",
+                      background: pendingStatus === opt.value ? opt.bg : C.surfaceBg,
+                      border: pendingStatus === opt.value ? `1.5px solid ${opt.color}` : `0.5px solid ${C.border}`,
+                      color: pendingStatus === opt.value ? opt.color : C.textSub,
+                      transition: "all .15s",
+                    }}>
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Duration picker — only for reserved */}
+              {pendingStatus === 'reserved' && (
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 500, color: C.textSub, marginBottom: 8, display: "block" }}>
+                    Reserve for how long?
+                  </label>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {RESERVATION_DURATIONS.map(d => (
+                      <button key={d} onClick={() => setReservationDuration(d)}
+                        style={{
+                          padding: "5px 14px", borderRadius: 20, cursor: "pointer", fontSize: 12, fontWeight: 500,
+                          background: reservationDuration === d ? C.primary : C.surfaceBg,
+                          color:      reservationDuration === d ? "#fff"     : C.textSub,
+                          border:     reservationDuration === d ? `0.5px solid ${C.primaryDark}` : `0.5px solid ${C.border}`,
+                          transition: "all .15s",
+                        }}>
+                        {d} min
+                      </button>
+                    ))}
+                  </div>
+                  <p style={{ fontSize: 11, color: C.textMuted, margin: "8px 0 0" }}>
+                    Table will auto-release at {format(new Date(Date.now() + reservationDuration * 60 * 1000), 'HH:mm')}
+                  </p>
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 8 }}>
+                <Btn variant="secondary" onClick={() => setTableStatusModal(null)} style={{ flex: 1 }}>Cancel</Btn>
+                <Btn variant="warning" onClick={confirmTableStatus} disabled={settingTableStatus} style={{ flex: 1 }}>
+                  {settingTableStatus ? <Spinner size={14} /> : 'Confirm'}
+                </Btn>
+              </div>
             </div>
           </div>
         </div>
@@ -606,40 +894,190 @@ export default function ManagerPortal() {
         </div>
       )}
 
-      {/* ── New order modal ──────────────────────────────────────────────── */}
+      {/* ══════════════════════════════════════════════════════════════════════
+          NEW ORDER MODAL — 2-step: customer details → item selection
+          Max-height + overflow-y so long menus scroll cleanly.
+      ══════════════════════════════════════════════════════════════════════ */}
       {showNewOrder && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 50 }}>
-          <div style={{ ...CARD, maxWidth: 640, width: "100%", maxHeight: "80vh", overflowY: "auto", padding: 0, overflow: "hidden" }}>
-            <div style={{ position: "sticky", top: 0, background: C.primaryLight, borderBottom: `0.5px solid ${C.primaryBorder}`, padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <h3 style={{ fontSize: 15, fontWeight: 500, color: C.primaryDark, margin: 0 }}>
-                New order {selectedTable ? `— Table ${tables.find(t => t.id === selectedTable)?.table_number}` : ''}
-              </h3>
+          <div style={{
+            ...CARD, maxWidth: 640, width: "100%",
+            maxHeight: "88vh",
+            display: "flex", flexDirection: "column",
+            padding: 0, overflow: "hidden",
+          }}>
+            {/* ── Modal header (sticky) ──────────────────────────────────── */}
+            <div style={{
+              background: C.primaryLight, borderBottom: `0.5px solid ${C.primaryBorder}`,
+              padding: "16px 20px",
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              flexShrink: 0,
+            }}>
+              <div>
+                <h3 style={{ fontSize: 15, fontWeight: 500, color: C.primaryDark, margin: 0 }}>
+                  {orderStep === 1 ? 'Customer details' : 'Select items'}
+                  {selectedTable && orderStep === 2 ? ` — Table ${tables.find(t => t.id === selectedTable)?.table_number}` : ''}
+                </h3>
+                {/* Step indicator */}
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+                  {[1, 2].map(s => (
+                    <React.Fragment key={s}>
+                      <div style={{
+                        width: 20, height: 20, borderRadius: "50%",
+                        background: s <= orderStep ? C.primary : C.border,
+                        color: s <= orderStep ? "#fff" : C.textMuted,
+                        fontSize: 10, fontWeight: 500,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                      }}>{s}</div>
+                      {s < 2 && <div style={{ width: 28, height: 1, background: orderStep > 1 ? C.primary : C.border }} />}
+                    </React.Fragment>
+                  ))}
+                  <span style={{ fontSize: 11, color: C.textMuted, marginLeft: 4 }}>
+                    {orderStep === 1 ? 'Customer info' : 'Order items'}
+                  </span>
+                </div>
+              </div>
               <button onClick={() => setShowNewOrder(false)} style={{ fontSize: 18, background: "none", border: "none", cursor: "pointer", color: C.textMuted }}>✕</button>
             </div>
-            <div style={{ padding: "20px 24px", overflowY: "auto" }}>
-              <div style={{ fontSize: 11, fontWeight: 500, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 12 }}>Select items</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 20 }}>
-                {menuItems.map(item => {
-                  const isSelected = !!selectedItems.find(i => i.id === item.id);
-                  return (
-                    <button key={item.id}
-                      onClick={() => {
-                        if (isSelected) setSelectedItems(selectedItems.filter(i => i.id !== item.id));
-                        else setSelectedItems([...selectedItems, { ...item, quantity: 1 }]);
-                      }}
-                      style={{ padding: "10px 12px", borderRadius: 8, cursor: "pointer", textAlign: "left", transition: "all .15s", border: `0.5px solid ${isSelected ? C.primary : C.border}`, background: isSelected ? C.primaryLight : C.cardBg }}>
-                      <div style={{ fontSize: 12, fontWeight: 500, color: C.text }}>{item.name}</div>
-                      <div style={{ fontSize: 12, fontWeight: 500, color: C.primary, marginTop: 2 }}>₹{item.price?.toFixed(2)}</div>
-                    </button>
-                  );
-                })}
-              </div>
-              <div style={{ display: "flex", gap: 10 }}>
-                <Btn variant="secondary" onClick={() => setShowNewOrder(false)} style={{ flex: 1 }}>Cancel</Btn>
-                <Btn onClick={createOrder} disabled={isSubmitting} style={{ flex: 1 }}>
-                  {isSubmitting ? 'Creating…' : 'Create order'}
-                </Btn>
-              </div>
+
+            {/* ── Modal body (scrollable) ────────────────────────────────── */}
+            <div style={{ overflowY: "auto", flex: 1, padding: "20px 24px" }}>
+
+              {/* Step 1: Customer details */}
+              {orderStep === 1 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  <div style={{ background: C.primaryLight, border: `0.5px solid ${C.primaryBorder}`, borderRadius: 8, padding: "10px 14px", fontSize: 12, color: C.primaryDark }}>
+                    Collecting customer details enables direct WhatsApp communication and order tracking.
+                  </div>
+
+                  {/* Table selector — if not pre-selected */}
+                  {!selectedTable && (
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 500, color: C.textSub, marginBottom: 6, display: "block" }}>
+                        Table <span style={{ color: C.danger }}>*</span>
+                      </label>
+                      <select
+                        value={selectedTable || ''}
+                        onChange={e => setSelectedTable(e.target.value || null)}
+                        style={{ ...inputStyle }}>
+                        <option value="">— choose a table —</option>
+                        {tables.filter(t => getTableStatus(t).status === 'available').map(t => (
+                          <option key={t.id} value={t.id}>
+                            Table {t.table_number}{t.capacity ? ` (${t.capacity} seats)` : ''}{t.section ? ` · ${t.section}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Customer name */}
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 500, color: C.textSub, marginBottom: 6, display: "block" }}>
+                      Customer name <span style={{ color: C.danger }}>*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={customerName}
+                      onChange={e => { setCustomerName(e.target.value); setCustomerNameErr(''); }}
+                      placeholder="e.g. Ravi Kumar"
+                      style={{ ...inputStyle, border: `0.5px solid ${customerNameErr ? C.danger : C.border}` }}
+                      onKeyDown={e => e.key === 'Enter' && validateAndProceedToItems()}
+                    />
+                    {customerNameErr && <p style={{ fontSize: 11, color: C.danger, margin: "4px 0 0" }}>{customerNameErr}</p>}
+                  </div>
+
+                  {/* WhatsApp number */}
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 500, color: C.textSub, marginBottom: 6, display: "block" }}>
+                      WhatsApp number <span style={{ color: C.danger }}>*</span>
+                    </label>
+                    <div style={{ position: "relative" }}>
+                      <span style={{
+                        position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)",
+                        fontSize: 12, color: C.textSub, pointerEvents: "none",
+                      }}>+91</span>
+                      <input
+                        type="tel"
+                        value={customerPhone}
+                        onChange={e => { setCustomerPhone(e.target.value); setCustomerPhoneErr(''); }}
+                        placeholder="98765 43210"
+                        style={{
+                          ...inputStyle, paddingLeft: 36,
+                          border: `0.5px solid ${customerPhoneErr ? C.danger : C.border}`,
+                        }}
+                        onKeyDown={e => e.key === 'Enter' && validateAndProceedToItems()}
+                      />
+                    </div>
+                    {customerPhoneErr && <p style={{ fontSize: 11, color: C.danger, margin: "4px 0 0" }}>{customerPhoneErr}</p>}
+                    <p style={{ fontSize: 11, color: C.textMuted, margin: "4px 0 0" }}>
+                      Order updates and KOT will be sent to this number via WhatsApp.
+                    </p>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 8, paddingTop: 4 }}>
+                    <Btn variant="secondary" onClick={() => setShowNewOrder(false)} style={{ flex: 1 }}>Cancel</Btn>
+                    <Btn onClick={validateAndProceedToItems} disabled={!selectedTable && tables.filter(t => getTableStatus(t).status === 'available').length === 0} style={{ flex: 1 }}>
+                      Next — choose items →
+                    </Btn>
+                  </div>
+                </div>
+              )}
+
+              {/* Step 2: Item selection */}
+              {orderStep === 2 && (
+                <div>
+                  {/* Customer summary pill */}
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 8, marginBottom: 14,
+                    background: C.successLight, border: `0.5px solid ${C.successBorder}`,
+                    borderRadius: 8, padding: "8px 12px",
+                  }}>
+                    <span style={{ fontSize: 18 }}>👤</span>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 500, color: C.successDark }}>{customerName}</div>
+                      <div style={{ fontSize: 11, color: C.success }}>+91 {customerPhone}</div>
+                    </div>
+                    <button onClick={() => setOrderStep(1)} style={{ marginLeft: "auto", fontSize: 11, color: C.primary, background: "none", border: "none", cursor: "pointer" }}>Edit</button>
+                  </div>
+
+                  <div style={{ fontSize: 11, fontWeight: 500, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>Select items</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 20 }}>
+                    {menuItems.map(item => {
+                      const isSelected = !!selectedItems.find(i => i.id === item.id);
+                      return (
+                        <button key={item.id}
+                          onClick={() => {
+                            if (isSelected) setSelectedItems(selectedItems.filter(i => i.id !== item.id));
+                            else setSelectedItems([...selectedItems, { ...item, quantity: 1 }]);
+                          }}
+                          style={{
+                            padding: "10px 12px", borderRadius: 8, cursor: "pointer", textAlign: "left",
+                            transition: "all .15s",
+                            border: `0.5px solid ${isSelected ? C.primary : C.border}`,
+                            background: isSelected ? C.primaryLight : C.cardBg,
+                          }}>
+                          <div style={{ fontSize: 12, fontWeight: 500, color: C.text }}>{item.name}</div>
+                          <div style={{ fontSize: 12, fontWeight: 500, color: C.primary, marginTop: 2 }}>₹{item.price?.toFixed(2)}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {selectedItems.length > 0 && (
+                    <div style={{ background: C.surfaceBg, borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 12, color: C.textSub }}>
+                      <strong style={{ color: C.text }}>{selectedItems.length} item{selectedItems.length !== 1 ? 's' : ''} selected</strong>
+                      {' '}· ₹{selectedItems.reduce((s, i) => s + (i.price || 0) * (i.quantity || 1), 0).toFixed(2)} subtotal
+                    </div>
+                  )}
+
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Btn variant="secondary" onClick={() => setOrderStep(1)} style={{ flex: 1 }}>← Back</Btn>
+                    <Btn onClick={createOrder} disabled={isSubmitting || selectedItems.length === 0} style={{ flex: 1 }}>
+                      {isSubmitting ? 'Creating…' : `Create order (${selectedItems.length} items)`}
+                    </Btn>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -655,7 +1093,7 @@ export default function ManagerPortal() {
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <span style={{ fontSize: 12, color: C.textSub }}>👤 {user?.full_name || user?.email}</span>
-              <Btn onClick={() => { setShowNewOrder(true); setActiveTab('orders'); }}>+ New order</Btn>
+              <Btn onClick={() => openNewOrderModal(null)}>+ New order</Btn>
               <Btn variant="danger" onClick={logout}>Logout</Btn>
             </div>
           </div>
@@ -684,7 +1122,9 @@ export default function ManagerPortal() {
             { key: 'menu',   label: 'Menu'   },
           ].map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)} style={{
-              padding: "6px 16px", borderRadius: 7, fontSize: 12, fontWeight: activeTab === tab.key ? 500 : 400, cursor: "pointer", transition: "all .15s",
+              padding: "6px 16px", borderRadius: 7, fontSize: 12,
+              fontWeight: activeTab === tab.key ? 500 : 400,
+              cursor: "pointer", transition: "all .15s",
               background:   activeTab === tab.key ? C.primary     : "transparent",
               color:        activeTab === tab.key ? "#fff"        : C.textMuted,
               border:       activeTab === tab.key ? `0.5px solid ${C.primaryDark}` : "0.5px solid transparent",
@@ -700,7 +1140,6 @@ export default function ManagerPortal() {
         {activeTab === 'queue' && (
           <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
 
-            {/* Pending approval */}
             {pendingApprTokens.length > 0 && (
               <div>
                 <SectionLabel>Pending approval — {pendingApprTokens.length} large {pendingApprTokens.length === 1 ? 'party' : 'parties'}</SectionLabel>
@@ -738,7 +1177,6 @@ export default function ManagerPortal() {
               </div>
             )}
 
-            {/* Waiting */}
             <div>
               <SectionLabel>Waiting for table — {waitingTokens.length} token{waitingTokens.length !== 1 ? 's' : ''}</SectionLabel>
               {waitingTokens.length === 0 ? (
@@ -746,8 +1184,8 @@ export default function ManagerPortal() {
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   {waitingTokens.map(token => {
-                    const avail     = availableTablesFor(token.pax);
-                    const isAssign  = assigningToken === token.id;
+                    const avail    = availableTablesFor(token.pax);
+                    const isAssign = assigningToken === token.id;
                     return (
                       <div key={token.id} style={{ ...CARD, display: "flex", alignItems: "flex-start", gap: 16 }}>
                         <div style={{ width: 44, height: 44, borderRadius: "50%", background: C.warningLight, color: C.warningDark, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 500, flexShrink: 0 }}>
@@ -782,7 +1220,6 @@ export default function ManagerPortal() {
               )}
             </div>
 
-            {/* Seated */}
             {seatedTokens.length > 0 && (
               <div>
                 <SectionLabel>Seated — {seatedTokens.length}</SectionLabel>
@@ -808,7 +1245,6 @@ export default function ManagerPortal() {
               </div>
             )}
 
-            {/* Takeaway */}
             {takeawayTokens.length > 0 && (
               <div>
                 <SectionLabel>Takeaway — {takeawayTokens.length}</SectionLabel>
@@ -838,36 +1274,118 @@ export default function ManagerPortal() {
 
         {/* ════════════════════════════════════════════════════════════════
             TAB: TABLES
+            Enhanced: shows countdown for reserved tables, "Set status"
+            button for available tables, "Release" for reserved/cleaning.
         ════════════════════════════════════════════════════════════════ */}
         {activeTab === 'tables' && (
           <div>
-            <h2 style={{ fontSize: 16, fontWeight: 500, color: C.text, margin: "0 0 16px" }}>Table allocation</h2>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(140px,1fr))", gap: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h2 style={{ fontSize: 16, fontWeight: 500, color: C.text, margin: 0 }}>Table allocation</h2>
+              <span style={{ fontSize: 11, color: C.textMuted }}>
+                Available tables can be reserved or marked for cleaning. Reserved tables auto-release after the set duration.
+              </span>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 10 }}>
               {tables.map(table => {
                 const { status, order, token } = getTableStatus(table);
                 const s = TABLE_STATUS[status] ?? TABLE_STATUS.available;
+                const countdown = reservationExpiry[table.id] ? reservationCountdown(reservationExpiry[table.id]) : null;
+                const isBlockedForOrder = status === 'occupied' || status === 'reserved' || status === 'dirty';
+
                 return (
-                  <div key={table.id} style={{ background: s.bg, border: `0.5px solid ${s.text}22`, borderRadius: 12, padding: "14px 14px 12px", display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                  <div key={table.id} style={{
+                    background: s.bg,
+                    border: `0.5px solid ${s.text}22`,
+                    borderRadius: 12, padding: "14px 14px 12px",
+                    display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+                  }}>
                     <div style={{ fontSize: 12, fontWeight: 500, color: s.text }}>Table {table.table_number}</div>
-                    <div style={{ fontSize: 22, margin: "4px 0" }}>🪑</div>
+                    <div style={{ fontSize: 22, margin: "4px 0" }}>
+                      {status === 'available' ? '🪑' : status === 'occupied' ? '🍽️' : status === 'reserved' ? '🔒' : '🧹'}
+                    </div>
                     <div style={{ fontSize: 10, fontWeight: 500, color: s.text }}>{s.label}</div>
+
+                    {/* Reservation countdown */}
+                    {countdown && (
+                      <div style={{
+                        fontSize: 11, fontWeight: 500, color: C.warningDark,
+                        background: C.warningLight, border: `0.5px solid ${C.warningBorder}`,
+                        padding: "2px 8px", borderRadius: 6, marginTop: 2,
+                      }}>
+                        ⏱ {countdown}
+                      </div>
+                    )}
+                    {status === 'reserved' && !countdown && (
+                      <div style={{ fontSize: 10, color: C.warningDark, background: C.warningLight, padding: "2px 7px", borderRadius: 6 }}>Reserved</div>
+                    )}
+
                     {token && <div style={{ fontSize: 10, color: s.text, background: `${s.text}18`, padding: "2px 7px", borderRadius: 6 }}>Token: {token.id}</div>}
-                    {order && <div style={{ fontSize: 10, color: s.text, background: `${s.text}18`, padding: "2px 7px", borderRadius: 6 }}>Order: {order.order_number?.slice(-4)}</div>}
-                    <button
-                      onClick={() => status === 'occupied' ? openFreeTableModal(table) : (() => { setSelectedTable(table.id); setShowNewOrder(true); })()}
-                      style={{ marginTop: 6, fontSize: 10, fontWeight: 500, padding: "4px 10px", borderRadius: 6, border: `0.5px solid ${s.text}44`, background: "rgba(255,255,255,0.6)", color: s.text, cursor: "pointer", width: "100%" }}>
-                      {status === 'occupied' ? 'Mark available' : '+ New order'}
-                    </button>
+                    {order  && <div style={{ fontSize: 10, color: s.text, background: `${s.text}18`, padding: "2px 7px", borderRadius: 6 }}>Order: {order.order_number?.slice(-4)}</div>}
+
+                    {/* Action buttons */}
+                    <div style={{ width: "100%", marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+                      {status === 'available' && (
+                        <>
+                          <button
+                            onClick={() => openNewOrderModal(table.id)}
+                            style={{
+                              fontSize: 10, fontWeight: 500, padding: "4px 10px", borderRadius: 6,
+                              border: `0.5px solid ${s.text}44`, background: "rgba(255,255,255,0.6)",
+                              color: s.text, cursor: "pointer", width: "100%",
+                            }}>
+                            + New order
+                          </button>
+                          <button
+                            onClick={() => openTableStatusModal(table)}
+                            style={{
+                              fontSize: 10, fontWeight: 500, padding: "4px 10px", borderRadius: 6,
+                              border: `0.5px solid ${C.warningBorder}`, background: C.warningLight,
+                              color: C.warningDark, cursor: "pointer", width: "100%",
+                            }}>
+                            Set status
+                          </button>
+                        </>
+                      )}
+                      {status === 'occupied' && (
+                        <button
+                          onClick={() => openFreeTableModal(table)}
+                          style={{
+                            fontSize: 10, fontWeight: 500, padding: "4px 10px", borderRadius: 6,
+                            border: `0.5px solid ${s.text}44`, background: "rgba(255,255,255,0.6)",
+                            color: s.text, cursor: "pointer", width: "100%",
+                          }}>
+                          Mark available
+                        </button>
+                      )}
+                      {(status === 'reserved' || status === 'dirty') && (
+                        <button
+                          onClick={() => releaseTable(table)}
+                          style={{
+                            fontSize: 10, fontWeight: 500, padding: "4px 10px", borderRadius: 6,
+                            border: `0.5px solid ${C.successBorder}`, background: C.successLight,
+                            color: C.successDark, cursor: "pointer", width: "100%",
+                          }}>
+                          Release now
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })}
             </div>
-            <div style={{ display: "flex", gap: 16, marginTop: 14, flexWrap: "wrap" }}>
+
+            {/* Legend */}
+            <div style={{ display: "flex", gap: 16, marginTop: 14, flexWrap: "wrap", alignItems: "center" }}>
               {Object.entries(TABLE_STATUS).map(([k, v]) => (
                 <div key={k} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: C.textSub }}>
-                  <span style={{ width: 10, height: 10, borderRadius: "50%", background: v.text, display: "inline-block" }} />{v.label}
+                  <span style={{ width: 10, height: 10, borderRadius: "50%", background: v.text, display: "inline-block" }} />
+                  {v.label}
                 </div>
               ))}
+              <span style={{ fontSize: 11, color: C.textMuted, marginLeft: "auto" }}>
+                Reserved tables show a countdown and auto-release when time expires.
+              </span>
             </div>
           </div>
         )}
@@ -887,6 +1405,7 @@ export default function ManagerPortal() {
                       <div>
                         <div style={{ fontSize: 14, fontWeight: 500, color: C.text, marginBottom: 2 }}>Order #{order.order_number?.slice(-4)}</div>
                         <div style={{ fontSize: 12, color: C.textSub }}>Table {table?.table_number || 'N/A'}{table?.section ? ` · ${table.section}` : ''}</div>
+                        {order.customer_name && <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>👤 {order.customer_name}</div>}
                         <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>{safeFormat(order.created_at, 'HH:mm:ss')}</div>
                       </div>
                       <div>
@@ -945,7 +1464,11 @@ export default function ManagerPortal() {
                 onDragLeave={() => setUploadDragOver(false)}
                 onDrop={handleDrop}
                 onClick={() => fileInputRef.current?.click()}
-                style={{ border: `1px dashed ${uploadDragOver ? C.primary : C.border}`, borderRadius: 12, padding: "40px 20px", textAlign: "center", cursor: "pointer", background: uploadDragOver ? C.primaryLight : C.cardBg, transition: "all .2s" }}>
+                style={{
+                  border: `1px dashed ${uploadDragOver ? C.primary : C.border}`,
+                  borderRadius: 12, padding: "40px 20px", textAlign: "center", cursor: "pointer",
+                  background: uploadDragOver ? C.primaryLight : C.cardBg, transition: "all .2s",
+                }}>
                 <div style={{ fontSize: 32, marginBottom: 8 }}>📂</div>
                 <p style={{ fontSize: 13, fontWeight: 500, color: C.text, margin: "0 0 4px" }}>Drop your catalog Excel here</p>
                 <p style={{ fontSize: 11, color: C.textMuted, margin: 0 }}>or click to browse — .xlsx, .xls, or .csv</p>
@@ -968,7 +1491,6 @@ export default function ManagerPortal() {
                   </div>
                   <button onClick={handleResetUpload} style={{ fontSize: 12, color: C.textMuted, background: "none", border: "none", cursor: "pointer" }}>✕ Choose different file</button>
                 </div>
-
                 {uploadErrors.length > 0 && (
                   <AlertBanner type="error">
                     <strong>{uploadErrors.length} issue{uploadErrors.length !== 1 ? 's' : ''} found</strong> — fix in Excel and re-upload
@@ -977,7 +1499,6 @@ export default function ManagerPortal() {
                     </ul>
                   </AlertBanner>
                 )}
-
                 <div style={{ ...CARD, padding: 0, overflowX: "auto" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed" }}>
                     <thead>
@@ -1008,7 +1529,6 @@ export default function ManagerPortal() {
                     </tbody>
                   </table>
                 </div>
-
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
                   <Btn variant="secondary" onClick={handleResetUpload}>Cancel</Btn>
                   <Btn onClick={handleConfirmUpload} disabled={uploadErrors.length > 0}>Confirm &amp; upload {uploadRows.length} items</Btn>
@@ -1063,8 +1583,8 @@ export default function ManagerPortal() {
                         if (aS !== bS) return aS ? -1 : 1;
                         return (a.name || '').localeCompare(b.name || '');
                       }).map(item => {
-                        const inStock   = item.is_stocked ?? item.is_available;
-                        const isToggle  = togglingId === item.id;
+                        const inStock  = item.is_stocked ?? item.is_available;
+                        const isToggle = togglingId === item.id;
                         return (
                           <tr key={item.id} style={{ borderBottom: `0.5px solid ${C.border}`, opacity: inStock ? 1 : 0.55 }}>
                             <td style={{ padding: "10px 14px" }}>
@@ -1082,8 +1602,13 @@ export default function ManagerPortal() {
                                 : <span style={{ color: C.textMuted }}>—</span>}
                             </td>
                             <td style={{ padding: "10px 14px", textAlign: "right" }}>
-                              <button onClick={() => toggleAvailability(item)} disabled={isToggle} title={inStock ? 'In stock — tap to mark out of stock' : 'Out of stock — tap to mark in stock'}
-                                style={{ position: "relative", display: "inline-flex", width: 36, height: 20, borderRadius: 10, background: isToggle ? C.borderStrong : inStock ? C.success : C.border, border: "none", cursor: "pointer", padding: 0, flexShrink: 0, transition: "background .2s" }}>
+                              <button onClick={() => toggleAvailability(item)} disabled={isToggle}
+                                title={inStock ? 'In stock — tap to mark out of stock' : 'Out of stock — tap to mark in stock'}
+                                style={{
+                                  position: "relative", display: "inline-flex", width: 36, height: 20, borderRadius: 10,
+                                  background: isToggle ? C.borderStrong : inStock ? C.success : C.border,
+                                  border: "none", cursor: "pointer", padding: 0, flexShrink: 0, transition: "background .2s",
+                                }}>
                                 {isToggle
                                   ? <Spinner size={12} />
                                   : <span style={{ position: "absolute", top: 3, left: inStock ? 19 : 3, width: 14, height: 14, borderRadius: "50%", background: "#fff", transition: "left .2s" }} />}
