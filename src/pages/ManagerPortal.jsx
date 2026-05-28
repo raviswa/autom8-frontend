@@ -247,15 +247,7 @@ async function downloadCatalogTemplate(apiClient, showToast, currentMenuItems = 
 // FIND this block inside the JSX (the Download template button onClick):
 // ════════════════════════════════════════════════════════════════════════════
  
-/*  REMOVE THIS:
-    onClick={async () => {
-      setDownloadingTpl(true);
-      await downloadCatalogTemplate(apiClient, showToast);
-      setDownloadingTpl(false);
-    }}
-*/
- 
-/*  REPLACE WITH: */
+
     onClick={async () => {
       setDownloadingTpl(true);
       await downloadCatalogTemplate(apiClient, showToast, menuItems);  // ← pass state
