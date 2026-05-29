@@ -1,4 +1,4 @@
-// Dashboard v202605291339
+// Dashboard v202605291415
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { supabase, useAuth } from "../contexts/AuthContext";
 // ── Export to Excel (no npm install — uses plain CSV download) ────────────────
@@ -829,29 +829,89 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
     if (apiClientProp) return apiClientProp;
     if (apiClientCtx)  return apiClientCtx;
 
-    // Fallback: build a minimal fetch-based client from localStorage token
-    const userData  = JSON.parse(localStorage.getItem('userData') || '{}');
-    const token     = userData.token || userData.access_token || userData.session?.access_token;
-    const API_BASE  = import.meta.env.VITE_API_URL || 'https://autom8-backend-production.up.railway.app';
+    // Fallback: scan ALL localStorage keys to find the JWT token,
+    // regardless of what key name AuthContext uses
+    const API_BASE = import.meta.env.VITE_API_URL || 'https://autom8-backend-production.up.railway.app';
 
-    if (!token) return null;
+    let token = null;
+    try {
+      // Strategy 1: common key names used by AuthContext implementations
+      const CANDIDATE_KEYS = ['userData', 'autom8_user', 'auth', 'session', 'user', 'authData'];
+      for (const key of CANDIDATE_KEYS) {
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        try {
+          const parsed = JSON.parse(raw);
+          const t = parsed?.token
+            || parsed?.access_token
+            || parsed?.session?.access_token
+            || parsed?.data?.session?.access_token;
+          if (t && typeof t === 'string' && t.length > 20) { token = t; break; }
+        } catch (_) {
+          // raw string token stored directly
+          if (typeof raw === 'string' && raw.length > 20 && !raw.startsWith('{')) {
+            token = raw; break;
+          }
+        }
+      }
 
-    // Return an axios-compatible object with .get() method
+      // Strategy 2: scan every localStorage key for anything that looks like a JWT
+      if (!token) {
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          const raw = localStorage.getItem(key);
+          if (!raw) continue;
+          // JWT pattern: three base64url segments separated by dots
+          const jwtMatch = raw.match(/(eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})/);
+          if (jwtMatch) { token = jwtMatch[1]; break; }
+          try {
+            const parsed = JSON.parse(raw);
+            const candidates = [
+              parsed?.token, parsed?.access_token,
+              parsed?.session?.access_token,
+              parsed?.data?.session?.access_token,
+              parsed?.user?.token,
+            ].filter(t => t && typeof t === 'string' && t.length > 20);
+            if (candidates.length) { token = candidates[0]; break; }
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+
+    console.log('[apiClient] fallback token found:', !!token);
+    if (!token) {
+      console.warn('[apiClient] No token found in localStorage — backend calls will fail. Check AuthContext stores token in localStorage.');
+      return null;
+    }
+
     return {
       get: async (path, opts = {}) => {
-        const url    = new URL(API_BASE + path);
-        if (opts.params) Object.entries(opts.params).forEach(([k, v]) => url.searchParams.set(k, v));
+        const url = new URL(API_BASE + path);
+        if (opts.params) Object.entries(opts.params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
         const res = await fetch(url.toString(), {
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         });
         if (!res.ok) {
-          const err = await res.json().catch(() => ({ error: res.statusText }));
-          const e   = new Error(err.error || res.statusText);
-          e.response = { status: res.status, data: err };
+          const errData = await res.json().catch(() => ({ error: res.statusText }));
+          const e = new Error(errData.error || res.statusText);
+          e.response = { status: res.status, data: errData };
           throw e;
         }
-        const data = await res.json();
-        return { data };
+        return { data: await res.json() };
+      },
+      post: async (path, body = {}) => {
+        const res = await fetch(API_BASE + path, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({ error: res.statusText }));
+          const e = new Error(errData.error || res.statusText);
+          e.response = { status: res.status, data: errData };
+          throw e;
+        }
+        return { data: await res.json() };
       },
     };
   }, [apiClientProp, apiClientCtx]);
