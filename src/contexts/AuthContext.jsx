@@ -53,8 +53,7 @@ export function AuthProvider({ children }) {
       setLoading(false);
     };
 
-    initAuth();
-
+  
     // Axios interceptor: attach stored token to every request
 const requestInterceptor = apiClient.interceptors.request.use(
   (config) => {
@@ -113,6 +112,8 @@ const requestInterceptor = apiClient.interceptors.request.use(
         return Promise.reject(error);
       }
     );
+
+  initAuth();
 
   return () => {
   apiClient.interceptors.request.eject(requestInterceptor);
