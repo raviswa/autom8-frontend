@@ -35,7 +35,6 @@ const PRESETS = [
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-// Returns stable ISO strings — called with preset key, result is memoized by key
 function getRangeISO(preset) {
   const now   = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -72,14 +71,14 @@ function fmtDate(d) {
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-// ─── Chart.js CDN loader — waits until fully ready before resolving ──────────
+// ─── Chart.js CDN loader ──────────────────────────────────────────────────────
 let _chartReady = false;
 let _chartCbs   = [];
 
 function waitForChart(cb) {
   if (_chartReady && window.Chart) { cb(); return; }
   _chartCbs.push(cb);
-  if (document.querySelector('script[data-chartjs]')) return; // already loading
+  if (document.querySelector('script[data-chartjs]')) return;
   const s = document.createElement("script");
   s.src = "https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js";
   s.setAttribute("data-chartjs", "1");
@@ -100,7 +99,6 @@ function RevenueChart({ labels, revenue, orders, covers, preset }) {
     if (!labels?.length) return;
 
     waitForChart(() => {
-      // Destroy old instance before creating new one
       if (chartRef.current) {
         try { chartRef.current.destroy(); } catch (_) {}
         chartRef.current = null;
@@ -109,13 +107,10 @@ function RevenueChart({ labels, revenue, orders, covers, preset }) {
       const canvas = canvasRef.current;
       if (!canvas) return;
 
-      // Clear canvas explicitly to avoid ghost rendering
       const ctx = canvas.getContext("2d");
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // For 30-day view skip some x labels to avoid compression
       const maxLabels = 15;
-      const step = labels.length > maxLabels ? Math.ceil(labels.length / maxLabels) : 1;
 
       chartRef.current = new window.Chart(ctx, {
         data: {
@@ -151,22 +146,11 @@ function RevenueChart({ labels, revenue, orders, covers, preset }) {
           plugins: { legend: { display: false } },
           scales: {
             x: {
-              ticks: {
-                color: "#888",
-                font: { size: 10 },
-                maxRotation: 0,
-                autoSkip: true,
-                maxTicksLimit: maxLabels,
-              },
+              ticks: { color: "#888", font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: maxLabels },
               grid: { display: false },
             },
             y: {
-              ticks: {
-                color: "#888",
-                font: { size: 10 },
-                callback: v => fmtINR(v),
-                maxTicksLimit: 6,
-              },
+              ticks: { color: "#888", font: { size: 10 }, callback: v => fmtINR(v), maxTicksLimit: 6 },
               grid: { color: "rgba(0,0,0,0.06)" },
             },
             y2: {
@@ -232,8 +216,6 @@ function Badge({ val, neutral }) {
   return <span style={{ display: "inline-block", fontSize: 11, fontWeight: 500, padding: "1px 7px", borderRadius: 6, background: up ? "#EAF3DE" : "#FCEBEB", color: up ? "#3B6D11" : "#A32D2D" }}>{up ? "↑" : "↓"} {Math.abs(val)}%</span>;
 }
 
-
-// ─── Tooltip ──────────────────────────────────────────────────────────────────
 function Tooltip({ text, children }) {
   const [show, setShow] = React.useState(false);
   return (
@@ -318,7 +300,7 @@ function TableOccupancy({ tables }) {
   const waiting  = tables?.filter(t => t.status === "waiting").length ?? 0;
   const free     = tables?.filter(t => t.status === "free").length ?? 0;
   const total    = tables?.length ?? 0;
-  const occPax   = 0; // current_pax not in schema
+  const occPax   = 0;
   const avgPax   = occupied > 0 ? (occPax / occupied).toFixed(1) : "—";
   const occRate  = total ? Math.round((occupied / total) * 100) : 0;
 
@@ -397,10 +379,10 @@ function KotStatus({ stats }) {
         <MiniStat label="In progress" value={stats?.inProgress ?? 0} color="#BA7517" />
         <MiniStat label="Served"      value={stats?.served ?? 0}     color="#1D9E75" />
       </div>
-      <KRow label="Avg KOT time"      value={stats?.avgTime != null ? `${stats.avgTime} min` : "—"} />
+      <KRow label="Avg KOT time"         value={stats?.avgTime != null ? `${stats.avgTime} min` : "—"} />
       <KRow label="Delayed (&gt;20 min)" value={stats?.delayed != null ? `${stats.delayed} KOTs` : "—"} danger={(stats?.delayed ?? 0) > 0} />
-      <KRow label="Fastest item"      value={stats?.fastestItem ?? "—"} />
-      <KRow label="Slowest item"      value={stats?.slowestItem ?? "—"} warn />
+      <KRow label="Fastest item"         value={stats?.fastestItem ?? "—"} />
+      <KRow label="Slowest item"         value={stats?.slowestItem ?? "—"} warn />
     </StatCard>
   );
 }
@@ -408,8 +390,6 @@ function KotStatus({ stats }) {
 function CancellationVoids({ stats }) {
   return (
     <StatCard title="Cancellations &amp; voids" sub="selected period">
-
-      {/* Section 1: Booking-level cancellations (from WhatsApp bot) */}
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 11, fontWeight: 500, color: "#888", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>
           Booking cancellations (WhatsApp)
@@ -423,32 +403,25 @@ function CancellationVoids({ stats }) {
           Customer-level: booking resets, flow cancellations, service type cancellations
         </div>
       </div>
-
-      {/* Divider */}
       <div style={{ borderTop: "0.5px solid #F0F0EE", marginBottom: 14 }} />
-
-      {/* Section 2: Order-level cancellations (manager cancelled placed orders) */}
       <div>
         <div style={{ fontSize: 11, fontWeight: 500, color: "#888", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>
           Order cancellations (Manager)
         </div>
         <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-          <MiniStat label="Cancelled"   value={stats?.cancelled   ?? 0} color="#A32D2D" />
+          <MiniStat label="Cancelled"    value={stats?.cancelled   ?? 0} color="#A32D2D" />
           <MiniStat label="Revenue lost" value={fmtINR(stats?.revLost ?? 0)} color="#BA7517" />
           <MiniStat label="Rate"         value={stats?.rate != null ? `${stats.rate}%` : "—"} color="#BA7517" />
         </div>
-        <KRow label="Revenue lost"       value={stats?.revLost != null ? `₹${stats.revLost.toLocaleString("en-IN")}` : "₹0"} danger />
+        <KRow label="Revenue lost"        value={stats?.revLost != null ? `₹${stats.revLost.toLocaleString("en-IN")}` : "₹0"} danger />
         <KRow label="Total orders (base)" value={stats?.totalOrders ?? "—"} />
         <div style={{ marginTop: 8, fontSize: 11, color: "#aaa", padding: "6px 8px", background: "#FFF8F5", borderRadius: 6 }}>
           Manager cancelled placed orders in the portal. Cancellation reason not yet captured.
         </div>
       </div>
-
     </StatCard>
   );
 }
-
-
 
 // ─── Data hooks ───────────────────────────────────────────────────────────────
 function useKpiData(restaurantId, startISO, endISO) {
@@ -474,7 +447,7 @@ function useChartData(restaurantId, startISO, endISO, preset) {
   const [data, setData] = useState(null);
   useEffect(() => {
     if (!restaurantId) return;
-    setData(null); // clear old data immediately to avoid stale chart
+    setData(null);
     (async () => {
       const { data: orders } = await supabase.from("orders").select("total_amount, created_at").eq("restaurant_id", restaurantId).not("status", "eq", "cancelled").gte("created_at", startISO).lte("created_at", endISO);
       if (!orders) return;
@@ -501,7 +474,6 @@ function useMenuItems(restaurantId, startISO, endISO) {
   useEffect(() => {
     if (!restaurantId) return;
     (async () => {
-      // Get completed orders in range, then their items
       const { data: orders } = await supabase.from("orders")
         .select("id")
         .eq("restaurant_id", restaurantId)
@@ -516,9 +488,8 @@ function useMenuItems(restaurantId, startISO, endISO) {
       if (!data) return;
       const map = {};
       data.forEach(r => {
-        // Bot orders store item name in special_instructions when menu_item_id is null
         const n = r.menu_item?.name || r.special_instructions || null;
-        if (!n) return; // skip items with no name at all
+        if (!n) return;
         if (!map[n]) map[n] = { name: n, qty: 0, revenue: 0 };
         map[n].qty     += r.quantity ?? 1;
         map[n].revenue += (r.quantity ?? 1) * (r.unit_price ?? 0);
@@ -564,7 +535,6 @@ function useKotStats(restaurantId) {
 
 function useCancelStats(apiClient, restaurantId, startISO, endISO) {
   const [stats, setStats] = useState(null);
-
   useEffect(() => {
     if (!apiClient || !restaurantId || !startISO || !endISO) return;
     let cancelled = false;
@@ -576,12 +546,10 @@ function useCancelStats(apiClient, restaurantId, startISO, endISO) {
         if (cancelled) return;
         const d = res.data;
         setStats({
-          // Order-level cancellations (manager cancelled a placed order)
-          cancelled:     d.orderCancels,
-          revLost:       d.orderRevLost,
-          totalOrders:   d.totalOrders,
-          rate:          d.orderRate,
-          // Booking-level cancellations (customer cancelled booking/flow)
+          cancelled:      d.orderCancels,
+          revLost:        d.orderRevLost,
+          totalOrders:    d.totalOrders,
+          rate:           d.orderRate,
           bookingCancels: d.bookingCancels,
           totalBookings:  d.totalBookings,
           bookingRate:    d.bookingRate,
@@ -592,20 +560,16 @@ function useCancelStats(apiClient, restaurantId, startISO, endISO) {
     })();
     return () => { cancelled = true; };
   }, [apiClient, restaurantId, startISO, endISO]);
-
   return stats;
 }
 
-// ─── Hook: WABA info from Munafe Chat restaurants table ───────────────────────
 function useWABAInfo(apiClient) {
-  const [info, setInfo] = useState(undefined); // undefined = loading, null = not found
+  const [info, setInfo] = useState(undefined);
   useEffect(() => {
     if (!apiClient) { console.warn('[useWABAInfo] no apiClient'); return; }
     (async () => {
       try {
-        console.log('[useWABAInfo] calling /api/dashboard/waba...');
         const res = await apiClient.get('/api/dashboard/waba');
-        console.log('[useWABAInfo] response:', res.data);
         setInfo(res.data?.restaurant ?? null);
       } catch (err) {
         console.error('[useWABAInfo] failed:', err?.response?.status, err?.response?.data || err.message);
@@ -616,7 +580,6 @@ function useWABAInfo(apiClient) {
   return info;
 }
 
-// ─── Hook: WhatsApp orders from Munafe Chat bookings table ────────────────────
 function useWAOrders(apiClient, startISO, endISO) {
   const [orders, setOrders] = useState(null);
   useEffect(() => {
@@ -624,11 +587,9 @@ function useWAOrders(apiClient, startISO, endISO) {
     setOrders(null);
     (async () => {
       try {
-        console.log('[useWAOrders] calling /api/dashboard/wa-orders...', { startISO, endISO });
         const res = await apiClient.get('/api/dashboard/wa-orders', {
           params: { start: startISO, end: endISO },
         });
-        console.log('[useWAOrders] response:', res.data?.orders?.length, 'orders');
         setOrders(res.data?.orders ?? []);
       } catch (err) {
         console.error('[useWAOrders] failed:', err?.response?.status, err?.response?.data || err.message);
@@ -648,7 +609,6 @@ function WABAPanel({ info }) {
     </div>
   );
 
-  // undefined = still loading, null = not found/no key
   if (info === undefined) return (
     <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "center", color: "#aaa", fontSize: 13 }}>
       Loading...
@@ -681,13 +641,13 @@ function WABAPanel({ info }) {
         <span style={{ fontSize: 14, fontWeight: 500, color: "#111" }}>WhatsApp Business</span>
         <span style={{ fontSize: 11, background: "#EAF3DE", color: "#3B6D11", padding: "2px 8px", borderRadius: 6 }}>● Connected</span>
       </div>
-      {row("Business name",         info.name)}
-      {row("Phone number",          info.whatsapp_number ? `+${info.whatsapp_number}` : null)}
-      {row("WABA ID",               info.waba_id)}
-      {row("Manager phone",         info.manager_phone ? `+${info.manager_phone}` : null)}
-      {row("Timezone",              info.timezone)}
-      {row("Dining duration",       info.dining_duration_minutes ? `${info.dining_duration_minutes} min` : null)}
-      {row("Payment mode",          info.payment_mode)}
+      {row("Business name",       info.name)}
+      {row("Phone number",        info.whatsapp_number ? `+${info.whatsapp_number}` : null)}
+      {row("WABA ID",             info.waba_id)}
+      {row("Manager phone",       info.manager_phone ? `+${info.manager_phone}` : null)}
+      {row("Timezone",            info.timezone)}
+      {row("Dining duration",     info.dining_duration_minutes ? `${info.dining_duration_minutes} min` : null)}
+      {row("Payment mode",        info.payment_mode)}
       <div style={{ marginTop: 12, padding: "8px 12px", background: "#F7F7F5", borderRadius: 8, fontSize: 12, color: "#888" }}>
         📲 Test ordering bot: send <strong>"Hi"</strong> to <strong>+{info.whatsapp_number}</strong>
       </div>
@@ -695,7 +655,7 @@ function WABAPanel({ info }) {
   );
 }
 
-// ─── WhatsApp Orders Table ─────────────────────────────────────────────────────
+// ─── WhatsApp Orders Table ────────────────────────────────────────────────────
 function WAOrdersTable({ orders, rangeLabel }) {
   const [search, setSearch] = useState("");
 
@@ -715,14 +675,14 @@ function WAOrdersTable({ orders, rangeLabel }) {
   const handleExport = () => {
     if (!filtered?.length) return;
     const rows = filtered.map(o => ({
-      Date:          o.created_at ? new Date(o.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "—",
-      Name:          o.customers?.name || o.customer_id || "—",
-      Phone:         o.customers?.phone || "—",
-      Service:       o.service_type || o.event_type || "—",
-      Token:         o.token_number || "—",
-      Party_Size:    o.party_size || "—",
-      Amount:        o.total_amount != null ? `₹${o.total_amount}` : "—",
-      Status:        o.status || "—",
+      Date:       o.created_at ? new Date(o.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "—",
+      Name:       o.customers?.name || o.customer_id || "—",
+      Phone:      o.customers?.phone || "—",
+      Service:    o.service_type || o.event_type || "—",
+      Token:      o.token_number || "—",
+      Party_Size: o.party_size || "—",
+      Amount:     o.total_amount != null ? `₹${o.total_amount}` : "—",
+      Status:     o.status || "—",
     }));
     exportToCSV(rows, `whatsapp-orders-${rangeLabel.replace(/[^a-z0-9]/gi, "-")}.csv`);
   };
@@ -818,109 +778,16 @@ function WAOrdersTable({ orders, rangeLabel }) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function OwnerDashboard({ restaurantId, restaurantName, onLogout, apiClient: apiClientProp }) {
-  // Build apiClient from whatever source is available:
-  // 1. Prop passed from App.jsx (most reliable)
-  // 2. AuthContext (if it exports apiClient)
-  // 3. Self-constructed axios-like client from localStorage token
   const { apiClient: apiClientCtx } = useAuth();
 
-  const apiClient = React.useMemo(() => {
-    // Use prop or context if available
-    if (apiClientProp) return apiClientProp;
-    if (apiClientCtx)  return apiClientCtx;
+  // ── THE ONLY CHANGE: replaced the 60-line useMemo/fallback scanner with this ──
+  const apiClient = apiClientProp ?? apiClientCtx ?? null;
 
-    // Fallback: scan ALL localStorage keys to find the JWT token,
-    // regardless of what key name AuthContext uses
-    const API_BASE = import.meta.env.VITE_API_URL || 'https://autom8-backend-production.up.railway.app';
-
-    let token = null;
-    try {
-      // Strategy 1: common key names used by AuthContext implementations
-      const CANDIDATE_KEYS = ['userData', 'autom8_user', 'auth', 'session', 'user', 'authData'];
-      for (const key of CANDIDATE_KEYS) {
-        const raw = localStorage.getItem(key);
-        if (!raw) continue;
-        try {
-          const parsed = JSON.parse(raw);
-          const t = parsed?.token
-            || parsed?.access_token
-            || parsed?.session?.access_token
-            || parsed?.data?.session?.access_token;
-          if (t && typeof t === 'string' && t.length > 20) { token = t; break; }
-        } catch (_) {
-          // raw string token stored directly
-          if (typeof raw === 'string' && raw.length > 20 && !raw.startsWith('{')) {
-            token = raw; break;
-          }
-        }
-      }
-
-      // Strategy 2: scan every localStorage key for anything that looks like a JWT
-      if (!token) {
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          const raw = localStorage.getItem(key);
-          if (!raw) continue;
-          // JWT pattern: three base64url segments separated by dots
-          const jwtMatch = raw.match(/(eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})/);
-          if (jwtMatch) { token = jwtMatch[1]; break; }
-          try {
-            const parsed = JSON.parse(raw);
-            const candidates = [
-              parsed?.token, parsed?.access_token,
-              parsed?.session?.access_token,
-              parsed?.data?.session?.access_token,
-              parsed?.user?.token,
-            ].filter(t => t && typeof t === 'string' && t.length > 20);
-            if (candidates.length) { token = candidates[0]; break; }
-          } catch (_) {}
-        }
-      }
-    } catch (_) {}
-
-    console.log('[apiClient] fallback token found:', !!token);
-    if (!token) {
-      console.warn('[apiClient] No token found in localStorage — backend calls will fail. Check AuthContext stores token in localStorage.');
-      return null;
-    }
-
-    return {
-      get: async (path, opts = {}) => {
-        const url = new URL(API_BASE + path);
-        if (opts.params) Object.entries(opts.params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
-        const res = await fetch(url.toString(), {
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        });
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({ error: res.statusText }));
-          const e = new Error(errData.error || res.statusText);
-          e.response = { status: res.status, data: errData };
-          throw e;
-        }
-        return { data: await res.json() };
-      },
-      post: async (path, body = {}) => {
-        const res = await fetch(API_BASE + path, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({ error: res.statusText }));
-          const e = new Error(errData.error || res.statusText);
-          e.response = { status: res.status, data: errData };
-          throw e;
-        }
-        return { data: await res.json() };
-      },
-    };
-  }, [apiClientProp, apiClientCtx]);
   const [preset,      setPreset]      = useState("today");
   const [customStart, setCustomStart] = useState(null);
   const [customEnd,   setCustomEnd]   = useState(null);
   const [showCal,     setShowCal]     = useState(false);
 
-  // Compute stable ISO strings — only recomputes when preset/custom dates change
   const { startISO, endISO } = useMemo(() => {
     if (customStart && customEnd) {
       return { startISO: customStart.toISOString(), endISO: customEnd.toISOString() };
@@ -937,23 +804,21 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
   const wabaInfo    = useWABAInfo(apiClient);
   const waOrders    = useWAOrders(apiClient, startISO, endISO);
 
-  const rangeLabel = (customStart && customEnd) ? `Custom · ${fmtDate(customStart)} – ${fmtDate(customEnd)}` : { today: "Today", yesterday: "Yesterday", "7d": "Last 7 days", "30d": "Last 30 days" }[preset];
+  const rangeLabel = (customStart && customEnd)
+    ? `Custom · ${fmtDate(customStart)} – ${fmtDate(customEnd)}`
+    : { today: "Today", yesterday: "Yesterday", "7d": "Last 7 days", "30d": "Last 30 days" }[preset];
 
   const row1 = [
-    { icon: "₹",  label: "Total revenue",   value: kpi ? fmtINR(kpi.totalRevenue) : "—", badge: null, sub: "selected period" },
-    { icon: "🛒", label: "Orders",           value: kpi?.totalOrders ?? "—",               badge: null, sub: "selected period" },
-    { icon: "🧾", label: "Avg order value",  value: kpi ? `₹${kpi.aov}` : "—",             badge: null, sub: "selected period", tooltip: "Total revenue ÷ orders. Excludes cancelled orders." },
-    { icon: "👥", label: "Total covers",     value: kpi?.totalCovers ?? "—",                neutral: true, sub: "selected period", tooltip: "Total orders placed. Each order = 1 cover (one dining transaction)." },
+    { icon: "₹",  label: "Total revenue",  value: kpi ? fmtINR(kpi.totalRevenue) : "—", badge: null, sub: "selected period" },
+    { icon: "🛒", label: "Orders",          value: kpi?.totalOrders ?? "—",               badge: null, sub: "selected period" },
+    { icon: "🧾", label: "Avg order value", value: kpi ? `₹${kpi.aov}` : "—",             badge: null, sub: "selected period", tooltip: "Total revenue ÷ orders. Excludes cancelled orders." },
+    { icon: "👥", label: "Total covers",    value: kpi?.totalCovers ?? "—",                neutral: true, sub: "selected period", tooltip: "Total orders placed. Each order = 1 cover (one dining transaction)." },
   ];
   const row2 = [
-    { icon: "🔄", label: "Table turns",     value: kpi && tables?.length ? (kpi.totalOrders / tables.length).toFixed(1) : "—",
-      sub: "selected period", tooltip: "Total orders ÷ tables. Shows how efficiently tables are reused. Higher = better." },
-    { icon: "⏱",  label: "Avg dining time", value: kpi?.avgDining ? `${kpi.avgDining} min` : "—",
-      sub: "Benchmark: 90 min", tooltip: "Avg mins from walk-in check-in to table completion. Benchmark: 90 min." },
-    { icon: "🎟",  label: "Tokens issued",   value: kpi?.tokensIssued ?? "—",
-      sub: "selected period", tooltip: "Walk-in customers who received a queue token via bot or QR." },
-    { icon: "⏳", label: "Avg wait time",   value: kpi?.avgWait ? `${kpi.avgWait} min` : "—",
-      sub: "selected period", tooltip: "Avg mins from check-in to table assignment." },
+    { icon: "🔄", label: "Table turns",     value: kpi && tables?.length ? (kpi.totalOrders / tables.length).toFixed(1) : "—", sub: "selected period", tooltip: "Total orders ÷ tables. Shows how efficiently tables are reused. Higher = better." },
+    { icon: "⏱",  label: "Avg dining time", value: kpi?.avgDining ? `${kpi.avgDining} min` : "—", sub: "Benchmark: 90 min", tooltip: "Avg mins from walk-in check-in to table completion. Benchmark: 90 min." },
+    { icon: "🎟",  label: "Tokens issued",   value: kpi?.tokensIssued ?? "—", sub: "selected period", tooltip: "Walk-in customers who received a queue token via bot or QR." },
+    { icon: "⏳", label: "Avg wait time",   value: kpi?.avgWait ? `${kpi.avgWait} min` : "—", sub: "selected period", tooltip: "Avg mins from check-in to table assignment." },
   ];
 
   const btnStyle = (active) => ({
@@ -1013,15 +878,9 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
           {row2.map((m, i) => <MetricCard key={i} {...m} />)}
         </div>
 
-        {/* Revenue + heatmap — only render when data is ready */}
+        {/* Revenue + heatmap */}
         {chartData && chartData.labels?.length > 0 && (
-          <RevenueChart
-            labels={chartData.labels}
-            revenue={chartData.revenue}
-            orders={chartData.orders}
-            covers={chartData.covers}
-            preset={preset}
-          />
+          <RevenueChart labels={chartData.labels} revenue={chartData.revenue} orders={chartData.orders} covers={chartData.covers} preset={preset} />
         )}
         {chartData && chartData.labels?.length === 0 && (
           <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "32px 20px", marginBottom: 12, textAlign: "center", fontSize: 13, color: "#aaa" }}>
