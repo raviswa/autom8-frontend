@@ -506,9 +506,12 @@ export default function KDSScreen() {
 
   // ── Fetch feed ──────────────────────────────────────────────────────────────
 const fetchFeed = useCallback(async () => {
+  const token = localStorage.getItem('authToken');
+  if (!token) return [];                          // ← don't fire without a token
   try {
     const res = await apiClient.get('/api/kds/feed', {
       params: { status: 'all' },
+      headers: { Authorization: `Bearer ${token}` },  // ← attach inline as fallback
     });
     setAllItems(res.data.items || []);
     return res.data.items || [];
