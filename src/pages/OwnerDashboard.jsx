@@ -1,4 +1,4 @@
-// Dashboard v202605291755
+// Dashboard v202605291757
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { supabase, useAuth } from "../contexts/AuthContext";
 // ── Export to Excel (no npm install — uses plain CSV download) ────────────────
@@ -824,93 +824,35 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
   // 3. Self-constructed axios-like client from localStorage token
   const { apiClient: apiClientCtx } = useAuth();
 
+  // apiClient resolution — three sources in priority order:
+  // 1. Prop from App.jsx  2. AuthContext (axios instance)  3. localStorage fallback
+  // AuthContext (src/contexts/AuthContext.jsx) stores token as localStorage key 'authToken'
   const apiClient = React.useMemo(() => {
-    // Use prop or context if available
     if (apiClientProp) return apiClientProp;
     if (apiClientCtx)  return apiClientCtx;
 
-    // Fallback: scan ALL localStorage keys to find the JWT token,
-    // regardless of what key name AuthContext uses
+    // Direct read — AuthContext.jsx uses localStorage.setItem('authToken', token)
+    const token   = localStorage.getItem('authToken');
     const API_BASE = import.meta.env.VITE_API_URL || 'https://autom8-backend-production.up.railway.app';
 
-    let token = null;
-    try {
-      // Strategy 1: common key names used by AuthContext implementations
-      const CANDIDATE_KEYS = ['userData', 'autom8_user', 'auth', 'session', 'user', 'authData'];
-      for (const key of CANDIDATE_KEYS) {
-        const raw = localStorage.getItem(key);
-        if (!raw) continue;
-        try {
-          const parsed = JSON.parse(raw);
-          const t = parsed?.token
-            || parsed?.access_token
-            || parsed?.session?.access_token
-            || parsed?.data?.session?.access_token;
-          if (t && typeof t === 'string' && t.length > 20) { token = t; break; }
-        } catch (_) {
-          // raw string token stored directly
-          if (typeof raw === 'string' && raw.length > 20 && !raw.startsWith('{')) {
-            token = raw; break;
-          }
-        }
-      }
-
-      // Strategy 2: scan every localStorage key for anything that looks like a JWT
-      if (!token) {
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          const raw = localStorage.getItem(key);
-          if (!raw) continue;
-          // JWT pattern: three base64url segments separated by dots
-          const jwtMatch = raw.match(/(eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})/);
-          if (jwtMatch) { token = jwtMatch[1]; break; }
-          try {
-            const parsed = JSON.parse(raw);
-            const candidates = [
-              parsed?.token, parsed?.access_token,
-              parsed?.session?.access_token,
-              parsed?.data?.session?.access_token,
-              parsed?.user?.token,
-            ].filter(t => t && typeof t === 'string' && t.length > 20);
-            if (candidates.length) { token = candidates[0]; break; }
-          } catch (_) {}
-        }
-      }
-    } catch (_) {}
-
-    console.log('[apiClient] fallback token found:', !!token);
     if (!token) {
-      console.warn('[apiClient] No token found in localStorage — backend calls will fail. Check AuthContext stores token in localStorage.');
+      console.warn('[apiClient] authToken not in localStorage — user may not be logged in');
       return null;
     }
 
+    console.log('[apiClient] using localStorage authToken as fallback');
+    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
     return {
       get: async (path, opts = {}) => {
         const url = new URL(API_BASE + path);
         if (opts.params) Object.entries(opts.params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
-        const res = await fetch(url.toString(), {
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        });
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({ error: res.statusText }));
-          const e = new Error(errData.error || res.statusText);
-          e.response = { status: res.status, data: errData };
-          throw e;
-        }
+        const res = await fetch(url.toString(), { headers });
+        if (!res.ok) { const d = await res.json().catch(() => ({})); const e = new Error(d.error || res.statusText); e.response = { status: res.status, data: d }; throw e; }
         return { data: await res.json() };
       },
       post: async (path, body = {}) => {
-        const res = await fetch(API_BASE + path, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({ error: res.statusText }));
-          const e = new Error(errData.error || res.statusText);
-          e.response = { status: res.status, data: errData };
-          throw e;
-        }
+        const res = await fetch(API_BASE + path, { method: 'POST', headers, body: JSON.stringify(body) });
+        if (!res.ok) { const d = await res.json().catch(() => ({})); const e = new Error(d.error || res.statusText); e.response = { status: res.status, data: d }; throw e; }
         return { data: await res.json() };
       },
     };
