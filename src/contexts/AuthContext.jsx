@@ -114,7 +114,10 @@ const requestInterceptor = apiClient.interceptors.request.use(
       }
     );
 
-    return () => apiClient.interceptors.response.eject(interceptor);
+  return () => {
+  apiClient.interceptors.request.eject(requestInterceptor);
+  apiClient.interceptors.response.eject(interceptor);
+};
   }, []);
 
   const loginWithEmail = useCallback(async (email, password) => {
