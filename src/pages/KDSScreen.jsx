@@ -505,18 +505,20 @@ export default function KDSScreen() {
   const printedOrders = useRef(new Set());
 
   // ── Fetch feed ──────────────────────────────────────────────────────────────
-  const fetchFeed = useCallback(async () => {
-    try {
-      const res = await apiClient.get('/api/kds/feed', { params: { status: 'all' } });
-      setAllItems(res.data.items || []);
-      return res.data.items || [];
-    } catch (err) {
-      console.error('[KDS] fetchFeed error:', err);
-      return [];
-    } finally {
-      setLoading(false);
-    }
-  }, [apiClient]);
+const fetchFeed = useCallback(async () => {
+  try {
+    const res = await apiClient.get('/api/kds/feed', {
+      params: { status: 'all' },
+    });
+    setAllItems(res.data.items || []);
+    return res.data.items || [];
+  } catch (err) {
+    console.error('[KDS] fetchFeed error:', err);
+    return [];
+  } finally {
+    setLoading(false);
+  }
+}, [apiClient]);
 
   useEffect(() => {
     fetchFeed();
