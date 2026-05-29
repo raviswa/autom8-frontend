@@ -55,6 +55,18 @@ export function AuthProvider({ children }) {
 
     initAuth();
 
+    // Axios interceptor: attach stored token to every request
+const requestInterceptor = apiClient.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('authToken');
+    if (token) {
+      config.headers['Authorization'] = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+    
     // Axios interceptor: on 401/403, try to refresh token automatically
     const interceptor = apiClient.interceptors.response.use(
       (response) => response,
