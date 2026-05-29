@@ -1,78 +1,62 @@
-// Dashboard — unified design system applied
+// Dashboard v202605291339
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { supabase, useAuth } from "../contexts/AuthContext";
-
-// ─── Design tokens ────────────────────────────────────────────────────────────
-const C = {
-  primary:       "#378ADD",
-  primaryDark:   "#185FA5",
-  primaryLight:  "#E6F1FB",
-  primaryBorder: "#B5D4F4",
-  success:       "#1D9E75",
-  successLight:  "#E1F5EE",
-  successBorder: "#9FE1CB",
-  successDark:   "#085041",
-  warning:       "#BA7517",
-  warningLight:  "#FAEEDA",
-  warningBorder: "#FAC775",
-  warningDark:   "#633806",
-  danger:        "#A32D2D",
-  dangerLight:   "#FCEBEB",
-  dangerBorder:  "#F7C1C1",
-  dangerDark:    "#791F1F",
-  pageBg:        "#F5F5F3",
-  cardBg:        "#ffffff",
-  surfaceBg:     "#F5F5F3",
-  border:        "#E8E8E5",
-  borderStrong:  "#D0D0CC",
-  text:          "#111111",
-  textSub:       "#555555",
-  textMuted:     "#999999",
-};
-
-const CARD   = { background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: "16px 20px" };
-const HEAT_COLORS = ["#E6F1FB", "#85B7EB", "#378ADD", "#185FA5", "#0C447C"];
-
-const TABLE_COLORS = {
-  occupied: { bg: C.primaryLight,  text: C.primaryDark  },
-  waiting:  { bg: C.warningLight,  text: C.warningDark  },
-  free:     { bg: "#F1EFE8",        text: "#444441"      },
-};
-
-const PRESETS = [
-  { label: "Today",     key: "today"     },
-  { label: "Yesterday", key: "yesterday" },
-  { label: "7 days",    key: "7d"        },
-  { label: "30 days",   key: "30d"       },
-];
-
-// ─── IST helpers ──────────────────────────────────────────────────────────────
-const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-
-function istMidnightUTC(offsetDays = 0) {
-  const nowUTC = Date.now();
-  const dayIST = new Date(nowUTC + IST_OFFSET_MS);
-  dayIST.setUTCHours(0, 0, 0, 0);
-  dayIST.setUTCDate(dayIST.getUTCDate() + offsetDays);
-  return new Date(dayIST.getTime() - IST_OFFSET_MS);
+// ── Export to Excel (no npm install — uses plain CSV download) ────────────────
+function exportToCSV(rows, filename) {
+  if (!rows?.length) return;
+  const headers = Object.keys(rows[0]);
+  const csv = [
+    headers.join(","),
+    ...rows.map(r => headers.map(h => {
+      const v = r[h] ?? "";
+      const s = String(v).replace(/"/g, '""');
+      return s.includes(",") || s.includes("\n") || s.includes('"') ? `"${s}"` : s;
+    }).join(","))
+  ].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
 }
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+const HEAT_COLORS = ["#E6F1FB", "#85B7EB", "#378ADD", "#185FA5", "#0C447C"];
+const TABLE_COLORS = {
+  occupied: { bg: "#1D9E75", text: "#085041" },
+  waiting:  { bg: "#BA7517", text: "#633806" },
+  free:     { bg: "#D3D1C7", text: "#444441" },
+};
+const PRESETS = [
+  { label: "Today",     key: "today" },
+  { label: "Yesterday", key: "yesterday" },
+  { label: "7 days",    key: "7d" },
+  { label: "30 days",   key: "30d" },
+];
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+// Returns stable ISO strings — called with preset key, result is memoized by key
 function getRangeISO(preset) {
-  const now = new Date();
+  const now   = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   switch (preset) {
     case "today":
-      return { startISO: istMidnightUTC(0).toISOString(), endISO: now.toISOString() };
+      return { startISO: today.toISOString(), endISO: now.toISOString() };
     case "yesterday": {
-      const s = istMidnightUTC(-1);
-      const e = new Date(istMidnightUTC(0).getTime() - 1);
+      const s = new Date(today); s.setDate(s.getDate() - 1);
+      const e = new Date(today); e.setMilliseconds(-1);
       return { startISO: s.toISOString(), endISO: e.toISOString() };
     }
-    case "7d":
-      return { startISO: istMidnightUTC(-6).toISOString(), endISO: now.toISOString() };
-    case "30d":
-      return { startISO: istMidnightUTC(-29).toISOString(), endISO: now.toISOString() };
+    case "7d": {
+      const s = new Date(today); s.setDate(s.getDate() - 6);
+      return { startISO: s.toISOString(), endISO: now.toISOString() };
+    }
+    case "30d": {
+      const s = new Date(today); s.setDate(s.getDate() - 29);
+      return { startISO: s.toISOString(), endISO: now.toISOString() };
+    }
     default:
-      return { startISO: istMidnightUTC(0).toISOString(), endISO: now.toISOString() };
+      return { startISO: today.toISOString(), endISO: now.toISOString() };
   }
 }
 
@@ -82,74 +66,195 @@ function fmtINR(n) {
   if (n >= 1000)   return "₹" + (n / 1000).toFixed(1) + "k";
   return "₹" + Math.round(n);
 }
+
 function fmtDate(d) {
   if (!d) return "";
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
-function resolveCustomerName(o) {
-  const raw = o.customers?.name || o.customer_id || "";
-  if (!raw || raw.toLowerCase().startsWith("hi,") || raw.length > 60) return "(Unresolved contact)";
-  return raw;
-}
 
-// ─── Chart.js loader ──────────────────────────────────────────────────────────
-let _chartReady = false, _chartCbs = [];
+// ─── Chart.js CDN loader — waits until fully ready before resolving ──────────
+let _chartReady = false;
+let _chartCbs   = [];
+
 function waitForChart(cb) {
   if (_chartReady && window.Chart) { cb(); return; }
   _chartCbs.push(cb);
-  if (document.querySelector('script[data-chartjs]')) return;
+  if (document.querySelector('script[data-chartjs]')) return; // already loading
   const s = document.createElement("script");
   s.src = "https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js";
   s.setAttribute("data-chartjs", "1");
-  s.onload = () => { _chartReady = true; _chartCbs.forEach(fn => fn()); _chartCbs = []; };
+  s.onload = () => {
+    _chartReady = true;
+    _chartCbs.forEach(fn => fn());
+    _chartCbs = [];
+  };
   document.head.appendChild(s);
 }
 
-// ─── UI Primitives ────────────────────────────────────────────────────────────
-function Spinner({ size = 20 }) {
-  return <div style={{ width: size, height: size, border: `2px solid ${C.border}`, borderTop: `2px solid ${C.primary}`, borderRadius: "50%", animation: "spin .7s linear infinite", display: "inline-block" }} />;
+// ─── Revenue + Heatmap chart ──────────────────────────────────────────────────
+function RevenueChart({ labels, revenue, orders, covers, preset }) {
+  const canvasRef = useRef(null);
+  const chartRef  = useRef(null);
+
+  useEffect(() => {
+    if (!labels?.length) return;
+
+    waitForChart(() => {
+      // Destroy old instance before creating new one
+      if (chartRef.current) {
+        try { chartRef.current.destroy(); } catch (_) {}
+        chartRef.current = null;
+      }
+
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      // Clear canvas explicitly to avoid ghost rendering
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // For 30-day view skip some x labels to avoid compression
+      const maxLabels = 15;
+      const step = labels.length > maxLabels ? Math.ceil(labels.length / maxLabels) : 1;
+
+      chartRef.current = new window.Chart(ctx, {
+        data: {
+          labels,
+          datasets: [
+            {
+              type: "bar",
+              label: "Revenue",
+              data: revenue,
+              backgroundColor: "#378ADD",
+              borderRadius: 3,
+              yAxisID: "y",
+              maxBarThickness: 32,
+            },
+            {
+              type: "line",
+              label: "Orders",
+              data: orders,
+              borderColor: "#1D9E75",
+              backgroundColor: "transparent",
+              borderWidth: 2,
+              pointRadius: labels.length > 15 ? 1 : 3,
+              tension: 0.4,
+              yAxisID: "y2",
+              borderDash: [4, 3],
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: { duration: 300 },
+          plugins: { legend: { display: false } },
+          scales: {
+            x: {
+              ticks: {
+                color: "#888",
+                font: { size: 10 },
+                maxRotation: 0,
+                autoSkip: true,
+                maxTicksLimit: maxLabels,
+              },
+              grid: { display: false },
+            },
+            y: {
+              ticks: {
+                color: "#888",
+                font: { size: 10 },
+                callback: v => fmtINR(v),
+                maxTicksLimit: 6,
+              },
+              grid: { color: "rgba(0,0,0,0.06)" },
+            },
+            y2: {
+              position: "right",
+              ticks: { color: "#888", font: { size: 10 }, maxTicksLimit: 6 },
+              grid: { display: false },
+            },
+          },
+        },
+      });
+    });
+
+    return () => {
+      if (chartRef.current) {
+        try { chartRef.current.destroy(); } catch (_) {}
+        chartRef.current = null;
+      }
+    };
+  }, [labels, revenue, orders]);
+
+  const maxC = Math.max(...(covers ?? [1]));
+
+  return (
+    <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "16px 20px", marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <span style={{ fontSize: 14, fontWeight: 500, color: "#111" }}>Revenue trend &amp; peak hours</span>
+        <span style={{ fontSize: 11, color: "#aaa" }}>
+          {preset === "today" || preset === "yesterday" ? "hourly" : "daily"}
+        </span>
+      </div>
+      <div style={{ display: "flex", gap: 12, fontSize: 11, color: "#888", marginBottom: 12 }}>
+        <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: "#378ADD", marginRight: 4, verticalAlign: "middle" }}></span>Revenue</span>
+        <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: "#1D9E75", marginRight: 4, verticalAlign: "middle" }}></span>Orders</span>
+        <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: "#0C447C", marginRight: 4, verticalAlign: "middle" }}></span>Cover intensity</span>
+      </div>
+      <div style={{ height: 200, position: "relative" }}>
+        <canvas ref={canvasRef} />
+      </div>
+      {covers?.length > 0 && (
+        <div style={{ marginTop: 6, display: "grid", gridTemplateColumns: `repeat(${covers.length}, 1fr)`, gap: 3 }}>
+          {covers.map((v, i) => {
+            const ci = Math.min(4, Math.floor((v / maxC) * 4.99));
+            return <div key={i} title={`${v} covers`} style={{ background: HEAT_COLORS[ci], height: 10, borderRadius: 3 }} />;
+          })}
+        </div>
+      )}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 11, color: "#aaa" }}>
+        <span>Covers</span>
+        <div style={{ display: "flex", gap: 2 }}>
+          {HEAT_COLORS.map((c, i) => <span key={i} style={{ background: c, width: 14, height: 8, borderRadius: 2, display: "inline-block" }} />)}
+        </div>
+        <span>Low → High</span>
+      </div>
+    </div>
+  );
 }
 
-const PILL_VARIANTS = {
-  blue:  { color: C.primaryDark,  background: C.primaryLight  },
-  teal:  { color: C.successDark,  background: C.successLight  },
-  green: { color: "#27500A",      background: "#EAF3DE"       },
-  amber: { color: C.warningDark,  background: C.warningLight  },
-  red:   { color: C.dangerDark,   background: C.dangerLight   },
-  gray:  { color: "#444441",      background: "#F1EFE8"       },
-};
-function Pill({ label, variant = "gray" }) {
-  const v = PILL_VARIANTS[variant] ?? PILL_VARIANTS.gray;
-  return <span style={{ fontSize: 10, fontWeight: 500, padding: "2px 8px", borderRadius: 20, letterSpacing: "0.03em", ...v }}>{label}</span>;
-}
-
-function AlertBanner({ type = "warn", children }) {
-  const s = {
-    info:  { bg: C.primaryLight,  border: C.primaryBorder,  color: C.primaryDark  },
-    good:  { bg: C.successLight,  border: C.successBorder,  color: C.successDark  },
-    warn:  { bg: C.warningLight,  border: C.warningBorder,  color: C.warningDark  },
-    error: { bg: C.dangerLight,   border: C.dangerBorder,   color: C.dangerDark   },
-  }[type];
-  return <div style={{ fontSize: 12, background: s.bg, border: `0.5px solid ${s.border}`, borderRadius: 8, padding: "8px 12px", marginBottom: 10, color: s.color, lineHeight: 1.6 }}>{children}</div>;
-}
-
+// ─── Subcomponents ────────────────────────────────────────────────────────────
 function Badge({ val, neutral }) {
   if (neutral) return <span style={{ display: "inline-block", fontSize: 11, fontWeight: 500, padding: "1px 7px", borderRadius: 6, background: "#F1EFE8", color: "#5F5E5A" }}>→ 0%</span>;
   if (val === undefined || val === null) return null;
   const up = val >= 0;
-  return <span style={{ display: "inline-block", fontSize: 11, fontWeight: 500, padding: "1px 7px", borderRadius: 6, background: up ? "#EAF3DE" : C.dangerLight, color: up ? "#3B6D11" : C.dangerDark }}>{up ? "↑" : "↓"} {Math.abs(val)}%</span>;
+  return <span style={{ display: "inline-block", fontSize: 11, fontWeight: 500, padding: "1px 7px", borderRadius: 6, background: up ? "#EAF3DE" : "#FCEBEB", color: up ? "#3B6D11" : "#A32D2D" }}>{up ? "↑" : "↓"} {Math.abs(val)}%</span>;
 }
 
+
+// ─── Tooltip ──────────────────────────────────────────────────────────────────
 function Tooltip({ text, children }) {
   const [show, setShow] = React.useState(false);
   return (
-    <span style={{ position: "relative", display: "inline-flex", alignItems: "center" }} onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
+    <span style={{ position: "relative", display: "inline-flex", alignItems: "center" }}
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+    >
       {children}
-      <span style={{ marginLeft: 3, cursor: "help", color: C.borderStrong, fontSize: 11 }}>ⓘ</span>
+      <span style={{ marginLeft: 3, cursor: "help", color: "#C8C8C4", fontSize: 11 }}>ⓘ</span>
       {show && (
-        <span style={{ position: "absolute", bottom: "120%", left: "50%", transform: "translateX(-50%)", background: "#1A1A18", color: "#fff", fontSize: 11, padding: "6px 10px", borderRadius: 8, whiteSpace: "pre-wrap", maxWidth: 220, zIndex: 100, boxShadow: "0 4px 12px rgba(0,0,0,.2)", lineHeight: 1.5, pointerEvents: "none" }}>
+        <span style={{
+          position: "absolute", bottom: "120%", left: "50%", transform: "translateX(-50%)",
+          background: "#1A1A1A", color: "#fff", fontSize: 11, padding: "6px 10px",
+          borderRadius: 8, whiteSpace: "pre-wrap", maxWidth: 220, zIndex: 100,
+          boxShadow: "0 4px 12px rgba(0,0,0,0.2)", lineHeight: 1.5,
+          pointerEvents: "none",
+        }}>
           {text}
-          <span style={{ position: "absolute", top: "100%", left: "50%", transform: "translateX(-50%)", borderLeft: "5px solid transparent", borderRight: "5px solid transparent", borderTop: "5px solid #1A1A18" }} />
+          <span style={{ position: "absolute", top: "100%", left: "50%", transform: "translateX(-50%)",
+            borderLeft: "5px solid transparent", borderRight: "5px solid transparent",
+            borderTop: "5px solid #1A1A1A" }} />
         </span>
       )}
     </span>
@@ -158,160 +263,46 @@ function Tooltip({ text, children }) {
 
 function MetricCard({ icon, label, value, sub, badge, neutral, tooltip }) {
   return (
-    <div style={{ background: C.surfaceBg, borderRadius: 10, padding: "12px 14px" }}>
-      <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 4 }}>
+    <div style={{ background: "#F7F7F5", borderRadius: 12, padding: "14px 16px" }}>
+      <div style={{ fontSize: 12, color: "#888", marginBottom: 4 }}>
         {icon} {tooltip ? <Tooltip text={tooltip}>{label}</Tooltip> : label}
       </div>
-      <div style={{ fontSize: 22, fontWeight: 500, color: C.text }}>{value ?? "—"}</div>
-      <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-        <Badge val={badge} neutral={neutral} />{sub && <span>{sub}</span>}
+      <div style={{ fontSize: 22, fontWeight: 500, color: "#111" }}>{value ?? "—"}</div>
+      <div style={{ fontSize: 11, color: "#aaa", marginTop: 4, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+        <Badge val={badge} neutral={neutral} />
+        {sub && <span>{sub}</span>}
       </div>
     </div>
   );
 }
 
-function StatCard({ title, sub, children }) {
-  return (
-    <div style={{ ...CARD }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>{title}</span>
-        <span style={{ fontSize: 11, color: C.textMuted }}>{sub}</span>
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function MiniStat({ label, value, color }) {
-  return (
-    <div style={{ background: C.surfaceBg, borderRadius: 8, padding: "8px 10px", textAlign: "center", flex: 1 }}>
-      <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 2 }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 500, color: color ?? C.text }}>{value}</div>
-    </div>
-  );
-}
-
-function KRow({ label, value, danger, warn }) {
-  return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: `0.5px solid ${C.border}`, fontSize: 12 }}>
-      <span style={{ color: C.textMuted }}>{label}</span>
-      <span style={{ fontWeight: 500, color: danger ? C.danger : warn ? C.warning : C.text }}>{value}</span>
-    </div>
-  );
-}
-
-// ─── Revenue chart ────────────────────────────────────────────────────────────
-function RevenueChart({ labels, revenue, orders, covers, preset }) {
-  const canvasRef = useRef(null);
-  const chartRef  = useRef(null);
-
-  const insight = useMemo(() => {
-    if (!labels?.length) return null;
-    const maxRevIdx = revenue.indexOf(Math.max(...revenue));
-    const minRevIdx = revenue.indexOf(Math.min(...revenue));
-    return `${labels[maxRevIdx]} had the highest revenue (${fmtINR(revenue[maxRevIdx])}, ${orders[maxRevIdx]} order${orders[maxRevIdx] !== 1 ? "s" : ""}).` +
-      (minRevIdx !== maxRevIdx ? ` ${labels[minRevIdx]} was the quietest (${fmtINR(revenue[minRevIdx])}).` : "") +
-      ` Peak covers: ${Math.max(...covers)}.`;
-  }, [labels, revenue, orders, covers]);
-
-  useEffect(() => {
-    if (!labels?.length) return;
-    waitForChart(() => {
-      if (chartRef.current) { try { chartRef.current.destroy(); } catch(_) {} chartRef.current = null; }
-      const canvas = canvasRef.current; if (!canvas) return;
-      const ctx = canvas.getContext("2d"); ctx.clearRect(0, 0, canvas.width, canvas.height);
-      chartRef.current = new window.Chart(ctx, {
-        data: {
-          labels,
-          datasets: [
-            { type: "bar",  label: "Revenue (₹)", data: revenue, backgroundColor: C.primary, borderRadius: 4, yAxisID: "y",  maxBarThickness: 40, order: 2 },
-            { type: "line", label: "Orders",       data: orders,  borderColor: C.success, backgroundColor: C.successLight + "40", borderWidth: 2.5, pointRadius: labels.length > 15 ? 2 : 5, pointBackgroundColor: C.success, pointBorderColor: "#fff", pointBorderWidth: 2, tension: 0.4, yAxisID: "y2", fill: false, order: 1 },
-          ],
-        },
-        options: {
-          responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
-          interaction: { mode: "index", intersect: false },
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              backgroundColor: "#1A1A18", titleColor: "#fff", bodyColor: "#ccc", padding: 10, cornerRadius: 8,
-              callbacks: { label: ctx => ctx.dataset.label === "Revenue (₹)" ? "  Revenue: " + fmtINR(ctx.parsed.y) : "  Orders: " + ctx.parsed.y }
-            }
-          },
-          scales: {
-            x:  { ticks: { color: C.textMuted, font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 15 }, grid: { display: false } },
-            y:  { ticks: { color: C.textMuted, font: { size: 10 }, callback: v => fmtINR(v), maxTicksLimit: 6 }, grid: { color: "rgba(0,0,0,0.05)" }, title: { display: true, text: "Revenue (₹)", color: C.textMuted, font: { size: 10 } } },
-            y2: { position: "right", ticks: { color: C.textMuted, font: { size: 10 }, maxTicksLimit: 6, stepSize: 1 }, grid: { display: false }, title: { display: true, text: "Orders", color: C.textMuted, font: { size: 10 } } },
-          },
-        },
-      });
-    });
-    return () => { if (chartRef.current) { try { chartRef.current.destroy(); } catch(_) {} chartRef.current = null; } };
-  }, [labels, revenue, orders]);
-
-  const maxC = Math.max(...(covers ?? [1]));
-  return (
-    <div style={{ ...CARD, marginBottom: 12 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>Revenue &amp; order volume</span>
-        <span style={{ fontSize: 11, color: C.textMuted }}>{preset === "today" || preset === "yesterday" ? "hourly" : "daily"}</span>
-      </div>
-      {insight && (
-        <div style={{ fontSize: 12, color: C.textSub, background: C.surfaceBg, borderRadius: 8, padding: "8px 12px", marginBottom: 12, lineHeight: 1.6, borderLeft: `3px solid ${C.primary}`, borderRadius: "0 8px 8px 0" }}>
-          {insight}
-        </div>
-      )}
-      <div style={{ display: "flex", gap: 14, fontSize: 11, color: C.textMuted, marginBottom: 12, flexWrap: "wrap" }}>
-        <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: C.primary, marginRight: 4, verticalAlign: "middle" }}></span>Revenue (left)</span>
-        <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: "50%", background: C.success, marginRight: 4, verticalAlign: "middle" }}></span>Orders (right)</span>
-        <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: "#0C447C", marginRight: 4, verticalAlign: "middle" }}></span>Cover intensity</span>
-      </div>
-      <div style={{ height: 200, position: "relative" }}><canvas ref={canvasRef} /></div>
-      {covers?.length > 0 && (
-        <div style={{ marginTop: 6, display: "grid", gridTemplateColumns: `repeat(${covers.length},1fr)`, gap: 3 }}>
-          {covers.map((v, i) => {
-            const ci = Math.min(4, Math.floor((v / maxC) * 4.99));
-            return <div key={i} title={`${labels?.[i] ?? i}: ${v} cover${v !== 1 ? "s" : ""}`} style={{ background: HEAT_COLORS[ci], height: 10, borderRadius: 3 }} />;
-          })}
-        </div>
-      )}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 11, color: C.textMuted }}>
-        <span>Covers</span>
-        <div style={{ display: "flex", gap: 2 }}>{HEAT_COLORS.map((c, i) => <span key={i} style={{ background: c, width: 14, height: 8, borderRadius: 2, display: "inline-block" }} />)}</div>
-        <span>Low → High</span>
-      </div>
-    </div>
-  );
-}
-
-// ─── Top Menu Items ───────────────────────────────────────────────────────────
 function TopMenuItems({ items }) {
   const maxRev = items?.[0]?.revenue ?? 1;
   return (
-    <div style={{ ...CARD }}>
+    <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "16px 20px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>Top menu items</span>
-        <span style={{ fontSize: 11, color: C.textMuted }}>by revenue</span>
+        <span style={{ fontSize: 14, fontWeight: 500, color: "#111" }}>Top menu items</span>
+        <span style={{ fontSize: 11, color: "#aaa" }}>by revenue</span>
       </div>
-      {!items?.length && <div style={{ fontSize: 12, color: C.textMuted, padding: "16px 0", textAlign: "center" }}>No data for this period</div>}
+      {!items?.length && <div style={{ fontSize: 12, color: "#aaa", padding: "16px 0", textAlign: "center" }}>No data for this period</div>}
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed" }}>
         <thead>
-          <tr style={{ borderBottom: `0.5px solid ${C.border}` }}>
-            <th style={{ textAlign: "left",  color: C.textMuted, fontWeight: 400, fontSize: 11, paddingBottom: 6, width: "40%" }}>Item</th>
-            <th style={{ textAlign: "right", color: C.textMuted, fontWeight: 400, fontSize: 11, paddingBottom: 6, width: "15%" }}>Qty</th>
-            <th style={{ textAlign: "right", color: C.textMuted, fontWeight: 400, fontSize: 11, paddingBottom: 6, width: "25%" }}>Revenue</th>
+          <tr style={{ borderBottom: "0.5px solid #F0F0EE" }}>
+            <th style={{ textAlign: "left", color: "#aaa", fontWeight: 400, fontSize: 11, paddingBottom: 6, width: "40%" }}>Item</th>
+            <th style={{ textAlign: "right", color: "#aaa", fontWeight: 400, fontSize: 11, paddingBottom: 6, width: "15%" }}>Qty</th>
+            <th style={{ textAlign: "right", color: "#aaa", fontWeight: 400, fontSize: 11, paddingBottom: 6, width: "25%" }}>Revenue</th>
             <th style={{ width: "20%" }}></th>
           </tr>
         </thead>
         <tbody>
           {items?.map((it, i) => (
-            <tr key={i} style={{ borderBottom: `0.5px solid ${C.border}` }}>
-              <td style={{ padding: "7px 0", color: C.textSub }}>{i + 1}. {it.name}</td>
-              <td style={{ padding: "7px 0", textAlign: "right", color: C.text }}>{it.qty}</td>
-              <td style={{ padding: "7px 0", textAlign: "right", fontWeight: 500, color: C.text }}>₹{it.revenue.toLocaleString("en-IN")}</td>
+            <tr key={i} style={{ borderBottom: "0.5px solid #F7F7F5" }}>
+              <td style={{ padding: "7px 0", color: "#666" }}>{i + 1}. {it.name}</td>
+              <td style={{ padding: "7px 0", textAlign: "right" }}>{it.qty}</td>
+              <td style={{ padding: "7px 0", textAlign: "right", fontWeight: 500 }}>₹{it.revenue.toLocaleString("en-IN")}</td>
               <td style={{ padding: "7px 0 7px 8px" }}>
-                <div style={{ background: C.surfaceBg, borderRadius: 3, height: 5, overflow: "hidden" }}>
-                  <div style={{ width: `${Math.round(it.revenue / maxRev * 100)}%`, background: C.primary, height: "100%", borderRadius: 3 }} />
+                <div style={{ background: "#F0F0EE", borderRadius: 3, height: 5, overflow: "hidden" }}>
+                  <div style={{ width: `${Math.round(it.revenue / maxRev * 100)}%`, background: "#378ADD", height: "100%", borderRadius: 3 }} />
                 </div>
               </td>
             </tr>
@@ -322,44 +313,43 @@ function TopMenuItems({ items }) {
   );
 }
 
-// ─── Table Occupancy ──────────────────────────────────────────────────────────
 function TableOccupancy({ tables }) {
   const occupied = tables?.filter(t => t.status === "occupied").length ?? 0;
   const waiting  = tables?.filter(t => t.status === "waiting").length ?? 0;
   const free     = tables?.filter(t => t.status === "free").length ?? 0;
   const total    = tables?.length ?? 0;
+  const occPax   = 0; // current_pax not in schema
+  const avgPax   = occupied > 0 ? (occPax / occupied).toFixed(1) : "—";
   const occRate  = total ? Math.round((occupied / total) * 100) : 0;
+
   return (
-    <div style={{ ...CARD }}>
+    <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "16px 20px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>Table occupancy</span>
-        <span style={{ fontSize: 11, color: C.textMuted }}>live now</span>
+        <span style={{ fontSize: 14, fontWeight: 500, color: "#111" }}>Table occupancy</span>
+        <span style={{ fontSize: 11, color: "#aaa" }}>live now</span>
       </div>
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
         <div style={{ minWidth: 90 }}>
-          <div style={{ fontSize: 26, fontWeight: 500, color: C.text }}>{occupied}<span style={{ fontSize: 15, color: C.textMuted }}>/{total}</span></div>
-          <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 10 }}>tables occupied</div>
-          {[{ label: "Occupied", count: occupied, color: C.primary }, { label: "Waiting", count: waiting, color: C.warning }, { label: "Free", count: free, color: C.borderStrong }].map(r => (
+          <div style={{ fontSize: 26, fontWeight: 500, color: "#111" }}>{occupied}<span style={{ fontSize: 15, color: "#aaa" }}>/{total}</span></div>
+          <div style={{ fontSize: 11, color: "#aaa", marginBottom: 10 }}>tables occupied</div>
+          {[{ label: "Occupied", count: occupied, color: "#1D9E75" }, { label: "Waiting", count: waiting, color: "#BA7517" }, { label: "Free", count: free, color: "#B4B2A9" }].map(r => (
             <div key={r.label} style={{ fontSize: 12, marginBottom: 5 }}>
               <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: r.color, marginRight: 6, verticalAlign: "middle" }}></span>
               {r.label} <strong>{r.count}</strong>
             </div>
           ))}
-          <div style={{ marginTop: 10, fontSize: 11, color: C.textMuted }}>Occupancy rate</div>
-          <div style={{ fontSize: 13, fontWeight: 500, color: C.text }}>{occRate}%</div>
-          <div style={{ marginTop: 4, background: C.surfaceBg, borderRadius: 4, height: 5, overflow: "hidden" }}>
-            <div style={{ width: `${occRate}%`, background: C.success, height: "100%", borderRadius: 4, transition: "width .4s" }} />
-          </div>
+          <div style={{ marginTop: 10, fontSize: 11, color: "#aaa" }}>Avg pax/table</div>
+          <div style={{ fontSize: 13, fontWeight: 500, color: "#111" }}>{avgPax}</div>
+          <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>Occupancy rate</div>
+          <div style={{ fontSize: 13, fontWeight: 500, color: "#111" }}>{occRate}%</div>
         </div>
         <div style={{ flex: 1, display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6 }}>
           {tables?.map(t => {
-            const sc = TABLE_COLORS[t.status] ?? TABLE_COLORS.free;
+            const c = TABLE_COLORS[t.status] ?? TABLE_COLORS.free;
             return (
-              <div key={t.id} style={{ background: sc.bg, borderRadius: 8, padding: "6px 4px", textAlign: "center" }}>
-                <div style={{ fontSize: 10, fontWeight: 500, color: sc.text }}>T{t.table_number ?? t.id}</div>
-                <div style={{ fontSize: 10, color: sc.text, opacity: 0.8, textTransform: "capitalize" }}>
-                  {t.status === "occupied" ? "Occ." : t.status === "waiting" ? "Wait" : "Free"}
-                </div>
+              <div key={t.id} style={{ background: c.bg, borderRadius: 8, padding: "6px 4px", textAlign: "center" }}>
+                <div style={{ fontSize: 10, fontWeight: 500, color: c.text }}>T{t.table_number ?? t.id}</div>
+                <div style={{ fontSize: 10, color: c.text, opacity: 0.8 }}>—</div>
               </div>
             );
           })}
@@ -369,220 +359,112 @@ function TableOccupancy({ tables }) {
   );
 }
 
-// ─── KOT Status ───────────────────────────────────────────────────────────────
-function KotStatus({ stats, error }) {
-  const hasActivity = stats && (stats.open > 0 || stats.inProgress > 0 || stats.served > 0);
+function StatCard({ title, sub, children }) {
+  return (
+    <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "16px 20px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <span style={{ fontSize: 14, fontWeight: 500, color: "#111" }}>{title}</span>
+        <span style={{ fontSize: 11, color: "#aaa" }}>{sub}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function MiniStat({ label, value, color }) {
+  return (
+    <div style={{ background: "#F7F7F5", borderRadius: 10, padding: "8px 10px", textAlign: "center", flex: 1 }}>
+      <div style={{ fontSize: 11, color: "#888", marginBottom: 2 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 500, color: color ?? "#111" }}>{value}</div>
+    </div>
+  );
+}
+
+function KRow({ label, value, danger, warn }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: "0.5px solid #F7F7F5", fontSize: 12 }}>
+      <span style={{ color: "#888" }}>{label}</span>
+      <span style={{ fontWeight: 500, color: danger ? "#A32D2D" : warn ? "#BA7517" : "#111" }}>{value}</span>
+    </div>
+  );
+}
+
+function KotStatus({ stats }) {
   return (
     <StatCard title="KOT status" sub="kitchen orders today">
-      {error && <AlertBanner type="error">Could not load KOT data: {error}</AlertBanner>}
-      {!error && stats && !hasActivity && (
-        <AlertBanner type="info">No KOT tickets raised today yet. They appear here once orders are sent to the kitchen.</AlertBanner>
-      )}
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <MiniStat label="Pending"           value={stats?.open   ?? 0} color={C.warning} />
-        <MiniStat label="Ready"             value={stats?.served ?? 0} color={C.success} />
-        <MiniStat label="Delayed (>20 min)" value={stats?.delayed ?? 0} color={(stats?.delayed ?? 0) > 0 ? C.danger : C.text} />
+        <MiniStat label="Open"        value={stats?.open ?? 0} />
+        <MiniStat label="In progress" value={stats?.inProgress ?? 0} color="#BA7517" />
+        <MiniStat label="Served"      value={stats?.served ?? 0}     color="#1D9E75" />
       </div>
-      <KRow label="Avg time in queue" value={stats?.avgTime != null ? `${stats.avgTime} min` : "—"} />
+      <KRow label="Avg KOT time"      value={stats?.avgTime != null ? `${stats.avgTime} min` : "—"} />
+      <KRow label="Delayed (&gt;20 min)" value={stats?.delayed != null ? `${stats.delayed} KOTs` : "—"} danger={(stats?.delayed ?? 0) > 0} />
       <KRow label="Fastest item"      value={stats?.fastestItem ?? "—"} />
       <KRow label="Slowest item"      value={stats?.slowestItem ?? "—"} warn />
     </StatCard>
   );
 }
 
-// ─── Cancellations ────────────────────────────────────────────────────────────
-function CancellationVoids({ stats, error }) {
-  const highBookingRate   = (stats?.bookingRate  ?? 0) >= 50;
-  const orderCancelsClean = stats && stats.cancelled === 0 && (stats.totalOrders ?? 0) > 0;
+function CancellationVoids({ stats }) {
   return (
     <StatCard title="Cancellations &amp; voids" sub="selected period">
-      {error && <AlertBanner type="error">Could not load cancellation data: {error}</AlertBanner>}
 
+      {/* Section 1: Booking-level cancellations (from WhatsApp bot) */}
       <div style={{ marginBottom: 14 }}>
-        <div style={{ fontSize: 11, fontWeight: 500, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Booking cancellations (WhatsApp)</div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-          <MiniStat label="Cancelled"      value={stats?.bookingCancels ?? 0} color={C.danger}  />
-          <MiniStat label="Total bookings" value={stats?.totalBookings  ?? 0} />
-          <MiniStat label="Rate"           value={stats?.bookingRate != null ? `${stats.bookingRate}%` : "—"} color={C.warning} />
+        <div style={{ fontSize: 11, fontWeight: 500, color: "#888", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>
+          Booking cancellations (WhatsApp)
         </div>
-        {highBookingRate && (
-          <AlertBanner type="warn">{stats.bookingRate}% cancellation rate — most are WhatsApp flow drops. Consider simplifying the bot steps to confirmation.</AlertBanner>
-        )}
-        <div style={{ fontSize: 11, color: C.textMuted, padding: "6px 8px", background: C.surfaceBg, borderRadius: 6 }}>Customer-level: booking resets, flow abandonment, service type cancellations.</div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          <MiniStat label="Cancelled"      value={stats?.bookingCancels ?? 0} color="#A32D2D" />
+          <MiniStat label="Total bookings" value={stats?.totalBookings   ?? 0} />
+          <MiniStat label="Rate"           value={stats?.bookingRate != null ? `${stats.bookingRate}%` : "—"} color="#BA7517" />
+        </div>
+        <div style={{ fontSize: 11, color: "#aaa", padding: "6px 8px", background: "#FFF8F5", borderRadius: 6 }}>
+          Customer-level: booking resets, flow cancellations, service type cancellations
+        </div>
       </div>
 
-      <div style={{ borderTop: `0.5px solid ${C.border}`, marginBottom: 14 }} />
+      {/* Divider */}
+      <div style={{ borderTop: "0.5px solid #F0F0EE", marginBottom: 14 }} />
 
+      {/* Section 2: Order-level cancellations (manager cancelled placed orders) */}
       <div>
-        <div style={{ fontSize: 11, fontWeight: 500, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Order cancellations (Manager)</div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-          <MiniStat label="Cancelled"    value={stats?.cancelled  ?? 0} color={C.danger}  />
-          <MiniStat label="Revenue lost" value={fmtINR(stats?.revLost ?? 0)} color={C.warning} />
-          <MiniStat label="Rate"         value={stats?.rate != null ? `${stats.rate}%` : "—"} color={C.warning} />
+        <div style={{ fontSize: 11, fontWeight: 500, color: "#888", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>
+          Order cancellations (Manager)
         </div>
-        {orderCancelsClean && <AlertBanner type="good">No manager-level order cancellations this period — portal orders are clean.</AlertBanner>}
-        <KRow label="Revenue lost"        value={stats?.revLost != null ? `₹${stats.revLost.toLocaleString("en-IN")}` : "₹0"} danger={(stats?.revLost ?? 0) > 0} />
+        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          <MiniStat label="Cancelled"   value={stats?.cancelled   ?? 0} color="#A32D2D" />
+          <MiniStat label="Revenue lost" value={fmtINR(stats?.revLost ?? 0)} color="#BA7517" />
+          <MiniStat label="Rate"         value={stats?.rate != null ? `${stats.rate}%` : "—"} color="#BA7517" />
+        </div>
+        <KRow label="Revenue lost"       value={stats?.revLost != null ? `₹${stats.revLost.toLocaleString("en-IN")}` : "₹0"} danger />
         <KRow label="Total orders (base)" value={stats?.totalOrders ?? "—"} />
-        <div style={{ marginTop: 8, fontSize: 11, color: C.textMuted, padding: "6px 8px", background: C.surfaceBg, borderRadius: 6 }}>Manager cancelled placed orders in the portal. Cancellation reason not yet captured.</div>
+        <div style={{ marginTop: 8, fontSize: 11, color: "#aaa", padding: "6px 8px", background: "#FFF8F5", borderRadius: 6 }}>
+          Manager cancelled placed orders in the portal. Cancellation reason not yet captured.
+        </div>
       </div>
+
     </StatCard>
   );
 }
 
-// ─── WABA Panel ───────────────────────────────────────────────────────────────
-function WABAPanel({ info }) {
-  const row = (label, value) => (
-    <div style={{ display: "flex", gap: 12, marginBottom: 10 }}>
-      <div style={{ fontSize: 12, color: C.textMuted, minWidth: 150 }}>{label}</div>
-      <div style={{ fontSize: 12, fontWeight: 500, color: C.text, wordBreak: "break-all" }}>{value || "—"}</div>
-    </div>
-  );
-  if (info === undefined) return <div style={{ ...CARD, display: "flex", alignItems: "center", justifyContent: "center", color: C.textMuted, fontSize: 13 }}>Loading…</div>;
-  if (info === null) return (
-    <div style={{ ...CARD }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-        <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>WhatsApp Business</span>
-        <span style={{ fontSize: 10, fontWeight: 500, background: C.dangerLight, color: C.danger, padding: "2px 8px", borderRadius: 20 }}>Not configured</span>
-      </div>
-      <div style={{ fontSize: 12, color: C.textSub, lineHeight: 1.8 }}>
-        <div style={{ fontWeight: 500, color: C.text, marginBottom: 8 }}>How to connect your WABA:</div>
-        <div>1. Go to Meta Business Suite → WhatsApp Manager</div>
-        <div>2. Copy your WABA ID and Phone Number ID</div>
-        <div>3. Add them to your Munafe Chat restaurant settings</div>
-        <div>4. Add a Permanent Access Token to your backend .env</div>
-      </div>
-    </div>
-  );
-  return (
-    <div style={{ ...CARD }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-        <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>WhatsApp Business</span>
-        <span style={{ fontSize: 10, fontWeight: 500, background: C.successLight, color: C.successDark, padding: "2px 8px", borderRadius: 20 }}>● Connected</span>
-      </div>
-      {row("Business name",   info.name)}
-      {row("Phone number",    info.whatsapp_number ? `+${info.whatsapp_number}` : null)}
-      {row("WABA ID",         info.waba_id)}
-      {row("Manager phone",   info.manager_phone ? `+${info.manager_phone}` : null)}
-      {row("Timezone",        info.timezone)}
-      {row("Dining duration", info.dining_duration_minutes ? `${info.dining_duration_minutes} min` : null)}
-      {row("Payment mode",    info.payment_mode)}
-      <div style={{ marginTop: 12, padding: "8px 12px", background: C.surfaceBg, borderRadius: 8, fontSize: 12, color: C.textSub }}>
-        Test ordering bot: send "Hi" to <strong>+{info.whatsapp_number}</strong>
-      </div>
-    </div>
-  );
-}
 
-// ─── WhatsApp Orders Table ────────────────────────────────────────────────────
-function WAOrdersTable({ orders, rangeLabel }) {
-  const [search, setSearch] = useState("");
-  const filtered = useMemo(() => {
-    if (!orders) return null;
-    if (!search.trim()) return orders;
-    const q = search.toLowerCase();
-    return orders.filter(o => {
-      const name  = resolveCustomerName(o).toLowerCase();
-      const phone = (o.customers?.phone || "").toLowerCase();
-      const svc   = (o.service_type || o.event_type || "").toLowerCase();
-      const token = (o.token_number || "").toLowerCase();
-      return name.includes(q) || phone.includes(q) || svc.includes(q) || token.includes(q);
-    });
-  }, [orders, search]);
-
-  const handleExport = () => {
-    if (!filtered?.length) return;
-    const rows = filtered.map(o => ({
-      Date: o.created_at ? new Date(o.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "—",
-      Name: resolveCustomerName(o), Phone: o.customers?.phone || "—",
-      Service: o.service_type || o.event_type || "—", Token: o.token_number || "—",
-      Party_Size: o.party_size || "—", Amount: o.total_amount != null ? `₹${o.total_amount}` : "—", Status: o.status || "—",
-    }));
-    const headers = Object.keys(rows[0]);
-    const csv = [headers.join(","), ...rows.map(r => headers.map(h => { const v = String(r[h] ?? "").replace(/"/g, '""'); return v.includes(",") || v.includes("\n") ? `"${v}"` : v; }).join(","))].join("\n");
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-    a.download = `whatsapp-orders-${rangeLabel.replace(/[^a-z0-9]/gi, "-")}.csv`;
-    a.click();
-  };
-
-  const statusVariant = s => {
-    if (["completed","confirmed","paid"].includes(s)) return "green";
-    if (["cancelled","failed"].includes(s)) return "red";
-    if (["pending","awaiting"].includes(s)) return "amber";
-    return "gray";
-  };
-
-  return (
-    <div style={{ ...CARD }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
-        <div>
-          <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>WhatsApp orders</span>
-          {filtered != null && <span style={{ fontSize: 11, color: C.textMuted, marginLeft: 8 }}>{filtered.length} total · {rangeLabel}</span>}
-        </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, phone, token…"
-            style={{ fontSize: 12, padding: "5px 10px", borderRadius: 8, border: `0.5px solid ${C.border}`, outline: "none", width: 200, color: C.text }} />
-          <button onClick={handleExport} disabled={!filtered?.length}
-            style={{ fontSize: 12, padding: "5px 12px", borderRadius: 8, border: `0.5px solid ${C.border}`, background: filtered?.length ? C.surfaceBg : "#fafafa", color: filtered?.length ? C.text : C.textMuted, cursor: filtered?.length ? "pointer" : "default" }}>
-            ↓ Export CSV
-          </button>
-        </div>
-      </div>
-      {orders === null && <div style={{ textAlign: "center", padding: "24px 0", fontSize: 13, color: C.textMuted }}>Loading…</div>}
-      {orders !== null && filtered?.length === 0 && <div style={{ textAlign: "center", padding: "24px 0", fontSize: 13, color: C.textMuted }}>No orders in this period</div>}
-      {filtered?.length > 0 && (
-        <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: 300, borderRadius: 8, border: `0.5px solid ${C.border}` }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-            <thead style={{ position: "sticky", top: 0, background: C.cardBg, zIndex: 1 }}>
-              <tr style={{ borderBottom: `0.5px solid ${C.border}` }}>
-                {["Date & Time","Name","Phone","Service","Token","Pax","Amount","Status"].map(h => (
-                  <th key={h} style={{ textAlign: "left", color: C.textMuted, fontWeight: 400, fontSize: 11, padding: "8px 8px 8px 0", whiteSpace: "nowrap", background: C.cardBg }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((o, i) => (
-                <tr key={o.id || i} style={{ borderBottom: `0.5px solid ${C.border}` }}
-                  onMouseEnter={e => e.currentTarget.style.background = C.surfaceBg}
-                  onMouseLeave={e => e.currentTarget.style.background = ""}>
-                  <td style={{ padding: "6px 8px 6px 0", color: C.textSub, whiteSpace: "nowrap", fontSize: 11 }}>
-                    {o.created_at ? new Date(o.created_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" }) : "—"}
-                  </td>
-                  <td style={{ padding: "7px 8px 7px 0", fontWeight: 500, color: C.text, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{resolveCustomerName(o)}</td>
-                  <td style={{ padding: "7px 8px 7px 0", color: C.textSub, whiteSpace: "nowrap" }}>{o.customers?.phone ? `+${o.customers.phone}` : "—"}</td>
-                  <td style={{ padding: "7px 8px 7px 0", color: C.textSub, whiteSpace: "nowrap", textTransform: "capitalize" }}>{(o.service_type || o.event_type || "—").replace(/_/g, " ")}</td>
-                  <td style={{ padding: "7px 8px 7px 0", color: C.textSub, fontFamily: "monospace" }}>{o.token_number || "—"}</td>
-                  <td style={{ padding: "7px 8px 7px 0", color: C.textSub, textAlign: "center" }}>{o.party_size || "—"}</td>
-                  <td style={{ padding: "7px 8px 7px 0", fontWeight: 500, color: C.text, whiteSpace: "nowrap" }}>{o.total_amount != null ? `₹${Number(o.total_amount).toLocaleString("en-IN")}` : "—"}</td>
-                  <td style={{ padding: "7px 8px 7px 0" }}><Pill label={o.status || "—"} variant={statusVariant(o.status)} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ─── Data hooks ───────────────────────────────────────────────────────────────
 function useKpiData(restaurantId, startISO, endISO) {
   const [data, setData] = useState(null);
   useEffect(() => {
     if (!restaurantId) return;
-    setData(null);
     (async () => {
-      const [{ data: orders, error: oErr }, { data: tokens, error: tErr }] = await Promise.all([
+      const [{ data: orders }, { data: tokens }] = await Promise.all([
         supabase.from("orders").select("total_amount").eq("restaurant_id", restaurantId).not("status", "eq", "cancelled").gte("created_at", startISO).lte("created_at", endISO),
         supabase.from("walk_in_tokens").select("arrived_at, seated_at").eq("restaurant_id", restaurantId).gte("arrived_at", startISO).lte("arrived_at", endISO),
       ]);
-      if (oErr) console.error("[useKpiData] orders:", oErr.message);
-      if (tErr) console.error("[useKpiData] tokens:", tErr.message);
       const totalRevenue = (orders ?? []).reduce((s, o) => s + (o.total_amount ?? 0), 0);
       const totalOrders  = (orders ?? []).length;
-      const seated   = (tokens ?? []).filter(t => t.seated_at);
-      const avgMins  = seated.length ? Math.round(seated.reduce((s, t) => s + (new Date(t.seated_at) - new Date(t.arrived_at ?? t.created_at)) / 60000, 0) / seated.length) : null;
-      setData({ totalRevenue, totalOrders, aov: totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0, totalCovers: totalOrders, tokensIssued: (tokens ?? []).length, avgDining: avgMins, avgWait: avgMins });
+      const seated = (tokens ?? []).filter(t => t.seated_at);
+      const avgMins = seated.length ? Math.round(seated.reduce((s, t) => s + (new Date(t.seated_at) - new Date(t.arrived_at ?? t.created_at)) / 60000, 0) / seated.length) : null;
+      setData({ totalRevenue, totalOrders, aov: totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0, totalCovers: (orders ?? []).length, tokensIssued: (tokens ?? []).length, avgDining: avgMins, avgWait: avgMins });
     })();
   }, [restaurantId, startISO, endISO]);
   return data;
@@ -592,17 +474,16 @@ function useChartData(restaurantId, startISO, endISO, preset) {
   const [data, setData] = useState(null);
   useEffect(() => {
     if (!restaurantId) return;
-    setData(null);
+    setData(null); // clear old data immediately to avoid stale chart
     (async () => {
-      const { data: orders, error } = await supabase.from("orders").select("total_amount, created_at").eq("restaurant_id", restaurantId).not("status", "eq", "cancelled").gte("created_at", startISO).lte("created_at", endISO);
-      if (error) { console.error("[useChartData]", error.message); return; }
+      const { data: orders } = await supabase.from("orders").select("total_amount, created_at").eq("restaurant_id", restaurantId).not("status", "eq", "cancelled").gte("created_at", startISO).lte("created_at", endISO);
       if (!orders) return;
       const byLabel = {};
       orders.forEach(o => {
-        const d     = new Date(o.created_at);
+        const d = new Date(o.created_at);
         const label = (preset === "today" || preset === "yesterday")
-          ? `${String(new Date(d.getTime() + IST_OFFSET_MS).getUTCHours()).padStart(2, "0")}:00`
-          : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", timeZone: "Asia/Kolkata" });
+          ? `${d.getHours()}:00`
+          : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
         if (!byLabel[label]) byLabel[label] = { revenue: 0, orders: 0, covers: 0 };
         byLabel[label].revenue += o.total_amount ?? 0;
         byLabel[label].orders  += 1;
@@ -620,14 +501,24 @@ function useMenuItems(restaurantId, startISO, endISO) {
   useEffect(() => {
     if (!restaurantId) return;
     (async () => {
-      const { data: orders } = await supabase.from("orders").select("id").eq("restaurant_id", restaurantId).not("status", "eq", "cancelled").gte("created_at", startISO).lte("created_at", endISO);
+      // Get completed orders in range, then their items
+      const { data: orders } = await supabase.from("orders")
+        .select("id")
+        .eq("restaurant_id", restaurantId)
+        .not("status", "eq", "cancelled")
+        .gte("created_at", startISO)
+        .lte("created_at", endISO);
       if (!orders?.length) { setItems([]); return; }
-      const { data } = await supabase.from("order_items").select("quantity, unit_price, special_instructions, menu_item:menu_item_id(name)").in("order_id", orders.map(o => o.id));
+      const orderIds = orders.map(o => o.id);
+      const { data } = await supabase.from("order_items")
+        .select("quantity, unit_price, special_instructions, menu_item:menu_item_id(name)")
+        .in("order_id", orderIds);
       if (!data) return;
       const map = {};
       data.forEach(r => {
+        // Bot orders store item name in special_instructions when menu_item_id is null
         const n = r.menu_item?.name || r.special_instructions || null;
-        if (!n) return;
+        if (!n) return; // skip items with no name at all
         if (!map[n]) map[n] = { name: n, qty: 0, revenue: 0 };
         map[n].qty     += r.quantity ?? 1;
         map[n].revenue += (r.quantity ?? 1) * (r.unit_price ?? 0);
@@ -655,171 +546,406 @@ function useTables(restaurantId) {
 
 function useKotStats(restaurantId) {
   const [stats, setStats] = useState(null);
-  const [error, setError] = useState(null);
-  const doFetch = useCallback(async () => {
+  const fetch = useCallback(async () => {
     if (!restaurantId) return;
-    const todayStartISO = istMidnightUTC(0).toISOString();
-    const { data, error: qErr } = await supabase.from("kds_items").select("status, time_in_queue_seconds, item_name, created_at, updated_at").eq("restaurant_id", restaurantId).gte("created_at", todayStartISO);
-    if (qErr) { setError(qErr.message); return; }
-    setError(null);
-    if (!data?.length) { setStats({ open: 0, inProgress: 0, served: 0, avgTime: null, delayed: 0, fastestItem: null, slowestItem: null }); return; }
-    const pending = data.filter(k => k.status === "pending");
-    const ready   = data.filter(k => k.status === "ready");
-    const readyTimes = ready.map(k => (k.time_in_queue_seconds ?? 0) / 60).filter(t => t > 0);
-    const avgTime = readyTimes.length ? Math.round(readyTimes.reduce((s, v) => s + v, 0) / readyTimes.length) : null;
-    const byItem = {};
-    ready.forEach(k => {
-      const secs = k.time_in_queue_seconds ?? 0;
-      if (!secs || !k.item_name) return;
-      if (!byItem[k.item_name]) byItem[k.item_name] = { total: 0, count: 0 };
-      byItem[k.item_name].total += secs; byItem[k.item_name].count += 1;
-    });
-    const itemAvgs = Object.entries(byItem).map(([name, { total, count }]) => ({ name, avg: total / count })).sort((a, b) => a.avg - b.avg);
-    setStats({ open: pending.length, inProgress: 0, served: ready.length, avgTime, delayed: readyTimes.filter(t => t > 20).length, fastestItem: itemAvgs[0]?.name ?? null, slowestItem: itemAvgs[itemAvgs.length - 1]?.name ?? null });
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const { data, error } = await supabase.from("kot_tickets").select("status, created_at, served_at").eq("restaurant_id", restaurantId).gte("created_at", today.toISOString());
+    if (error || !data) { setStats({ open: 0, inProgress: 0, served: 0, avgTime: null, delayed: 0, fastestItem: null, slowestItem: null }); return; }
+    const times = data.filter(k => k.served_at).map(k => (new Date(k.served_at) - new Date(k.created_at)) / 60000);
+    setStats({ open: data.filter(k => k.status === "open").length, inProgress: data.filter(k => k.status === "in_progress").length, served: data.filter(k => k.status === "served").length, avgTime: times.length ? Math.round(times.reduce((s, v) => s + v, 0) / times.length) : null, delayed: times.filter(t => t > 20).length, fastestItem: null, slowestItem: null });
   }, [restaurantId]);
   useEffect(() => {
-    doFetch();
-    const ch = supabase.channel(`kds-${restaurantId}`).on("postgres_changes", { event: "*", schema: "public", table: "kds_items", filter: `restaurant_id=eq.${restaurantId}` }, doFetch).subscribe();
+    fetch();
+    const ch = supabase.channel(`kot-${restaurantId}`).on("postgres_changes", { event: "*", schema: "public", table: "kot_tickets", filter: `restaurant_id=eq.${restaurantId}` }, fetch).subscribe();
     return () => supabase.removeChannel(ch);
-  }, [restaurantId, doFetch]);
-  return { stats, error };
+  }, [restaurantId, fetch]);
+  return stats;
 }
 
 function useCancelStats(apiClient, restaurantId, startISO, endISO) {
   const [stats, setStats] = useState(null);
-  const [error, setError] = useState(null);
+
   useEffect(() => {
     if (!apiClient || !restaurantId || !startISO || !endISO) return;
     let cancelled = false;
-    setError(null);
     (async () => {
       try {
-        const res = await apiClient.get('/api/dashboard/cancel-stats', { params: { start: startISO, end: endISO } });
+        const res = await apiClient.get('/api/dashboard/cancel-stats', {
+          params: { start: startISO, end: endISO },
+        });
         if (cancelled) return;
         const d = res.data;
-        setStats({ cancelled: d.orderCancels, revLost: d.orderRevLost, totalOrders: d.totalOrders, rate: d.orderRate, bookingCancels: d.bookingCancels, totalBookings: d.totalBookings, bookingRate: d.bookingRate });
-      } catch(err) { if (cancelled) return; setError(err?.response?.data?.message || err.message); }
+        setStats({
+          // Order-level cancellations (manager cancelled a placed order)
+          cancelled:     d.orderCancels,
+          revLost:       d.orderRevLost,
+          totalOrders:   d.totalOrders,
+          rate:          d.orderRate,
+          // Booking-level cancellations (customer cancelled booking/flow)
+          bookingCancels: d.bookingCancels,
+          totalBookings:  d.totalBookings,
+          bookingRate:    d.bookingRate,
+        });
+      } catch (err) {
+        console.error('[useCancelStats]', err.message);
+      }
     })();
     return () => { cancelled = true; };
   }, [apiClient, restaurantId, startISO, endISO]);
-  return { stats, error };
+
+  return stats;
 }
 
+// ─── Hook: WABA info from Munafe Chat restaurants table ───────────────────────
 function useWABAInfo(apiClient) {
-  const [info, setInfo] = useState(undefined);
+  const [info, setInfo] = useState(undefined); // undefined = loading, null = not found
   useEffect(() => {
-    if (!apiClient) return;
+    if (!apiClient) { console.warn('[useWABAInfo] no apiClient'); return; }
     (async () => {
-      try { const res = await apiClient.get('/api/dashboard/waba'); setInfo(res.data?.restaurant ?? null); }
-      catch(err) { setInfo(null); }
+      try {
+        console.log('[useWABAInfo] calling /api/dashboard/waba...');
+        const res = await apiClient.get('/api/dashboard/waba');
+        console.log('[useWABAInfo] response:', res.data);
+        setInfo(res.data?.restaurant ?? null);
+      } catch (err) {
+        console.error('[useWABAInfo] failed:', err?.response?.status, err?.response?.data || err.message);
+        setInfo(null);
+      }
     })();
   }, [apiClient]);
   return info;
 }
 
+// ─── Hook: WhatsApp orders from Munafe Chat bookings table ────────────────────
 function useWAOrders(apiClient, startISO, endISO) {
   const [orders, setOrders] = useState(null);
   useEffect(() => {
-    if (!apiClient) return;
+    if (!apiClient) { console.warn('[useWAOrders] no apiClient'); return; }
     setOrders(null);
     (async () => {
-      try { const res = await apiClient.get('/api/dashboard/wa-orders', { params: { start: startISO, end: endISO } }); setOrders(res.data?.orders ?? []); }
-      catch(err) { setOrders([]); }
+      try {
+        console.log('[useWAOrders] calling /api/dashboard/wa-orders...', { startISO, endISO });
+        const res = await apiClient.get('/api/dashboard/wa-orders', {
+          params: { start: startISO, end: endISO },
+        });
+        console.log('[useWAOrders] response:', res.data?.orders?.length, 'orders');
+        setOrders(res.data?.orders ?? []);
+      } catch (err) {
+        console.error('[useWAOrders] failed:', err?.response?.status, err?.response?.data || err.message);
+        setOrders([]);
+      }
     })();
   }, [apiClient, startISO, endISO]);
   return orders;
 }
 
+// ─── WABA Info Panel ──────────────────────────────────────────────────────────
+function WABAPanel({ info }) {
+  const row = (label, value) => (
+    <div style={{ display: "flex", gap: 12, marginBottom: 10 }}>
+      <div style={{ fontSize: 12, color: "#888", minWidth: 160 }}>{label}</div>
+      <div style={{ fontSize: 13, fontWeight: 500, color: "#111", wordBreak: "break-all" }}>{value || "—"}</div>
+    </div>
+  );
+
+  // undefined = still loading, null = not found/no key
+  if (info === undefined) return (
+    <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "center", color: "#aaa", fontSize: 13 }}>
+      Loading...
+    </div>
+  );
+  if (info === null) return (
+    <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "20px 24px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <span style={{ fontSize: 14, fontWeight: 500, color: "#111" }}>WhatsApp Business</span>
+        <span style={{ fontSize: 11, background: "#FCEBEB", color: "#A32D2D", padding: "2px 8px", borderRadius: 6 }}>Not configured</span>
+      </div>
+      <div style={{ fontSize: 12, color: "#888", lineHeight: 1.7 }}>
+        <div style={{ fontWeight: 500, color: "#111", marginBottom: 8 }}>How to connect your WABA:</div>
+        <div>1. Go to <strong>Meta Business Suite</strong> → WhatsApp Manager</div>
+        <div>2. Create or select a WhatsApp Business Account</div>
+        <div>3. Copy your <strong>WABA ID</strong> and <strong>Phone Number ID</strong></div>
+        <div>4. Add them to your Munafe Chat restaurant settings</div>
+        <div>5. Generate a <strong>Permanent Access Token</strong> from Meta Developer Console</div>
+        <div>6. Add the token to your Munafe backend <code>.env</code> as <code>WHATSAPP_ACCESS_TOKEN</code></div>
+        <div style={{ marginTop: 10, padding: "8px 12px", background: "#F7F7F5", borderRadius: 8, fontSize: 11 }}>
+          Need help? Visit <a href="https://developers.facebook.com/docs/whatsapp" target="_blank" rel="noreferrer" style={{ color: "#378ADD" }}>developers.facebook.com/docs/whatsapp</a>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "20px 24px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <span style={{ fontSize: 14, fontWeight: 500, color: "#111" }}>WhatsApp Business</span>
+        <span style={{ fontSize: 11, background: "#EAF3DE", color: "#3B6D11", padding: "2px 8px", borderRadius: 6 }}>● Connected</span>
+      </div>
+      {row("Business name",         info.name)}
+      {row("Phone number",          info.whatsapp_number ? `+${info.whatsapp_number}` : null)}
+      {row("WABA ID",               info.waba_id)}
+      {row("Manager phone",         info.manager_phone ? `+${info.manager_phone}` : null)}
+      {row("Timezone",              info.timezone)}
+      {row("Dining duration",       info.dining_duration_minutes ? `${info.dining_duration_minutes} min` : null)}
+      {row("Payment mode",          info.payment_mode)}
+      <div style={{ marginTop: 12, padding: "8px 12px", background: "#F7F7F5", borderRadius: 8, fontSize: 12, color: "#888" }}>
+        📲 Test ordering bot: send <strong>"Hi"</strong> to <strong>+{info.whatsapp_number}</strong>
+      </div>
+    </div>
+  );
+}
+
+// ─── WhatsApp Orders Table ─────────────────────────────────────────────────────
+function WAOrdersTable({ orders, rangeLabel }) {
+  const [search, setSearch] = useState("");
+
+  const filtered = useMemo(() => {
+    if (!orders) return null;
+    if (!search.trim()) return orders;
+    const q = search.toLowerCase();
+    return orders.filter(o => {
+      const name  = (o.customers?.name || o.customer_id || "").toLowerCase();
+      const phone = (o.customers?.phone || "").toLowerCase();
+      const svc   = (o.service_type || o.event_type || "").toLowerCase();
+      const token = (o.token_number || "").toLowerCase();
+      return name.includes(q) || phone.includes(q) || svc.includes(q) || token.includes(q);
+    });
+  }, [orders, search]);
+
+  const handleExport = () => {
+    if (!filtered?.length) return;
+    const rows = filtered.map(o => ({
+      Date:          o.created_at ? new Date(o.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "—",
+      Name:          o.customers?.name || o.customer_id || "—",
+      Phone:         o.customers?.phone || "—",
+      Service:       o.service_type || o.event_type || "—",
+      Token:         o.token_number || "—",
+      Party_Size:    o.party_size || "—",
+      Amount:        o.total_amount != null ? `₹${o.total_amount}` : "—",
+      Status:        o.status || "—",
+    }));
+    exportToCSV(rows, `whatsapp-orders-${rangeLabel.replace(/[^a-z0-9]/gi, "-")}.csv`);
+  };
+
+  const statusColor = (s) => {
+    if (!s) return "#888";
+    if (["completed","confirmed","paid"].includes(s)) return "#3B6D11";
+    if (["cancelled","failed"].includes(s)) return "#A32D2D";
+    if (["pending","awaiting"].includes(s)) return "#BA7517";
+    return "#555";
+  };
+
+  return (
+    <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "20px 24px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+        <div>
+          <span style={{ fontSize: 14, fontWeight: 500, color: "#111" }}>WhatsApp orders</span>
+          {filtered != null && (
+            <span style={{ fontSize: 11, color: "#aaa", marginLeft: 8 }}>{filtered.length} total · {rangeLabel}</span>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search name, phone, token..."
+            style={{ fontSize: 12, padding: "5px 10px", borderRadius: 8, border: "0.5px solid #E0E0DC", outline: "none", width: 200 }}
+          />
+          <button
+            onClick={handleExport}
+            disabled={!filtered?.length}
+            style={{ fontSize: 12, padding: "5px 12px", borderRadius: 8, border: "0.5px solid #E0E0DC", background: filtered?.length ? "#F7F7F5" : "#fafafa", color: filtered?.length ? "#111" : "#aaa", cursor: filtered?.length ? "pointer" : "default" }}
+          >
+            ⬇ Export CSV
+          </button>
+        </div>
+      </div>
+
+      {orders === null && (
+        <div style={{ textAlign: "center", padding: "24px 0", fontSize: 13, color: "#aaa" }}>Loading...</div>
+      )}
+      {orders !== null && filtered?.length === 0 && (
+        <div style={{ textAlign: "center", padding: "24px 0", fontSize: 13, color: "#aaa" }}>No orders in this period</div>
+      )}
+      {filtered?.length > 0 && (
+        <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: 300, borderRadius: 8, border: "0.5px solid #F0F0EE" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead style={{ position: "sticky", top: 0, background: "#fff", zIndex: 1 }}>
+              <tr style={{ borderBottom: "0.5px solid #E8E8E5" }}>
+                {["Date & Time", "Name", "Phone", "Service", "Token", "Pax", "Amount", "Status"].map(h => (
+                  <th key={h} style={{ textAlign: "left", color: "#aaa", fontWeight: 400, fontSize: 11, padding: "8px 8px 8px 0", whiteSpace: "nowrap", background: "#fff" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((o, i) => (
+                <tr key={o.id || i} style={{ borderBottom: "0.5px solid #F7F7F5" }} onMouseEnter={e => e.currentTarget.style.background="#F7F7F5"} onMouseLeave={e => e.currentTarget.style.background=""}>
+                  <td style={{ padding: "5px 8px 5px 0", color: "#555", whiteSpace: "nowrap", fontSize: 11 }}>
+                    {o.created_at ? new Date(o.created_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" }) : "—"}
+                  </td>
+                  <td style={{ padding: "7px 8px 7px 0", fontWeight: 500, color: "#111", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {o.customers?.name || o.customer_id || "—"}
+                  </td>
+                  <td style={{ padding: "7px 8px 7px 0", color: "#555", whiteSpace: "nowrap" }}>
+                    {o.customers?.phone ? `+${o.customers.phone}` : "—"}
+                  </td>
+                  <td style={{ padding: "7px 8px 7px 0", color: "#555", whiteSpace: "nowrap", textTransform: "capitalize" }}>
+                    {(o.service_type || o.event_type || "—").replace(/_/g, " ")}
+                  </td>
+                  <td style={{ padding: "7px 8px 7px 0", color: "#555", fontFamily: "monospace" }}>
+                    {o.token_number || "—"}
+                  </td>
+                  <td style={{ padding: "7px 8px 7px 0", color: "#555", textAlign: "center" }}>
+                    {o.party_size || "—"}
+                  </td>
+                  <td style={{ padding: "7px 8px 7px 0", fontWeight: 500, color: "#111", whiteSpace: "nowrap" }}>
+                    {o.total_amount != null ? `₹${Number(o.total_amount).toLocaleString("en-IN")}` : "—"}
+                  </td>
+                  <td style={{ padding: "7px 8px 7px 0" }}>
+                    <span style={{ fontSize: 11, fontWeight: 500, color: statusColor(o.status), background: statusColor(o.status) + "18", padding: "2px 7px", borderRadius: 5, textTransform: "capitalize" }}>
+                      {o.status || "—"}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function OwnerDashboard({ restaurantId, restaurantName, onLogout, apiClient: apiClientProp }) {
+  // Build apiClient from whatever source is available:
+  // 1. Prop passed from App.jsx (most reliable)
+  // 2. AuthContext (if it exports apiClient)
+  // 3. Self-constructed axios-like client from localStorage token
   const { apiClient: apiClientCtx } = useAuth();
-  const apiClient = apiClientCtx || apiClientProp;
+
+  const apiClient = React.useMemo(() => {
+    // Use prop or context if available
+    if (apiClientProp) return apiClientProp;
+    if (apiClientCtx)  return apiClientCtx;
+
+    // Fallback: build a minimal fetch-based client from localStorage token
+    const userData  = JSON.parse(localStorage.getItem('userData') || '{}');
+    const token     = userData.token || userData.access_token || userData.session?.access_token;
+    const API_BASE  = import.meta.env.VITE_API_URL || 'https://autom8-backend-production.up.railway.app';
+
+    if (!token) return null;
+
+    // Return an axios-compatible object with .get() method
+    return {
+      get: async (path, opts = {}) => {
+        const url    = new URL(API_BASE + path);
+        if (opts.params) Object.entries(opts.params).forEach(([k, v]) => url.searchParams.set(k, v));
+        const res = await fetch(url.toString(), {
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: res.statusText }));
+          const e   = new Error(err.error || res.statusText);
+          e.response = { status: res.status, data: err };
+          throw e;
+        }
+        const data = await res.json();
+        return { data };
+      },
+    };
+  }, [apiClientProp, apiClientCtx]);
   const [preset,      setPreset]      = useState("today");
   const [customStart, setCustomStart] = useState(null);
   const [customEnd,   setCustomEnd]   = useState(null);
   const [showCal,     setShowCal]     = useState(false);
 
+  // Compute stable ISO strings — only recomputes when preset/custom dates change
   const { startISO, endISO } = useMemo(() => {
-    if (customStart && customEnd) return { startISO: customStart.toISOString(), endISO: customEnd.toISOString() };
+    if (customStart && customEnd) {
+      return { startISO: customStart.toISOString(), endISO: customEnd.toISOString() };
+    }
     return getRangeISO(preset);
   }, [preset, customStart, customEnd]);
 
-  const kpi                      = useKpiData(restaurantId, startISO, endISO);
-  const chartData                = useChartData(restaurantId, startISO, endISO, preset);
-  const menuItems                = useMenuItems(restaurantId, startISO, endISO);
-  const tables                   = useTables(restaurantId);
-  const { stats: kotStats,    error: kotError    } = useKotStats(restaurantId);
-  const { stats: cancelStats, error: cancelError } = useCancelStats(apiClient, restaurantId, startISO, endISO);
-  const wabaInfo                 = useWABAInfo(apiClient);
-  const waOrders                 = useWAOrders(apiClient, startISO, endISO);
+  const kpi         = useKpiData(restaurantId, startISO, endISO);
+  const chartData   = useChartData(restaurantId, startISO, endISO, preset);
+  const menuItems   = useMenuItems(restaurantId, startISO, endISO);
+  const tables      = useTables(restaurantId);
+  const kotStats    = useKotStats(restaurantId);
+  const cancelStats = useCancelStats(apiClient, restaurantId, startISO, endISO);
+  const wabaInfo    = useWABAInfo(apiClient);
+  const waOrders    = useWAOrders(apiClient, startISO, endISO);
 
-  const rangeLabel = (customStart && customEnd)
-    ? `Custom · ${fmtDate(customStart)} – ${fmtDate(customEnd)}`
-    : { today: "Today", yesterday: "Yesterday", "7d": "Last 7 days", "30d": "Last 30 days" }[preset];
+  const rangeLabel = (customStart && customEnd) ? `Custom · ${fmtDate(customStart)} – ${fmtDate(customEnd)}` : { today: "Today", yesterday: "Yesterday", "7d": "Last 7 days", "30d": "Last 30 days" }[preset];
 
   const row1 = [
-    { icon: "₹",  label: "Total revenue",  value: kpi ? fmtINR(kpi.totalRevenue) : "—", sub: "selected period" },
-    { icon: "🛒", label: "Orders",          value: kpi?.totalOrders ?? "—",               sub: "selected period" },
-    { icon: "🧾", label: "Avg order value", value: kpi ? `₹${kpi.aov}` : "—",             sub: "selected period", tooltip: "Total revenue ÷ orders. Excludes cancelled orders." },
-    { icon: "👥", label: "Total covers",    value: kpi?.totalCovers ?? "—",               neutral: true, sub: "selected period", tooltip: "Total completed orders. Each order = 1 cover." },
+    { icon: "₹",  label: "Total revenue",   value: kpi ? fmtINR(kpi.totalRevenue) : "—", badge: null, sub: "selected period" },
+    { icon: "🛒", label: "Orders",           value: kpi?.totalOrders ?? "—",               badge: null, sub: "selected period" },
+    { icon: "🧾", label: "Avg order value",  value: kpi ? `₹${kpi.aov}` : "—",             badge: null, sub: "selected period", tooltip: "Total revenue ÷ orders. Excludes cancelled orders." },
+    { icon: "👥", label: "Total covers",     value: kpi?.totalCovers ?? "—",                neutral: true, sub: "selected period", tooltip: "Total orders placed. Each order = 1 cover (one dining transaction)." },
   ];
   const row2 = [
-    { icon: "🔄", label: "Table turns",     value: kpi && tables?.length ? (kpi.totalOrders / tables.length).toFixed(1) : "—", sub: "per table, period", tooltip: "Total orders ÷ tables." },
-    { icon: "⏱",  label: "Avg dining time", value: kpi?.avgDining ? `${kpi.avgDining} min` : "—", sub: "Benchmark: 90 min", tooltip: "Avg mins from walk-in to table completion." },
-    { icon: "🎟",  label: "Tokens issued",   value: kpi?.tokensIssued ?? "—", sub: "selected period", tooltip: "Walk-in customers who received a queue token." },
-    { icon: "⏳", label: "Avg wait time",   value: kpi?.avgWait ? `${kpi.avgWait} min` : "—", sub: "selected period", tooltip: "Avg mins from check-in to table assignment." },
+    { icon: "🔄", label: "Table turns",     value: kpi && tables?.length ? (kpi.totalOrders / tables.length).toFixed(1) : "—",
+      sub: "selected period", tooltip: "Total orders ÷ tables. Shows how efficiently tables are reused. Higher = better." },
+    { icon: "⏱",  label: "Avg dining time", value: kpi?.avgDining ? `${kpi.avgDining} min` : "—",
+      sub: "Benchmark: 90 min", tooltip: "Avg mins from walk-in check-in to table completion. Benchmark: 90 min." },
+    { icon: "🎟",  label: "Tokens issued",   value: kpi?.tokensIssued ?? "—",
+      sub: "selected period", tooltip: "Walk-in customers who received a queue token via bot or QR." },
+    { icon: "⏳", label: "Avg wait time",   value: kpi?.avgWait ? `${kpi.avgWait} min` : "—",
+      sub: "selected period", tooltip: "Avg mins from check-in to table assignment." },
   ];
 
   const btnStyle = (active) => ({
-    fontSize: 12, padding: "4px 10px", borderRadius: 7, border: "0.5px solid", cursor: "pointer",
-    background:   active ? C.cardBg      : "transparent",
-    color:        active ? C.text        : C.textMuted,
-    borderColor:  active ? C.borderStrong : "transparent",
+    fontSize: 12, padding: "4px 10px", borderRadius: 8, border: "0.5px solid", cursor: "pointer",
+    background:  active ? "#F0F0EE" : "transparent",
+    color:       active ? "#111"    : "#888",
+    borderColor: active ? "#C8C8C4" : "#E0E0DC",
   });
 
   return (
-    <div style={{ minHeight: "100vh", background: C.pageBg, padding: "24px" }}>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    <div style={{ minHeight: "100vh", background: "#F7F7F5", padding: "24px" }}>
       <div style={{ maxWidth: 1100, margin: "0 auto" }}>
 
         {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
           <div>
-            <h1 style={{ fontSize: 18, fontWeight: 500, color: C.text, margin: 0 }}>Owner dashboard</h1>
-            <p style={{ fontSize: 13, color: C.textMuted, margin: "2px 0 0" }}>{restaurantName} · {new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</p>
+            <h1 style={{ fontSize: 18, fontWeight: 500, color: "#111", margin: 0 }}>Owner dashboard</h1>
+            <p style={{ fontSize: 13, color: "#888", margin: "2px 0 0" }}>{restaurantName} · {new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</p>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <div style={{ display: "flex", gap: 3, background: C.surfaceBg, borderRadius: 9, padding: 3 }}>
+            <div style={{ display: "flex", gap: 4 }}>
               {PRESETS.map(p => (
                 <button key={p.key} style={btnStyle(preset === p.key && !customStart)} onClick={() => { setPreset(p.key); setCustomStart(null); setCustomEnd(null); setShowCal(false); }}>
                   {p.label}
                 </button>
               ))}
             </div>
-            <div style={{ width: 1, height: 18, background: C.border }} />
+            <div style={{ width: 1, height: 18, background: "#E0E0DC" }} />
             <button style={{ ...btnStyle(!!customStart), display: "flex", alignItems: "center", gap: 5 }} onClick={() => setShowCal(v => !v)}>
               📅 {customStart ? `${fmtDate(customStart)} – ${fmtDate(customEnd)}` : "Custom"}
             </button>
-            <div style={{ width: 1, height: 18, background: C.border }} />
-            <button onClick={onLogout} style={{ fontSize: 12, padding: "4px 12px", borderRadius: 8, border: `0.5px solid ${C.dangerBorder}`, background: C.dangerLight, color: C.danger, cursor: "pointer" }}>Logout</button>
+            <div style={{ width: 1, height: 18, background: "#E0E0DC" }} />
+            <button onClick={onLogout} style={{ fontSize: 12, padding: "4px 12px", borderRadius: 8, border: "0.5px solid #FCEBEB", background: "#FFF5F5", color: "#A32D2D", cursor: "pointer" }}>
+              Logout
+            </button>
           </div>
         </div>
 
         {/* Custom date picker */}
         {showCal && (
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, padding: 12, background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 10, flexWrap: "wrap" }}>
-            <label style={{ fontSize: 12, color: C.textMuted }}>From</label>
-            <input type="date" style={{ border: `0.5px solid ${C.border}`, borderRadius: 8, padding: "4px 8px", fontSize: 12, color: C.text }} onChange={e => setCustomStart(new Date(e.target.value))} />
-            <label style={{ fontSize: 12, color: C.textMuted }}>To</label>
-            <input type="date" style={{ border: `0.5px solid ${C.border}`, borderRadius: 8, padding: "4px 8px", fontSize: 12, color: C.text }} onChange={e => setCustomEnd(new Date(e.target.value + "T23:59:59"))} />
-            <button onClick={() => { if (customStart && customEnd) { setPreset(null); setShowCal(false); } }}
-              style={{ fontSize: 12, padding: "4px 14px", borderRadius: 8, border: "none", background: C.primary, color: "#fff", cursor: "pointer" }}>Apply</button>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, padding: 12, background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, flexWrap: "wrap" }}>
+            <label style={{ fontSize: 12, color: "#888" }}>From</label>
+            <input type="date" style={{ border: "0.5px solid #E0E0DC", borderRadius: 8, padding: "4px 8px", fontSize: 12 }} onChange={e => setCustomStart(new Date(e.target.value))} />
+            <label style={{ fontSize: 12, color: "#888" }}>To</label>
+            <input type="date" style={{ border: "0.5px solid #E0E0DC", borderRadius: 8, padding: "4px 8px", fontSize: 12 }} onChange={e => setCustomEnd(new Date(e.target.value + "T23:59:59"))} />
+            <button onClick={() => { if (customStart && customEnd) { setPreset(null); setShowCal(false); } }} style={{ fontSize: 12, padding: "4px 14px", borderRadius: 8, border: "none", background: "#378ADD", color: "#fff", cursor: "pointer" }}>Apply</button>
           </div>
         )}
 
-        <p style={{ fontSize: 11, color: C.textMuted, marginBottom: 14 }}>Showing: {rangeLabel}</p>
+        <p style={{ fontSize: 11, color: "#aaa", marginBottom: 12 }}>Showing: {rangeLabel}</p>
 
-        {/* KPI */}
+        {/* KPI rows */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 10, marginBottom: 10 }}>
           {row1.map((m, i) => <MetricCard key={i} {...m} />)}
         </div>
@@ -827,13 +953,25 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
           {row2.map((m, i) => <MetricCard key={i} {...m} />)}
         </div>
 
-        {/* Chart */}
-        {chartData && chartData.labels?.length > 0 && <RevenueChart labels={chartData.labels} revenue={chartData.revenue} orders={chartData.orders} covers={chartData.covers} preset={preset} />}
+        {/* Revenue + heatmap — only render when data is ready */}
+        {chartData && chartData.labels?.length > 0 && (
+          <RevenueChart
+            labels={chartData.labels}
+            revenue={chartData.revenue}
+            orders={chartData.orders}
+            covers={chartData.covers}
+            preset={preset}
+          />
+        )}
         {chartData && chartData.labels?.length === 0 && (
-          <div style={{ ...CARD, marginBottom: 12, textAlign: "center", padding: "32px 20px", fontSize: 13, color: C.textMuted }}>No orders in this period</div>
+          <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "32px 20px", marginBottom: 12, textAlign: "center", fontSize: 13, color: "#aaa" }}>
+            No orders in this period
+          </div>
         )}
         {!chartData && (
-          <div style={{ ...CARD, marginBottom: 12, textAlign: "center", padding: "32px 20px", fontSize: 13, color: C.textMuted }}>Loading chart…</div>
+          <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "32px 20px", marginBottom: 12, textAlign: "center", fontSize: 13, color: "#aaa" }}>
+            Loading chart...
+          </div>
         )}
 
         {/* Menu + Tables */}
@@ -842,7 +980,7 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
           <TableOccupancy tables={tables} />
         </div>
 
-        {/* WABA + WA Orders */}
+        {/* WABA info + WhatsApp orders */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12, marginBottom: 12 }}>
           <WABAPanel info={wabaInfo} />
           <WAOrdersTable orders={waOrders} rangeLabel={rangeLabel} />
@@ -850,8 +988,8 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
 
         {/* KOT + Cancellations */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12 }}>
-          <KotStatus    stats={kotStats}    error={kotError}    />
-          <CancellationVoids stats={cancelStats} error={cancelError} />
+          <KotStatus stats={kotStats} />
+          <CancellationVoids stats={cancelStats} />
         </div>
 
       </div>
