@@ -1,14 +1,8 @@
 // vite.register.config.js
-// Place at the ROOT of autom8-frontend/ (same level as vite.config.js)
+// Place at repo root alongside vite.config.js
 //
-// Build:   npm run build:register
-// Output:  dist-register/register.bundle.js
-//
-// After building, upload dist-register/register.bundle.js to:
-//   wp-content/plugins/munafe-register-loader/assets/register.bundle.js
-//
-// Create a .env file in the repo root (if not already present) with:
-//   VITE_API_URL=https://autom8-backend-production.up.railway.app
+// Build:  npm run build:register
+// Output: dist-register/register.bundle.js  → upload to WP plugin assets/
 
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
@@ -21,6 +15,10 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
 
     define: {
+      // Fix "process is not defined" error in browser
+      'process.env.NODE_ENV': '"production"',
+      'process.env':          '{}',
+      // Bake API URL into the bundle at build time
       'import.meta.env.VITE_API_URL': JSON.stringify(
         env.VITE_API_URL || 'https://autom8-backend-production.up.railway.app'
       ),
