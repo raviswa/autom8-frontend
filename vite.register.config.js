@@ -15,10 +15,6 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
 
     define: {
-      // Fix "process is not defined" error in browser
-      'process.env.NODE_ENV': '"production"',
-      'process.env':          '{}',
-      // Bake API URL into the bundle at build time
       'import.meta.env.VITE_API_URL': JSON.stringify(
         env.VITE_API_URL || 'https://autom8-backend-production.up.railway.app'
       ),
@@ -38,6 +34,7 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         output: {
           inlineDynamicImports: true,
+          banner: 'var process={env:{NODE_ENV:"production"}};',
         },
       },
 
