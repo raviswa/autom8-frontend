@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "lint": "eslint src",
     "start": "serve -s dist -l 3000"
-    
+    "build:register": "vite build --config vite.register.config.js"   
   },
   "dependencies": {
     "chart.js": "^4.4.1",
