@@ -9,7 +9,7 @@ const h = React.createElement; // keeps all existing h() calls working unchanged
 const ROOT_ID    = "munafe-registration-root";
 const API_BASE   = (() => {
   const el = document.getElementById(ROOT_ID);
-  return (el && el.dataset.api) || "https://api.munafe.com";
+  return (el && el.dataset.api) || "https://autom8-backend-production.up.railway.app";
 })();
 
 // ── Static data ───────────────────────────────────────────────────────────────
@@ -130,7 +130,7 @@ const CSS = `
     padding: 40px 16px 80px;
   }
 
-  .mn-wrap { max-width: 620px; margin: 0 auto; }
+  .mn-wrap { max-width: 100%; margin: 0 auto; padding: 0 8px; box-sizing: border-box; }
 
   /* Header */
   .mn-header { text-align: center; margin-bottom: 40px; }
@@ -417,7 +417,7 @@ function Step1({ f, set, errors }) {
       // Slug
       h(Field, { label: "Subdomain / Slug", hint: "Your unique Munafe URL handle", error: e("slug") ? "required" : "", full: true },
         h("div", { className: `mn-slug-row${e("slug") ? " err" : ""}` },
-          h("span", { className: "mn-slug-pre" }, "munafe.com/"),
+          h("span", { className: "mn-slug-pre" }, "autom8.works/"),
           h("input", {
             className: "mn-slug-inp",
             value: f.slug,
@@ -521,18 +521,29 @@ function Step2({ f, set }) {
 function Step3({ f, set, errors }) {
   const e = (k) => errors.includes(k);
   return h(Fragment, null,
+    h("div", { style: { marginBottom: 16, padding: "10px 14px", background: "#EAF3DE", borderRadius: 8, fontSize: 12, color: "#3B6D11", lineHeight: 1.7 } },
+      "📖 All values below come from ",
+      h("a", { href: "https://developers.facebook.com/apps/", target: "_blank", rel: "noreferrer", style: { color: "#1D9E75", fontWeight: 600 } }, "Meta for Developers"),
+      " and ",
+      h("a", { href: "https://business.facebook.com/", target: "_blank", rel: "noreferrer", style: { color: "#1D9E75", fontWeight: 600 } }, "Meta Business Manager"),
+      ". Set up once, never touched again."
+    ),
     h("div", { className: "mn-grid" },
-      h(Field, { label: "WhatsApp Number", hint: "Bot sends/receives from this number", error: e("whatsapp_number") ? "required" : "" },
-        h(Input, { value: f.whatsapp_number, onChange: (v) => set("whatsapp_number", v), placeholder: "919444000000", hasError: e("whatsapp_number") })
+      h(Field, { label: "WhatsApp Number *", hint: "Bot sends/receives from this number", error: e("whatsapp_number") ? "required" : "" },
+        h(Input, { value: f.whatsapp_number, onChange: (v) => set("whatsapp_number", v), placeholder: "919444000000", hasError: e("whatsapp_number") }),
+        h("div", { style: { fontSize: 11, color: "#666", marginTop: 4 } }, "Country code + number, no + or spaces. Find in: Meta Business Manager → Accounts → WhatsApp Accounts.")
       ),
       h(Field, { label: "WABA ID", hint: "WhatsApp Business Account ID" },
-        h(Input, { value: f.waba_id, onChange: (v) => set("waba_id", v), placeholder: "1234567890" })
+        h(Input, { value: f.waba_id, onChange: (v) => set("waba_id", v), placeholder: "1234567890" }),
+        h("div", { style: { fontSize: 11, color: "#666", marginTop: 4 } }, "Meta Business Manager → Accounts → WhatsApp Accounts → click your account → ID shown at top.")
       ),
-      h(Field, { label: "Phone Number ID", error: e("phone_number_id") ? "required" : "", hint: "Meta App → WhatsApp → API Setup" },
-        h(Input, { value: f.phone_number_id, onChange: (v) => set("phone_number_id", v), placeholder: "1234567890", hasError: e("phone_number_id") })
+      h(Field, { label: "Phone Number ID *", error: e("phone_number_id") ? "required" : "", hint: "Different from your phone number" },
+        h(Input, { value: f.phone_number_id, onChange: (v) => set("phone_number_id", v), placeholder: "1234567890", hasError: e("phone_number_id") }),
+        h("div", { style: { fontSize: 11, color: "#666", marginTop: 4 } }, "developers.facebook.com/apps → Your App → WhatsApp → API Setup → Phone Number ID (numeric string).")
       ),
-      h(Field, { label: "Meta System Access Token", error: e("meta_access_token") ? "required" : "", hint: "Permanent token from Meta Business Manager" },
-        h(Input, { value: f.meta_access_token, onChange: (v) => set("meta_access_token", v), placeholder: "EAAxxxxxx…", hasError: e("meta_access_token") })
+      h(Field, { label: "Meta System Access Token *", error: e("meta_access_token") ? "required" : "", hint: "Permanent token — never expires" },
+        h(Input, { value: f.meta_access_token, onChange: (v) => set("meta_access_token", v), placeholder: "EAAxxxxxx…", hasError: e("meta_access_token") }),
+        h("div", { style: { fontSize: 11, color: "#666", marginTop: 4 } }, "Meta Business Manager → Settings → System Users → Add System User (Admin) → Generate Token → tick whatsapp_business_messaging + whatsapp_business_management → Generate. Copy immediately.")
       ),
       h(Field, { label: "Timezone" },
         h(SelectField, { value: f.timezone, onChange: (v) => set("timezone", v), options: TIMEZONES })
@@ -597,7 +608,33 @@ function Step4({ f, set }) {
     setParseStatus("");
   };
 
+  const downloadTemplate = () => {
+    const rows = [
+      ["item_name","category","price","description","is_veg","sku","slot"],
+      ["Masala Dosa","Breakfast","80","Crispy dosa with potato filling","TRUE","SKU001","all_day"],
+      ["Chicken Biryani","Main Course","220","Fragrant rice with spiced chicken","FALSE","SKU002","lunch"],
+      ["Filter Coffee","Beverages","30","Traditional South Indian filter coffee","TRUE","SKU003","all_day"],
+    ];
+    const csv = rows.map(r => r.map(v => `"${v}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "munafe_menu_template.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
   return h(Fragment, null,
+    h("div", { style: { marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "#F0F6FF", borderRadius: 8, border: "1px solid #C5DDF8" } },
+      h("div", null,
+        h("div", { style: { fontSize: 13, fontWeight: 600, color: "#185FA5" } }, "📥 Download menu template"),
+        h("div", { style: { fontSize: 11, color: "#555", marginTop: 2 } }, "Fill in your items and upload below. Columns: item_name, category, price, description, is_veg, sku, slot")
+      ),
+      h("button", {
+        onClick: downloadTemplate,
+        style: { fontSize: 12, padding: "6px 14px", borderRadius: 8, border: "1px solid #378ADD", background: "#378ADD", color: "#fff", cursor: "pointer", whiteSpace: "nowrap", marginLeft: 12 }
+      }, "⬇ Get template")
+    ),
     h("div", {
       className: `mn-dropzone${dragOver ? " over" : ""}`,
       onDragOver: (e) => { e.preventDefault(); setDragOver(true); },
@@ -637,7 +674,7 @@ function Step5({ form, onRedirect }) {
 
   const summaryRows = [
     ["Business name",   form.display_name || form.name],
-    ["Subdomain",       form.slug ? `munafe.com/${form.slug}` : "—"],
+    ["Subdomain",       form.slug ? `autom8.works/${form.slug}` : "—"],
     ["Location",        [form.city, country?.label].filter(Boolean).join(", ")],
     ["Cuisines",        (form.cuisines || []).join(", ") || "—"],
     ["Kitchen flow",    form.kitchen_workflow],
