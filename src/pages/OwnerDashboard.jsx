@@ -4,9 +4,6 @@ import React, { useEffect, useState, useCallback, useRef, useMemo } from "react"
 import { supabase, useAuth } from "../contexts/AuthContext";
 import { Link } from 'react-router-dom';
 
-// In your owner dashboard nav/header:
-<Link to="/settings">⚙️ Settings</Link>
-
 // ── Export to Excel (no npm install — uses plain CSV download) ────────────────
 function exportToCSV(rows, filename) {
   if (!rows?.length) return;
@@ -934,7 +931,19 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
               📅 {customStart ? `${fmtDate(customStart)} – ${fmtDate(customEnd)}` : "Custom"}
             </button>
             <div style={{ width: 1, height: 18, background: "#E0E0DC" }} />
+            <Link
+              to="/settings"
+              style={{ fontSize: 12, padding: "4px 12px", borderRadius: 8,
+                       border: "0.5px solid #E0E0DC", background: "#F7F7F5",
+                       color: "#555", cursor: "pointer", textDecoration: "none",
+                       display: "inline-flex", alignItems: "center", gap: 4 }}
+            >
+              ⚙️ Settings
+            </Link>
+            <div style={{ width: 1, height: 18, background: "#E0E0DC" }} />
             <button onClick={onLogout} style={{ fontSize: 12, padding: "4px 12px", borderRadius: 8, border: "0.5px solid #FCEBEB", background: "#FFF5F5", color: "#A32D2D", cursor: "pointer" }}>
+              Logout
+            </button>
               Logout
             </button>
           </div>
