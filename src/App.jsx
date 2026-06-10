@@ -18,6 +18,7 @@ import NotFound           from './pages/NotFound';
 import MenuPage           from './pages/MenuPage';
 import WalkInForm         from './pages/WalkInForm';
 import FeatureWall        from './pages/FeatureWall';
+import SettingsPanel from './components/SettingsPanel';
 
 // ── Protected Route ───────────────────────────────────────────────────────────
 function ProtectedRoute({ children, allowedRoles }) {
@@ -164,6 +165,17 @@ function AppRoutes() {
   );
 }
 
+
+
+// Inside your router:
+<Route
+  path="/settings"
+  element={
+    <ProtectedRoute allowedRoles={['owner']}>
+      <SettingsPanel />
+    </ProtectedRoute>
+  }
+/>
 // ── App root ──────────────────────────────────────────────────────────────────
 export default function App() {
   return (
