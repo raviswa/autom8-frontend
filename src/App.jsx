@@ -18,7 +18,7 @@ import NotFound           from './pages/NotFound';
 import MenuPage           from './pages/MenuPage';
 import WalkInForm         from './pages/WalkInForm';
 import FeatureWall        from './pages/FeatureWall';
-import SettingsPanel from './components/SettingsPanel';
+import SettingsPanel      from './components/SettingsPanel';
 
 // ── Protected Route ───────────────────────────────────────────────────────────
 function ProtectedRoute({ children, allowedRoles }) {
@@ -32,9 +32,6 @@ function ProtectedRoute({ children, allowedRoles }) {
 // ── Feature-gated route ───────────────────────────────────────────────────────
 function FeatureRoute({ feature, children }) {
   const { hasFeature, loading } = useSubscription();
-  // FIX: never show FeatureWall while the subscription fetch is still in flight.
-  // Without this guard, features=[] → hasFeature=false → FeatureWall flashes
-  // for ~200ms before the response arrives and the real page renders.
   if (loading) return <Spinner />;
   if (!hasFeature(feature)) return <FeatureWall feature={feature} />;
   return children;
@@ -52,18 +49,38 @@ function Spinner() {
   );
 }
 
+// ── Simple toast (used by SettingsPanel) ──────────────────────────────────────
+function useToast() {
+  const [toast, setToast] = React.useState(null);
+  const showToast = React.useCallback((msg, type = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
+  }, []);
+  const ToastUI = toast ? (
+    <div style={{
+      position: 'fixed', bottom: 24, right: 24, zIndex: 9999,
+      padding: '10px 18px', borderRadius: 10, fontSize: 13, fontWeight: 500,
+      background: toast.type === 'error' ? '#A32D2D' : '#1D9E75',
+      color: '#fff', boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+      animation: 'fadeIn 0.2s ease',
+    }}>
+      {toast.msg}
+    </div>
+  ) : null;
+  return { showToast, ToastUI };
+}
+
 // ── Routes ────────────────────────────────────────────────────────────────────
 function AppRoutes() {
   const { user, loading, logout, apiClient } = useAuth();
-  // FIX: also pull loading from subscription so inline hasAnyOf checks
-  // never run against an empty features array.
   const { hasFeature, hasAnyOf, loading: subLoading } = useSubscription();
+  const { showToast, ToastUI } = useToast();
+
   if (loading || subLoading) return <Spinner />;
 
   const restaurantId   = user?.restaurant_id ?? user?.restaurantId ?? '46fb9b9e-431a-43c9-9edb-d316b0fef216';
   const restaurantName = user?.restaurant_name ?? user?.restaurantName ?? 'Hotel Munafe';
 
-  // Default redirect target per role
   const defaultRoute = () => {
     if (!user) return '/login';
     const roleMap = {
@@ -76,116 +93,119 @@ function AppRoutes() {
   };
 
   return (
-    <Routes>
+    <>
+      {ToastUI}
+      <Routes>
 
-      {/* ── Public ── */}
-      <Route path="/login" element={<LoginPage />} />
+        {/* ── Public ── */}
+        <Route path="/login" element={<LoginPage />} />
 
-      {/* Walk-in form */}
-      <Route
-        path="/checkin"
-        element={
-          <FeatureRoute feature={FEATURES.TOKEN_MANAGEMENT}>
-            <WalkInForm />
-          </FeatureRoute>
-        }
-      />
+        {/* Walk-in form */}
+        <Route
+          path="/checkin"
+          element={
+            <FeatureRoute feature={FEATURES.TOKEN_MANAGEMENT}>
+              <WalkInForm />
+            </FeatureRoute>
+          }
+        />
 
-      {/* ── Owner dashboard ── */}
-      <Route
-        path="/dashboard/owner"
-        element={
-          <ProtectedRoute allowedRoles={['owner']}>
-            <OwnerDashboard
-              restaurantId={restaurantId}
-              restaurantName={restaurantName}
-              onLogout={logout}
-              apiClient={apiClient}
-            />
-          </ProtectedRoute>
-        }
-      />
+        {/* ── Owner dashboard ── */}
+        <Route
+          path="/dashboard/owner"
+          element={
+            <ProtectedRoute allowedRoles={['owner']}>
+              <OwnerDashboard
+                restaurantId={restaurantId}
+                restaurantName={restaurantName}
+                onLogout={logout}
+                apiClient={apiClient}
+              />
+            </ProtectedRoute>
+          }
+        />
 
-      {/* ── Marketing / CRM dashboard ── */}
-      <Route
-        path="/dashboard/marketing"
-        element={
-          <ProtectedRoute allowedRoles={['marketing', 'owner']}>
-            <MarketingDashboard
-              restaurantId={restaurantId}
-              restaurantName={restaurantName}
-              onLogout={logout}
-              apiClient={apiClient}
-            />
-          </ProtectedRoute>
-        }
-      />
+        {/* ── Settings ── (owner only) ── */}
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute allowedRoles={['owner']}>
+              <SettingsPanel apiClient={apiClient} showToast={showToast} />
+            </ProtectedRoute>
+          }
+        />
 
-      {/* ── Manager portal ── */}
-      <Route
-        path="/dashboard/manager"
-        element={
-          <ProtectedRoute allowedRoles={['manager', 'owner']}>
-            <ManagerPortal />
-          </ProtectedRoute>
-        }
-      />
+        {/* ── Marketing / CRM dashboard ── */}
+        <Route
+          path="/dashboard/marketing"
+          element={
+            <ProtectedRoute allowedRoles={['marketing', 'owner']}>
+              <MarketingDashboard
+                restaurantId={restaurantId}
+                restaurantName={restaurantName}
+                onLogout={logout}
+                apiClient={apiClient}
+              />
+            </ProtectedRoute>
+          }
+        />
 
-      {/* ── KDS ── */}
-      <Route
-        path="/dashboard/kitchen"
-        element={
-          <ProtectedRoute allowedRoles={['kitchen_staff', 'owner', 'manager']}>
-            {hasAnyOf(FEATURES.DINE_IN, FEATURES.TAKEAWAY, FEATURES.DELIVERY)
-              ? <KDSScreen />
-              : <FeatureWall feature={FEATURES.DINE_IN} />
-            }
-          </ProtectedRoute>
-        }
-      />
+        {/* ── Manager portal ── */}
+        <Route
+          path="/dashboard/manager"
+          element={
+            <ProtectedRoute allowedRoles={['manager', 'owner']}>
+              <ManagerPortal />
+            </ProtectedRoute>
+          }
+        />
 
-      {/* ── Menu management ── */}
-      <Route
-        path="/dashboard/menu"
-        element={
-          <ProtectedRoute allowedRoles={['owner', 'manager']}>
-            {hasAnyOf(FEATURES.DINE_IN, FEATURES.TAKEAWAY, FEATURES.DELIVERY)
-              ? <MenuPage />
-              : <FeatureWall feature={FEATURES.DINE_IN} />
-            }
-          </ProtectedRoute>
-        }
-      />
+        {/* ── KDS ── */}
+        <Route
+          path="/dashboard/kitchen"
+          element={
+            <ProtectedRoute allowedRoles={['kitchen_staff', 'owner', 'manager']}>
+              {hasAnyOf(FEATURES.DINE_IN, FEATURES.TAKEAWAY, FEATURES.DELIVERY)
+                ? <KDSScreen />
+                : <FeatureWall feature={FEATURES.DINE_IN} />
+              }
+            </ProtectedRoute>
+          }
+        />
 
-      {/* ── Default redirect ── */}
-      <Route path="/" element={<Navigate to={defaultRoute()} />} />
+        {/* ── Menu management ── */}
+        <Route
+          path="/dashboard/menu"
+          element={
+            <ProtectedRoute allowedRoles={['owner', 'manager']}>
+              {hasAnyOf(FEATURES.DINE_IN, FEATURES.TAKEAWAY, FEATURES.DELIVERY)
+                ? <MenuPage />
+                : <FeatureWall feature={FEATURES.DINE_IN} />
+              }
+            </ProtectedRoute>
+          }
+        />
 
-      <Route path="*" element={<NotFound />} />
-    </Routes>
+        {/* ── Default redirect ── */}
+        <Route path="/" element={<Navigate to={defaultRoute()} />} />
+        <Route path="*" element={<NotFound />} />
+
+      </Routes>
+    </>
   );
 }
 
-
-
-// Inside your router:
-<Route
-  path="/settings"
-  element={
-    <ProtectedRoute allowedRoles={['owner']}>
-      <SettingsPanel />
-    </ProtectedRoute>
-  }
-/>
 // ── App root ──────────────────────────────────────────────────────────────────
 export default function App() {
   return (
     <Router>
       <AuthProvider>
         <SubscriptionProvider>
-            <WebSocketProvider>
-              <KOTPrintTemplate ref={kotRef} />
-              <AppRoutes />
-            </WebSocketProvider>        </SubscriptionProvider>
+          <WebSocketProvider>
+            <KOTPrintTemplate ref={kotRef} />
+            <AppRoutes />
+          </WebSocketProvider>
+        </SubscriptionProvider>
       </AuthProvider>
     </Router>
   );
