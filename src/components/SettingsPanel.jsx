@@ -1,0 +1,1187 @@
+/**
+ * SettingsPanel.jsx — Owner settings for Munafe
+ *
+ * 5 tabs:
+ *   Tables      — add / edit / delete physical tables
+ *   Restaurant  — display name, address, contact, cuisine, hours
+ *   Services    — toggle which service types are active
+ *   Kitchen     — dining duration, payment mode, workflow
+ *   WhatsApp    — WA number, WABA ID, manager phone, access token
+ *
+ * Uses the same design tokens (C) as ManagerPortal.jsx.
+ * Drop into any route that is only reachable by role === 'owner'.
+ */
+
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useAuth } from '../contexts/AuthContext';
+
+// ─── Design tokens (matches ManagerPortal) ────────────────────────────────────
+const C = {
+  primary:       '#378ADD', primaryDark:  '#185FA5', primaryLight: '#E6F1FB', primaryBorder:'#B5D4F4',
+  success:       '#1D9E75', successLight: '#E1F5EE', successBorder:'#9FE1CB', successDark:  '#085041',
+  warning:       '#BA7517', warningLight: '#FAEEDA', warningBorder:'#FAC775', warningDark:  '#633806',
+  danger:        '#A32D2D', dangerLight:  '#FCEBEB', dangerBorder: '#F7C1C1', dangerDark:   '#791F1F',
+  pageBg:        '#F5F5F3', cardBg:       '#ffffff', surfaceBg:    '#F5F5F3',
+  border:        '#E8E8E5', borderStrong: '#D0D0CC',
+  text:          '#111111', textSub:      '#555555', textMuted:    '#999999',
+};
+
+const CARD = {
+  background: C.cardBg,
+  border: `0.5px solid ${C.border}`,
+  borderRadius: 12,
+  padding: '24px',
+};
+
+// ─── Service options ──────────────────────────────────────────────────────────
+const SERVICES = [
+  { id: 'dine_in',        label: 'Dine-In',          icon: '🪑', desc: 'Walk-in table service via WhatsApp' },
+  { id: 'takeaway',       label: 'Takeaway',          icon: '🛍️', desc: 'Counter pickup orders'              },
+  { id: 'delivery',       label: 'Door Delivery',     icon: '🛵', desc: 'Delivery to customer address'       },
+  { id: 'reserve_table',  label: 'Table Reservation', icon: '📅', desc: 'Advance booking with deposit'       },
+];
+
+const WORKFLOWS = [
+  { value: 'KOT_only',         label: 'Paper KOT only'    },
+  { value: 'KDS_only',         label: 'Digital KDS only'  },
+  { value: 'Both_KOT_and_KDS', label: 'KOT + KDS hybrid'  },
+];
+
+const SECTIONS = ['Main Hall', 'Terrace', 'Private Room', 'Counter', 'Outdoor'];
+
+// ─── Primitives ───────────────────────────────────────────────────────────────
+function Spinner({ size = 18 }) {
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: '50%',
+      border: `2px solid ${C.border}`, borderTop: `2px solid ${C.primary}`,
+      animation: 'spin .7s linear infinite', display: 'inline-block',
+    }} />
+  );
+}
+
+function Toast({ msg, type = 'success' }) {
+  if (!msg) return null;
+  const bg = type === 'error' ? '#7F1D1D' : '#1A1A18';
+  return (
+    <div style={{
+      position: 'fixed', bottom: 24, right: 24, zIndex: 100,
+      background: bg, color: '#fff', fontSize: 12, fontWeight: 500,
+      padding: '10px 16px', borderRadius: 10,
+      boxShadow: '0 4px 20px rgba(0,0,0,.25)',
+    }}>
+      {msg}
+    </div>
+  );
+}
+
+function Label({ children, required }) {
+  return (
+    <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5 }}>
+      {children}{required && <span style={{ color: C.danger, marginLeft: 2 }}>*</span>}
+    </label>
+  );
+}
+
+const inputStyle = {
+  width: '100%', fontSize: 13, padding: '8px 10px', borderRadius: 8,
+  border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.text,
+  outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit',
+};
+
+function Input({ value, onChange, placeholder, type = 'text', disabled }) {
+  return (
+    <input
+      type={type} value={value ?? ''} placeholder={placeholder}
+      disabled={disabled}
+      onChange={e => onChange(e.target.value)}
+      style={{ ...inputStyle, opacity: disabled ? 0.5 : 1 }}
+    />
+  );
+}
+
+function Select({ value, onChange, options, disabled }) {
+  return (
+    <select
+      value={value ?? ''} disabled={disabled}
+      onChange={e => onChange(e.target.value)}
+      style={{ ...inputStyle, cursor: disabled ? 'not-allowed' : 'pointer' }}
+    >
+      {options.map(o => (
+        <option key={o.value ?? o} value={o.value ?? o}>{o.label ?? o}</option>
+      ))}
+    </select>
+  );
+}
+
+function Btn({ children, onClick, variant = 'primary', disabled, style: s, loading }) {
+  const variants = {
+    primary:   { background: C.primary,      color: '#fff',        border: `0.5px solid ${C.primaryDark}`  },
+    secondary: { background: C.surfaceBg,    color: C.text,        border: `0.5px solid ${C.border}`       },
+    danger:    { background: C.dangerLight,  color: C.danger,      border: `0.5px solid ${C.dangerBorder}` },
+    ghost:     { background: 'transparent',  color: C.textMuted,   border: `0.5px solid ${C.border}`       },
+    success:   { background: C.successLight, color: C.successDark, border: `0.5px solid ${C.successBorder}`},
+  };
+  const v = variants[variant] ?? variants.primary;
+  return (
+    <button
+      onClick={onClick} disabled={disabled || loading}
+      style={{
+        fontSize: 12, padding: '7px 14px', borderRadius: 8, fontWeight: 500,
+        cursor: (disabled || loading) ? 'not-allowed' : 'pointer',
+        opacity: (disabled || loading) ? 0.55 : 1,
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        ...v, ...s,
+      }}
+    >
+      {loading && <Spinner size={12} />}
+      {children}
+    </button>
+  );
+}
+
+function SectionTitle({ children }) {
+  return (
+    <div style={{ fontSize: 11, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12, marginTop: 20, paddingTop: 16, borderTop: `0.5px solid ${C.border}` }}>
+      {children}
+    </div>
+  );
+}
+
+function SaveBar({ onSave, loading, saved }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, marginTop: 24, paddingTop: 16, borderTop: `0.5px solid ${C.border}` }}>
+      {saved && <span style={{ fontSize: 11, color: C.success }}>✓ Saved</span>}
+      <Btn onClick={onSave} loading={loading}>Save changes</Btn>
+    </div>
+  );
+}
+
+// ─── TABLE STATUS BADGE ───────────────────────────────────────────────────────
+function StatusBadge({ status }) {
+  const map = {
+    available: { bg: C.successLight, color: C.successDark, label: 'Available' },
+    occupied:  { bg: C.primaryLight, color: C.primaryDark, label: 'Occupied'  },
+    reserved:  { bg: C.warningLight, color: C.warningDark, label: 'Reserved'  },
+    dirty:     { bg: C.dangerLight,  color: C.dangerDark,  label: 'Cleaning'  },
+  };
+  const s = map[status] ?? map.available;
+  return (
+    <span style={{ fontSize: 10, fontWeight: 500, padding: '2px 8px', borderRadius: 20, background: s.bg, color: s.color }}>
+      {s.label}
+    </span>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// TAB 1 — TABLES
+// Full CRUD: add, edit inline, delete (blocked if occupied)
+// ═════════════════════════════════════════════════════════════════════════════
+function TabTables({ apiClient, showToast }) {
+  const [tables,    setTables]    = useState([]);
+  const [loading,   setLoading]   = useState(true);
+  const [editingId, setEditingId] = useState(null);
+  const [editBuf,   setEditBuf]   = useState({});
+  const [adding,    setAdding]    = useState(false);
+  const [newRow,    setNewRow]    = useState({ table_number: '', capacity: 4, section: '' });
+  const [saving,    setSaving]    = useState(false);
+  const [deleting,  setDeleting]  = useState(null);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await apiClient.get('/api/tables');
+      setTables((r.data.tables ?? r.data ?? []).sort((a, b) => a.table_number - b.table_number));
+    } catch { showToast('Failed to load tables', 'error'); }
+    finally { setLoading(false); }
+  }, [apiClient, showToast]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const startEdit = (t) => {
+    setEditingId(t.id);
+    setEditBuf({ table_number: t.table_number, capacity: t.capacity ?? 4, section: t.section ?? '' });
+  };
+  const cancelEdit = () => { setEditingId(null); setEditBuf({}); };
+
+  const saveEdit = async (id) => {
+    if (!editBuf.table_number) return showToast('Table number is required', 'error');
+    setSaving(id);
+    try {
+      await apiClient.put(`/api/tables/${id}`, {
+        table_number: parseInt(editBuf.table_number),
+        capacity:     parseInt(editBuf.capacity) || 4,
+        section:      editBuf.section || null,
+      });
+      showToast(`Table ${editBuf.table_number} updated`);
+      setEditingId(null);
+      await load();
+    } catch (e) { showToast(e.response?.data?.error ?? 'Update failed', 'error'); }
+    finally { setSaving(null); }
+  };
+
+  const deleteTable = async (t) => {
+    if (!window.confirm(`Delete Table ${t.table_number}? This cannot be undone.`)) return;
+    setDeleting(t.id);
+    try {
+      await apiClient.delete(`/api/tables/${t.id}`);
+      showToast(`Table ${t.table_number} deleted`);
+      await load();
+    } catch (e) { showToast(e.response?.data?.error ?? 'Delete failed', 'error'); }
+    finally { setDeleting(null); }
+  };
+
+  const addTable = async () => {
+    if (!newRow.table_number) return showToast('Table number is required', 'error');
+    setSaving('new');
+    try {
+      await apiClient.post('/api/tables', {
+        table_number: parseInt(newRow.table_number),
+        capacity:     parseInt(newRow.capacity) || 4,
+        section:      newRow.section || null,
+      });
+      showToast(`Table ${newRow.table_number} added`);
+      setAdding(false);
+      setNewRow({ table_number: '', capacity: 4, section: '' });
+      await load();
+    } catch (e) { showToast(e.response?.data?.error ?? 'Add failed', 'error'); }
+    finally { setSaving(null); }
+  };
+
+  const bulkAdd = async () => {
+    const count = parseInt(window.prompt('How many tables to add? (will number from the next available slot)'));
+    if (!count || count < 1 || count > 50) return;
+    const maxNum = tables.reduce((m, t) => Math.max(m, t.table_number), 0);
+    setSaving('bulk');
+    let added = 0;
+    for (let i = 1; i <= count; i++) {
+      try {
+        await apiClient.post('/api/tables', { table_number: maxNum + i, capacity: 4 });
+        added++;
+      } catch {}
+    }
+    showToast(`Added ${added} table${added !== 1 ? 's' : ''}`);
+    setSaving(null);
+    await load();
+  };
+
+  if (loading) return <div style={{ padding: 32, textAlign: 'center' }}><Spinner size={28} /></div>;
+
+  const colStyle = { padding: '10px 12px', fontSize: 12, color: C.textSub, textAlign: 'left' };
+  const thStyle  = { ...colStyle, fontSize: 10, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', background: C.surfaceBg };
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 500, color: C.text }}>
+            {tables.length} table{tables.length !== 1 ? 's' : ''} configured
+          </div>
+          <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>
+            Changes here are reflected immediately in the manager portal.
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn variant="secondary" onClick={bulkAdd} loading={saving === 'bulk'}>+ Bulk add</Btn>
+          <Btn onClick={() => { setAdding(true); setEditingId(null); }}>+ Add table</Btn>
+        </div>
+      </div>
+
+      {/* Add row */}
+      {adding && (
+        <div style={{ ...CARD, marginBottom: 12, background: C.primaryLight, border: `0.5px solid ${C.primaryBorder}` }}>
+          <div style={{ fontSize: 12, fontWeight: 500, color: C.primaryDark, marginBottom: 12 }}>New table</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
+            <div>
+              <Label required>Table number</Label>
+              <Input value={newRow.table_number} onChange={v => setNewRow(p => ({ ...p, table_number: v }))} placeholder="e.g. 7" type="number" />
+            </div>
+            <div>
+              <Label>Capacity (seats)</Label>
+              <Input value={newRow.capacity} onChange={v => setNewRow(p => ({ ...p, capacity: v }))} type="number" />
+            </div>
+            <div>
+              <Label>Section</Label>
+              <Select value={newRow.section} onChange={v => setNewRow(p => ({ ...p, section: v }))} options={[{ value: '', label: '— none —' }, ...SECTIONS.map(s => ({ value: s, label: s }))]} />
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Btn onClick={addTable} loading={saving === 'new'}>Save table</Btn>
+            <Btn variant="ghost" onClick={() => setAdding(false)}>Cancel</Btn>
+          </div>
+        </div>
+      )}
+
+      {/* Table list */}
+      {tables.length === 0 && !adding ? (
+        <div style={{ ...CARD, textAlign: 'center', padding: '40px 24px', color: C.textMuted }}>
+          <div style={{ fontSize: 32, marginBottom: 8 }}>🪑</div>
+          <div style={{ fontSize: 13, fontWeight: 500, color: C.text, marginBottom: 4 }}>No tables configured yet</div>
+          <div style={{ fontSize: 12 }}>Add tables one by one or use Bulk add to set up your floor plan.</div>
+        </div>
+      ) : (
+        <div style={{ border: `0.5px solid ${C.border}`, borderRadius: 10, overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr>
+                {['Table', 'Capacity', 'Section', 'Status', ''].map(h => (
+                  <th key={h} style={thStyle}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {tables.map((t, i) => {
+                const isEditing = editingId === t.id;
+                const isOccupied = t.status === 'occupied';
+                return (
+                  <tr key={t.id} style={{ borderTop: i > 0 ? `0.5px solid ${C.border}` : 'none', background: isEditing ? C.primaryLight : 'transparent' }}>
+                    <td style={colStyle}>
+                      {isEditing
+                        ? <Input value={editBuf.table_number} onChange={v => setEditBuf(p => ({ ...p, table_number: v }))} type="number" />
+                        : <span style={{ fontWeight: 500, color: C.text }}>Table {t.table_number}</span>}
+                    </td>
+                    <td style={colStyle}>
+                      {isEditing
+                        ? <Input value={editBuf.capacity} onChange={v => setEditBuf(p => ({ ...p, capacity: v }))} type="number" />
+                        : `${t.capacity ?? 4} seats`}
+                    </td>
+                    <td style={colStyle}>
+                      {isEditing
+                        ? <Select value={editBuf.section} onChange={v => setEditBuf(p => ({ ...p, section: v }))} options={[{ value: '', label: '— none —' }, ...SECTIONS.map(s => ({ value: s, label: s }))]} />
+                        : (t.section || <span style={{ color: C.textMuted }}>—</span>)}
+                    </td>
+                    <td style={colStyle}><StatusBadge status={t.status ?? 'available'} /></td>
+                    <td style={{ ...colStyle, textAlign: 'right' }}>
+                      {isEditing ? (
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                          <Btn onClick={() => saveEdit(t.id)} loading={saving === t.id}>Save</Btn>
+                          <Btn variant="ghost" onClick={cancelEdit}>Cancel</Btn>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                          <Btn variant="ghost" onClick={() => startEdit(t)}>Edit</Btn>
+                          <Btn
+                            variant="danger"
+                            onClick={() => deleteTable(t)}
+                            loading={deleting === t.id}
+                            disabled={isOccupied}
+                            style={{ fontSize: 11 }}
+                          >
+                            {isOccupied ? 'In use' : 'Delete'}
+                          </Btn>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div style={{ marginTop: 12, fontSize: 11, color: C.textMuted }}>
+        Occupied tables cannot be deleted. Free the table from the manager portal first.
+      </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// TAB 2 — RESTAURANT
+// Display name, address, contact, cuisine, opening hours
+// ═════════════════════════════════════════════════════════════════════════════
+function TabRestaurant({ apiClient, showToast }) {
+  const [form, setForm] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saved,  setSaved]  = useState(false);
+
+  useEffect(() => {
+    apiClient.get('/api/dashboard/waba').then(r => {
+      const d = r.data.restaurant ?? {};
+      setForm({
+        display_name:  d.display_name  ?? d.name ?? '',
+        legal_name:    d.legal_name    ?? '',
+        address_line1: d.address_line1 ?? d.address ?? '',
+        address_line2: d.address_line2 ?? '',
+        city:          d.city          ?? '',
+        state:         d.state         ?? '',
+        postal_code:   d.postal_code   ?? '',
+        country:       d.country       ?? 'India',
+        contact_phone: d.contact_phone ?? d.phone ?? '',
+        contact_email: d.contact_email ?? d.email ?? '',
+        website_url:   d.website_url   ?? d.website ?? '',
+        cuisine_type:  d.cuisine_type  ?? '',
+        gstin:         d.gstin         ?? '',
+        logo_url:      d.logo_url      ?? '',
+      });
+    }).catch(() => showToast('Failed to load restaurant info', 'error'));
+  }, [apiClient, showToast]);
+
+  const set = (k, v) => { setSaved(false); setForm(p => ({ ...p, [k]: v })); };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await apiClient.put('/api/restaurants/me', form);
+      setSaved(true);
+      showToast('Restaurant details saved');
+    } catch (e) { showToast(e.response?.data?.error ?? 'Save failed', 'error'); }
+    finally { setSaving(false); }
+  };
+
+  if (!form) return <div style={{ padding: 32, textAlign: 'center' }}><Spinner size={28} /></div>;
+
+  const grid2 = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 };
+
+  return (
+    <div>
+      <div style={grid2}>
+        <div><Label required>Display name</Label><Input value={form.display_name} onChange={v => set('display_name', v)} placeholder="Murugan Idli Shop" /></div>
+        <div><Label>Legal / registered name</Label><Input value={form.legal_name} onChange={v => set('legal_name', v)} placeholder="Murugan Food Pvt. Ltd." /></div>
+      </div>
+
+      <SectionTitle>Address</SectionTitle>
+      <div style={{ marginBottom: 12 }}><Label>Address line 1</Label><Input value={form.address_line1} onChange={v => set('address_line1', v)} placeholder="12, Anna Salai" /></div>
+      <div style={{ marginBottom: 12 }}><Label>Address line 2</Label><Input value={form.address_line2} onChange={v => set('address_line2', v)} placeholder="Near Central Station" /></div>
+      <div style={{ ...grid2, marginBottom: 12 }}>
+        <div><Label>City</Label><Input value={form.city} onChange={v => set('city', v)} placeholder="Chennai" /></div>
+        <div><Label>State</Label><Input value={form.state} onChange={v => set('state', v)} placeholder="Tamil Nadu" /></div>
+      </div>
+      <div style={grid2}>
+        <div><Label>Postal code</Label><Input value={form.postal_code} onChange={v => set('postal_code', v)} placeholder="600002" /></div>
+        <div><Label>Country</Label><Input value={form.country} onChange={v => set('country', v)} /></div>
+      </div>
+
+      <SectionTitle>Contact</SectionTitle>
+      <div style={grid2}>
+        <div><Label>Contact phone</Label><Input value={form.contact_phone} onChange={v => set('contact_phone', v)} placeholder="044-2345XXXX" /></div>
+        <div><Label>Contact email</Label><Input value={form.contact_email} onChange={v => set('contact_email', v)} type="email" placeholder="hello@restaurant.com" /></div>
+      </div>
+      <div style={{ marginTop: 12 }}><Label>Website URL</Label><Input value={form.website_url} onChange={v => set('website_url', v)} placeholder="https://yoursite.com" /></div>
+
+      <SectionTitle>Brand</SectionTitle>
+      <div style={grid2}>
+        <div><Label>Cuisine type</Label><Input value={form.cuisine_type} onChange={v => set('cuisine_type', v)} placeholder="South Indian, North Indian…" /></div>
+        <div><Label>GSTIN</Label><Input value={form.gstin} onChange={v => set('gstin', v)} placeholder="22AAAAA0000A1Z5" /></div>
+      </div>
+      <div style={{ marginTop: 12 }}><Label>Logo URL</Label><Input value={form.logo_url} onChange={v => set('logo_url', v)} placeholder="https://…/logo.png" /></div>
+      {form.logo_url && (
+        <img src={form.logo_url} alt="Logo preview" style={{ marginTop: 8, height: 48, borderRadius: 6, border: `0.5px solid ${C.border}` }} onError={e => e.target.style.display = 'none'} />
+      )}
+
+      <SaveBar onSave={save} loading={saving} saved={saved} />
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// TAB 3 — SERVICES
+// Toggle which service types are visible to customers
+// ═════════════════════════════════════════════════════════════════════════════
+function TabServices({ apiClient, showToast }) {
+  const [features, setFeatures] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saved,  setSaved]  = useState(false);
+
+  useEffect(() => {
+    apiClient.get('/api/subscription').then(r => {
+      setFeatures(r.data.subscribed_features ?? r.data.features ?? []);
+    }).catch(() => {
+      // fall back to waba endpoint which also returns subscribed_features
+      apiClient.get('/api/dashboard/waba').then(r => {
+        setFeatures(r.data.restaurant?.subscribed_features ?? []);
+      }).catch(() => showToast('Failed to load services', 'error'));
+    });
+  }, [apiClient, showToast]);
+
+  const toggle = (id) => {
+    setSaved(false);
+    setFeatures(f => f.includes(id) ? f.filter(x => x !== id) : [...f, id]);
+  };
+
+  const save = async () => {
+    if (features.length < 1) return showToast('At least one service must be active', 'error');
+    setSaving(true);
+    try {
+      await apiClient.put('/api/restaurants/me', { subscribed_features: features });
+      setSaved(true);
+      showToast('Service configuration saved');
+    } catch (e) { showToast(e.response?.data?.error ?? 'Save failed', 'error'); }
+    finally { setSaving(false); }
+  };
+
+  if (!features) return <div style={{ padding: 32, textAlign: 'center' }}><Spinner size={28} /></div>;
+
+  return (
+    <div>
+      <div style={{ fontSize: 12, color: C.textSub, marginBottom: 16, lineHeight: 1.6 }}>
+        Enabled services appear as options when a customer messages your WhatsApp number.
+        Disabling a service removes it from the customer-facing menu immediately.
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        {SERVICES.map(svc => {
+          const on = features.includes(svc.id);
+          return (
+            <button
+              key={svc.id}
+              onClick={() => toggle(svc.id)}
+              style={{
+                padding: '16px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
+                transition: 'all .15s', background: on ? C.primaryLight : C.cardBg,
+                border: `0.5px solid ${on ? C.primary : C.border}`,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ fontSize: 20 }}>{svc.icon}</span>
+                <div style={{
+                  width: 36, height: 20, borderRadius: 10, position: 'relative',
+                  background: on ? C.success : C.border, transition: 'background .2s',
+                }}>
+                  <span style={{
+                    position: 'absolute', top: 3, left: on ? 19 : 3,
+                    width: 14, height: 14, borderRadius: '50%', background: '#fff',
+                    transition: 'left .2s',
+                  }} />
+                </div>
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 500, color: on ? C.primaryDark : C.text }}>{svc.label}</div>
+              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>{svc.desc}</div>
+            </button>
+          );
+        })}
+      </div>
+
+      <SaveBar onSave={save} loading={saving} saved={saved} />
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// TAB 4 — KITCHEN
+// Dining duration, payment mode, workflow, slot timings
+// ═════════════════════════════════════════════════════════════════════════════
+function TabKitchen({ apiClient, showToast }) {
+  const [form,      setForm]      = useState(null);
+  const [saving,    setSaving]    = useState(false);
+  const [saved,     setSaved]     = useState(false);
+  // Multi-counter section management
+  const [sections,  setSections]  = useState([]);   // [{ id, name }]
+  const [catMap,    setCatMap]    = useState({});    // { categoryName: sectionId }
+  const [menuCats,  setMenuCats]  = useState([]);    // distinct categories from menu_items
+  const [newSecName, setNewSecName] = useState('');
+
+  useEffect(() => {
+    Promise.all([
+      apiClient.get('/api/dashboard/waba'),
+      apiClient.get('/api/menu-items?ignore_slot=true').catch(() => ({ data: { items: [] } })),
+    ]).then(([wabaRes, menuRes]) => {
+      const d = wabaRes.data.restaurant ?? {};
+      setForm({
+        dining_duration_minutes: d.dining_duration_minutes ?? 90,
+        payment_mode:            d.payment_mode ?? 'prepay',
+        kitchen_workflow:        d.kitchen_workflow ?? 'KOT_only',
+        takeaway_fulfillment_mode: d.takeaway_fulfillment_mode ?? 'single_counter',
+        has_lunch:    d.opening_hours?.lunch  !== false,
+        lunch_start:  d.opening_hours?.lunch_start  ?? '12:00',
+        lunch_end:    d.opening_hours?.lunch_end    ?? '15:00',
+        has_dinner:   d.opening_hours?.dinner !== false,
+        dinner_start: d.opening_hours?.dinner_start ?? '19:00',
+        dinner_end:   d.opening_hours?.dinner_end   ?? '23:00',
+      });
+      // Fulfillment sections
+      const secs = d.fulfillment_sections ?? [];
+      setSections(secs);
+      // Build category→section map from menu items
+      const items  = menuRes.data.items ?? [];
+      const cats   = [...new Set(items.map(i => i.category).filter(Boolean))].sort();
+      setMenuCats(cats);
+      // Pre-populate map from existing item fulfillment_section values
+      const map = {};
+      items.forEach(i => {
+        if (i.category && i.fulfillment_section && i.fulfillment_section !== 'main') {
+          map[i.category] = i.fulfillment_section;
+        }
+      });
+      setCatMap(map);
+    }).catch(() => showToast('Failed to load kitchen config', 'error'));
+  }, [apiClient, showToast]);
+
+  const set = (k, v) => { setSaved(false); setForm(p => ({ ...p, [k]: v })); };
+
+  const addSection = () => {
+    const name = newSecName.trim();
+    if (!name) return;
+    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    if (sections.find(s => s.id === id)) return showToast('Section already exists', 'error');
+    setSections(p => [...p, { id, name }]);
+    setNewSecName('');
+  };
+
+  const removeSection = (id) => {
+    setSections(p => p.filter(s => s.id !== id));
+    setCatMap(p => { const m = { ...p }; Object.keys(m).forEach(k => { if (m[k] === id) delete m[k]; }); return m; });
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await apiClient.put('/api/restaurants/me', {
+        dining_duration_minutes:    parseInt(form.dining_duration_minutes),
+        payment_mode:               form.payment_mode,
+        kitchen_workflow:           form.kitchen_workflow,
+        takeaway_fulfillment_mode:  form.takeaway_fulfillment_mode,
+        fulfillment_sections:       sections,
+        opening_hours: {
+          lunch: form.has_lunch, lunch_start: form.lunch_start, lunch_end: form.lunch_end,
+          dinner: form.has_dinner, dinner_start: form.dinner_start, dinner_end: form.dinner_end,
+        },
+      });
+      // Bulk-update menu_items.fulfillment_section per category mapping
+      if (form.takeaway_fulfillment_mode === 'multi_counter' && Object.keys(catMap).length) {
+        for (const [cat, secId] of Object.entries(catMap)) {
+          await apiClient.put('/api/menu-items/bulk-section', {
+            category: cat, fulfillment_section: secId,
+          }).catch(() => {});
+        }
+      }
+      setSaved(true);
+      showToast('Kitchen settings saved');
+    } catch (e) { showToast(e.response?.data?.error ?? 'Save failed', 'error'); }
+    finally { setSaving(false); }
+  };
+
+  if (!form) return <div style={{ padding: 32, textAlign: 'center' }}><Spinner size={28} /></div>;
+
+  const grid2 = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 };
+  const ToggleRow = ({ label, checked, onToggle }) => (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: `0.5px solid ${C.border}` }}>
+      <span style={{ fontSize: 13, color: C.text }}>{label}</span>
+      <div onClick={onToggle} style={{ width: 40, height: 22, borderRadius: 11, cursor: 'pointer', position: 'relative', background: checked ? C.success : C.border, transition: 'background .2s' }}>
+        <div style={{ position: 'absolute', top: 3, left: checked ? 21 : 3, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left .2s' }} />
+      </div>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={grid2}>
+        <div>
+          <Label>Max dining time (minutes)</Label>
+          <Input value={form.dining_duration_minutes} onChange={v => set('dining_duration_minutes', v)} type="number" placeholder="90" />
+          <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>Tables are auto-released after this time.</div>
+        </div>
+        <div>
+          <Label>Payment mode</Label>
+          <Select value={form.payment_mode} onChange={v => set('payment_mode', v)} options={[
+            { value: 'prepay',   label: 'Pre-pay (order confirmation)' },
+            { value: 'postpay',  label: 'Post-pay (pay when leaving)'  },
+            { value: 'partial',  label: 'Partial deposit'              },
+          ]} />
+        </div>
+      </div>
+
+      {/* ── Takeaway Fulfillment Mode ─────────────────────────────────────── */}
+      <SectionTitle>Takeaway fulfillment</SectionTitle>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+        {[
+          { value: 'single_counter', label: 'Everything from one window',
+            desc: 'One staff member packs and hands over the complete order at a single counter.' },
+          { value: 'multi_counter', label: 'Multiple sections',
+            desc: 'Sweets, savouries, beverages, kitchen — customer collects from each section independently.' },
+        ].map(opt => (
+          <button key={opt.value}
+            onClick={() => set('takeaway_fulfillment_mode', opt.value)}
+            style={{
+              padding: '14px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
+              background: form.takeaway_fulfillment_mode === opt.value ? C.primaryLight : C.cardBg,
+              border: `0.5px solid ${form.takeaway_fulfillment_mode === opt.value ? C.primary : C.border}`,
+              transition: 'all .15s',
+            }}>
+            <div style={{ fontSize: 13, fontWeight: 500, color: form.takeaway_fulfillment_mode === opt.value ? C.primaryDark : C.text, marginBottom: 4 }}>
+              {form.takeaway_fulfillment_mode === opt.value ? '◉ ' : '○ '}{opt.label}
+            </div>
+            <div style={{ fontSize: 11, color: C.textMuted }}>{opt.desc}</div>
+          </button>
+        ))}
+      </div>
+
+      {/* ── Section management (only shown in multi_counter mode) ─────────── */}
+      {form.takeaway_fulfillment_mode === 'multi_counter' && (
+        <div style={{ background: C.surfaceBg, border: `0.5px solid ${C.border}`, borderRadius: 10, padding: 16, marginBottom: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: C.text, marginBottom: 12 }}>Fulfillment sections</div>
+
+          {/* Existing sections */}
+          {sections.length === 0 && (
+            <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 10 }}>
+              No sections yet. Add at least one (e.g. "Sweets & Savouries", "Kitchen", "Beverages").
+            </div>
+          )}
+          {sections.map(s => (
+            <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: `0.5px solid ${C.border}` }}>
+              <div>
+                <span style={{ fontSize: 13, color: C.text }}>{s.name}</span>
+                <span style={{ fontSize: 11, color: C.textMuted, marginLeft: 8 }}>id: {s.id}</span>
+              </div>
+              <Btn variant="danger" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => removeSection(s.id)}>Remove</Btn>
+            </div>
+          ))}
+
+          {/* Add new section */}
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <input
+              value={newSecName}
+              onChange={e => setNewSecName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && addSection()}
+              placeholder="e.g. Sweets & Savouries"
+              style={{ ...{ fontSize: 13, padding: '7px 10px', borderRadius: 8, border: `0.5px solid ${C.border}`, flex: 1, fontFamily: 'inherit' } }}
+            />
+            <Btn onClick={addSection}>+ Add</Btn>
+          </div>
+
+          {/* Category → section mapping */}
+          {menuCats.length > 0 && sections.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
+                Assign menu categories to sections
+              </div>
+              <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 10, lineHeight: 1.5 }}>
+                New orders will automatically route each item to its section based on category.
+                Items not assigned here go to the first section as fallback.
+              </div>
+              {menuCats.map(cat => (
+                <div key={cat} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: `0.5px solid ${C.border}` }}>
+                  <span style={{ fontSize: 13, color: C.text }}>{cat}</span>
+                  <select
+                    value={catMap[cat] || ''}
+                    onChange={e => setCatMap(p => ({ ...p, [cat]: e.target.value || undefined }))}
+                    style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, border: `0.5px solid ${C.border}`, background: C.cardBg }}
+                  >
+                    <option value="">— unassigned —</option>
+                    {sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <SectionTitle>Kitchen workflow</SectionTitle>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
+        {WORKFLOWS.map(w => (
+          <button key={w.value} onClick={() => set('kitchen_workflow', w.value)} style={{
+            padding: '10px 14px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 500,
+            background: form.kitchen_workflow === w.value ? C.primaryLight : C.cardBg,
+            border: `0.5px solid ${form.kitchen_workflow === w.value ? C.primary : C.border}`,
+            color: form.kitchen_workflow === w.value ? C.primaryDark : C.textSub,
+            transition: 'all .15s', textAlign: 'left',
+          }}>
+            {w.label}
+          </button>
+        ))}
+      </div>
+
+      <SectionTitle>Service slots</SectionTitle>
+      <ToggleRow label="Lunch service" checked={form.has_lunch} onToggle={() => set('has_lunch', !form.has_lunch)} />
+      {form.has_lunch && (
+        <div style={{ ...grid2, margin: '10px 0' }}>
+          <div><Label>Opens</Label><Input type="time" value={form.lunch_start} onChange={v => set('lunch_start', v)} /></div>
+          <div><Label>Closes</Label><Input type="time" value={form.lunch_end} onChange={v => set('lunch_end', v)} /></div>
+        </div>
+      )}
+      <ToggleRow label="Dinner service" checked={form.has_dinner} onToggle={() => set('has_dinner', !form.has_dinner)} />
+      {form.has_dinner && (
+        <div style={{ ...grid2, margin: '10px 0' }}>
+          <div><Label>Opens</Label><Input type="time" value={form.dinner_start} onChange={v => set('dinner_start', v)} /></div>
+          <div><Label>Closes</Label><Input type="time" value={form.dinner_end} onChange={v => set('dinner_end', v)} /></div>
+        </div>
+      )}
+
+      <SaveBar onSave={save} loading={saving} saved={saved} />
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// TAB 5 — WHATSAPP
+// WA number, WABA ID, phone number ID, manager phone, access token
+// ═════════════════════════════════════════════════════════════════════════════
+function TabWhatsApp({ apiClient, showToast }) {
+  const [form,   setForm]   = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saved,  setSaved]  = useState(false);
+  const [showToken, setShowToken] = useState(false);
+
+  useEffect(() => {
+    Promise.all([
+      apiClient.get('/api/dashboard/waba'),
+      apiClient.get('/api/restaurants/integration').catch(() => ({ data: {} })),
+    ]).then(([wabaRes, intRes]) => {
+      const d   = wabaRes.data.restaurant ?? {};
+      const int = intRes.data.integration ?? {};
+      setForm({
+        whatsapp_number:  d.whatsapp_number  ?? '',
+        waba_id:          d.waba_id          ?? '',
+        phone_number_id:  int.phone_number_id ?? '',
+        manager_phone:    d.manager_phone    ?? '',
+        access_token:     int.access_token   ?? '',
+        webhook_secret:   int.webhook_secret ?? '',
+      });
+    }).catch(() => showToast('Failed to load WhatsApp config', 'error'));
+  }, [apiClient, showToast]);
+
+  const set = (k, v) => { setSaved(false); setForm(p => ({ ...p, [k]: v })); };
+
+  const save = async () => {
+    if (!form.whatsapp_number) return showToast('WhatsApp number is required', 'error');
+    setSaving(true);
+    try {
+      // Update restaurant row
+      await apiClient.put('/api/restaurants/me', {
+        whatsapp_number: form.whatsapp_number,
+        waba_id:         form.waba_id        || null,
+        manager_phone:   form.manager_phone  || null,
+      });
+      // Update integration row (phone_number_id + access_token live here)
+      if (form.phone_number_id || form.access_token) {
+        await apiClient.put('/api/restaurants/integration', {
+          provider:       'meta',
+          channel:        'whatsapp',
+          phone_number_id: form.phone_number_id || null,
+          access_token:   form.access_token    || null,
+          webhook_secret:  form.webhook_secret  || null,
+        });
+      }
+      setSaved(true);
+      showToast('WhatsApp settings saved');
+    } catch (e) { showToast(e.response?.data?.error ?? 'Save failed', 'error'); }
+    finally { setSaving(false); }
+  };
+
+  if (!form) return <div style={{ padding: 32, textAlign: 'center' }}><Spinner size={28} /></div>;
+
+  const hint = (text) => <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4, lineHeight: 1.5 }}>{text}</div>;
+
+  return (
+    <div>
+      <div style={{ background: '#EAF3DE', border: '0.5px solid #A7E3C0', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#3B6D11', marginBottom: 20, lineHeight: 1.7 }}>
+        📖 All values come from <strong>Meta for Developers</strong> and <strong>Meta Business Manager</strong>.
+        Changes here take effect on the next incoming message — no restart needed.
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <div>
+          <Label required>WhatsApp number</Label>
+          <Input value={form.whatsapp_number} onChange={v => set('whatsapp_number', v)} placeholder="919444000000" />
+          {hint('Country code + number, no + or spaces.')}
+        </div>
+        <div>
+          <Label>Manager phone</Label>
+          <Input value={form.manager_phone} onChange={v => set('manager_phone', v)} placeholder="919876543210" />
+          {hint('Walk-in and order alerts are sent here.')}
+        </div>
+        <div>
+          <Label>WABA ID</Label>
+          <Input value={form.waba_id} onChange={v => set('waba_id', v)} placeholder="1234567890" />
+          {hint('Business Manager → Accounts → WhatsApp Accounts → ID.')}
+        </div>
+        <div>
+          <Label>Phone Number ID</Label>
+          <Input value={form.phone_number_id} onChange={v => set('phone_number_id', v)} placeholder="1234567890" />
+          {hint('developers.facebook.com → Your App → WhatsApp → API Setup.')}
+        </div>
+      </div>
+
+      <SectionTitle>API credentials</SectionTitle>
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
+          <Label>Meta System Access Token</Label>
+          <button onClick={() => setShowToken(p => !p)} style={{ fontSize: 11, color: C.primary, background: 'none', border: 'none', cursor: 'pointer' }}>
+            {showToken ? 'Hide' : 'Show'}
+          </button>
+        </div>
+        <input
+          type={showToken ? 'text' : 'password'}
+          value={form.access_token}
+          onChange={e => set('access_token', e.target.value)}
+          placeholder="EAAxxxxxx…"
+          style={inputStyle}
+        />
+        {hint('System user token from Business Manager → Settings → System Users. Permanent — never expires.')}
+      </div>
+      <div>
+        <Label>Webhook verify token</Label>
+        <Input value={form.webhook_secret} onChange={v => set('webhook_secret', v)} placeholder="your_webhook_secret" />
+        {hint('Must match the token set in your Meta app\'s webhook configuration.')}
+      </div>
+
+      <SaveBar onSave={save} loading={saving} saved={saved} />
+    </div>
+  );
+}
+
+
+// ═════════════════════════════════════════════════════════════════════════════
+// TAB 6 — STAFF
+// Onboard employees, set roles, collect WA numbers, terminate on resignation
+// ═════════════════════════════════════════════════════════════════════════════
+function TabStaff({ apiClient, showToast }) {
+  const [employees, setEmployees] = useState([]);
+  const [roles,     setRoles]     = useState([]);
+  const [loading,   setLoading]   = useState(true);
+  const [showForm,  setShowForm]  = useState(false);
+  const [saving,    setSaving]    = useState(false);
+  const [filter,    setFilter]    = useState('active'); // active | terminated
+  const [form, setForm] = useState({
+    full_name: '', email: '', phone: '', whatsapp_number: '', role: '',
+  });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [empRes, roleRes] = await Promise.all([
+        apiClient.get('/api/staff'),
+        apiClient.get('/api/staff/roles'),
+      ]);
+      setEmployees(empRes.data.employees ?? []);
+      setRoles(roleRes.data.roles ?? []);
+    } catch { showToast('Failed to load staff', 'error'); }
+    finally { setLoading(false); }
+  }, [apiClient, showToast]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const setF = (k, v) => setForm(p => ({ ...p, [k]: v }));
+
+  const onboard = async () => {
+    if (!form.full_name) return showToast('Name is required', 'error');
+    if (!form.email)     return showToast('Email is required', 'error');
+    if (!form.role)      return showToast('Role is required', 'error');
+    setSaving(true);
+    try {
+      await apiClient.post('/api/staff', form);
+      showToast(`${form.full_name} added${form.whatsapp_number ? ' — WhatsApp invite sent' : ''}`);
+      setShowForm(false);
+      setForm({ full_name: '', email: '', phone: '', whatsapp_number: '', role: '' });
+      await load();
+    } catch (e) { showToast(e.response?.data?.error ?? 'Failed to add employee', 'error'); }
+    finally { setSaving(false); }
+  };
+
+  const terminate = async (emp) => {
+    const note = window.prompt(`Reason for terminating ${emp.full_name}?`, 'Resigned');
+    if (note === null) return; // cancelled
+    try {
+      await apiClient.put(`/api/staff/${emp.id}/terminate`, { termination_note: note || 'Resigned' });
+      showToast(`${emp.full_name}'s access revoked`);
+      await load();
+    } catch (e) { showToast(e.response?.data?.error ?? 'Failed to terminate', 'error'); }
+  };
+
+  const ROLE_COLORS = {
+    owner:         { bg: '#FEF3C7', color: '#92400E' },
+    manager:       { bg: C.primaryLight, color: C.primaryDark },
+    kitchen_staff: { bg: '#F0FDF4', color: '#166534' },
+    captain:       { bg: '#EFF6FF', color: '#1E40AF' },
+    waiter:        { bg: '#FDF4FF', color: '#7E22CE' },
+    marketing:     { bg: '#FFF7ED', color: '#9A3412' },
+  };
+
+  const NOTIFY_ROLES = ['manager', 'kitchen_staff', 'captain', 'waiter', 'owner'];
+
+  const active     = employees.filter(e => e.is_active);
+  const terminated = employees.filter(e => !e.is_active);
+  const displayed  = filter === 'active' ? active : terminated;
+
+  if (loading) return <div style={{ padding: 32, textAlign: 'center' }}><Spinner size={28} /></div>;
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 500, color: C.text }}>
+            {active.length} active · {terminated.length} terminated
+          </div>
+          <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>
+            WhatsApp numbers are used to send operational notifications per role.
+          </div>
+        </div>
+        <Btn onClick={() => setShowForm(s => !s)}>+ Add employee</Btn>
+      </div>
+
+      {/* Add form */}
+      {showForm && (
+        <div style={{ ...{background: C.primaryLight, border: `0.5px solid ${C.primaryBorder}`, borderRadius: 10, padding: 20, marginBottom: 16} }}>
+          <div style={{ fontSize: 13, fontWeight: 500, color: C.primaryDark, marginBottom: 14 }}>New employee</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+            <div><Label required>Full name</Label><Input value={form.full_name} onChange={v => setF('full_name', v)} placeholder="Senthil Kumar" /></div>
+            <div>
+              <Label required>Role</Label>
+              <Select
+                value={form.role}
+                onChange={v => setF('role', v)}
+                options={[{ value: '', label: '— select role —' }, ...roles.map(r => ({ value: r.value, label: r.label }))]}
+              />
+              {form.role && (
+                <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+                  {roles.find(r => r.value === form.role)?.description}
+                </div>
+              )}
+            </div>
+            <div><Label required>Login email</Label><Input value={form.email} onChange={v => setF('email', v)} type="email" placeholder="senthil@restaurant.com" /></div>
+            <div><Label>Phone</Label><Input value={form.phone} onChange={v => setF('phone', v)} placeholder="9876543210" /></div>
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <Label>
+              WhatsApp number
+              {NOTIFY_ROLES.includes(form.role) && <span style={{ color: C.success, marginLeft: 6, fontSize: 10 }}>● Notifications will be sent here</span>}
+            </Label>
+            <Input value={form.whatsapp_number} onChange={v => setF('whatsapp_number', v)} placeholder="919876543210 (with country code)" />
+            {NOTIFY_ROLES.includes(form.role) && (
+              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+                {{
+                  manager:       'Receives: new tokens, large party requests, order ready, feedback alerts',
+                  kitchen_staff: 'Receives: new order notifications (backup to KDS)',
+                  captain:       'Receives: takeaway orders ready to collect',
+                  waiter:        'Receives: food ready to serve at table notifications',
+                  owner:         'Receives: all manager notifications + billing alerts',
+                }[form.role] ?? ''}
+              </div>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Btn onClick={onboard} loading={saving}>Add employee</Btn>
+            <Btn variant="ghost" onClick={() => setShowForm(false)}>Cancel</Btn>
+          </div>
+        </div>
+      )}
+
+      {/* Filter tabs */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 14 }}>
+        {[['active', `Active (${active.length})`], ['terminated', `Terminated (${terminated.length})`]].map(([v, l]) => (
+          <button key={v} onClick={() => setFilter(v)} style={{
+            fontSize: 12, padding: '5px 14px', borderRadius: 20, cursor: 'pointer',
+            background: filter === v ? C.text : C.surfaceBg,
+            color:      filter === v ? '#fff' : C.textMuted,
+            border:     `0.5px solid ${filter === v ? C.text : C.border}`,
+          }}>{l}</button>
+        ))}
+      </div>
+
+      {/* Employee list */}
+      {displayed.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '32px 0', color: C.textMuted, fontSize: 13 }}>
+          {filter === 'active' ? 'No active employees yet. Add your first team member.' : 'No terminated employees.'}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {displayed.map(emp => {
+            const rc = ROLE_COLORS[emp.role] ?? { bg: C.surfaceBg, color: C.text };
+            return (
+              <div key={emp.id} style={{ background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 10, padding: '14px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: C.text }}>{emp.full_name}</span>
+                    <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: rc.bg, color: rc.color }}>
+                      {emp.role.replace('_', ' ')}
+                    </span>
+                    {!emp.is_active && <span style={{ fontSize: 10, color: C.danger }}>● Terminated</span>}
+                  </div>
+                  <div style={{ fontSize: 11, color: C.textMuted }}>
+                    {emp.email}
+                    {emp.whatsapp_number && <span style={{ marginLeft: 10 }}>📱 {emp.whatsapp_number}</span>}
+                  </div>
+                  {emp.terminated_at && (
+                    <div style={{ fontSize: 11, color: C.danger, marginTop: 3 }}>
+                      Terminated {new Date(emp.terminated_at).toLocaleDateString('en-IN')} · {emp.termination_note}
+                    </div>
+                  )}
+                  {emp.is_active && emp.last_login && (
+                    <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>
+                      Last login: {new Date(emp.last_login).toLocaleDateString('en-IN')}
+                    </div>
+                  )}
+                </div>
+                {emp.is_active && (
+                  <Btn variant="danger" style={{ fontSize: 11 }} onClick={() => terminate(emp)}>
+                    Terminate
+                  </Btn>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ROOT — SettingsPanel
+// ═════════════════════════════════════════════════════════════════════════════
+const TABS = [
+  { id: 'tables',     label: '🪑 Tables'      },
+  { id: 'restaurant', label: '🍽️ Restaurant'  },
+  { id: 'services',   label: '🚀 Services'    },
+  { id: 'kitchen',    label: '🍳 Kitchen'     },
+  { id: 'whatsapp',   label: '💬 WhatsApp'    },
+  { id: 'staff',      label: '👥 Staff'       },
+];
+
+export default function SettingsPanel() {
+  const { apiClient } = useAuth();
+  const [activeTab, setActiveTab] = useState('tables');
+  const [toast, setToast] = useState({ msg: '', type: 'success' });
+
+  const showToast = useCallback((msg, type = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast({ msg: '', type: 'success' }), 3500);
+  }, []);
+
+  const tabContent = {
+    tables:     <TabTables     apiClient={apiClient} showToast={showToast} />,
+    restaurant: <TabRestaurant apiClient={apiClient} showToast={showToast} />,
+    services:   <TabServices   apiClient={apiClient} showToast={showToast} />,
+    kitchen:    <TabKitchen    apiClient={apiClient} showToast={showToast} />,
+    whatsapp:   <TabWhatsApp   apiClient={apiClient} showToast={showToast} />,
+    staff:      <TabStaff      apiClient={apiClient} showToast={showToast} />,
+  };
+
+  return (
+    <div style={{ minHeight: '100vh', background: C.pageBg }}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <Toast msg={toast.msg} type={toast.type} />
+
+      {/* Header */}
+      <div style={{ background: C.cardBg, borderBottom: `0.5px solid ${C.border}`, padding: '16px 24px' }}>
+        <h1 style={{ fontSize: 18, fontWeight: 500, color: C.text, margin: 0 }}>Settings</h1>
+        <p style={{ fontSize: 12, color: C.textMuted, margin: '2px 0 0' }}>Manage your restaurant configuration</p>
+      </div>
+
+      <div style={{ maxWidth: 860, margin: '0 auto', padding: '24px 16px' }}>
+        {/* Tab bar */}
+        <div style={{ display: 'flex', gap: 3, marginBottom: 20, background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 10, padding: 4, width: 'fit-content', flexWrap: 'wrap' }}>
+          {TABS.map(tab => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
+              padding: '7px 14px', borderRadius: 7, fontSize: 12, fontWeight: activeTab === tab.id ? 500 : 400,
+              cursor: 'pointer', transition: 'all .15s', whiteSpace: 'nowrap',
+              background:   activeTab === tab.id ? C.primary     : 'transparent',
+              color:        activeTab === tab.id ? '#fff'        : C.textMuted,
+              border:       activeTab === tab.id ? `0.5px solid ${C.primaryDark}` : '0.5px solid transparent',
+            }}>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Content card */}
+        <div style={CARD}>
+          {tabContent[activeTab]}
+        </div>
+      </div>
+    </div>
+  );
+}
