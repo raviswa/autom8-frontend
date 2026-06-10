@@ -1,6 +1,9 @@
 // Dashboard v202605291757
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { supabase, useAuth } from "../contexts/AuthContext";
+// In your owner dashboard nav/header:
+<Link to="/settings">⚙️ Settings</Link>
+
 // ── Export to Excel (no npm install — uses plain CSV download) ────────────────
 function exportToCSV(rows, filename) {
   if (!rows?.length) return;
