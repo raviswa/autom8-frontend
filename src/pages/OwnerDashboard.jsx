@@ -1,6 +1,9 @@
 // Dashboard v202605291757
+
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { supabase, useAuth } from "../contexts/AuthContext";
+import { Link } from 'react-router-dom';
+
 // In your owner dashboard nav/header:
 <Link to="/settings">⚙️ Settings</Link>
 
