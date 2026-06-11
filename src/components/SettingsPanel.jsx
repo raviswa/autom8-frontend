@@ -925,7 +925,7 @@ function TabWhatsApp({ apiClient, showToast }) {
 
 // ═════════════════════════════════════════════════════════════════════════════
 // TAB 6 — STAFF
-// Onboard employees, set roles, collect WA numbers, terminate on resignation
+// Onboard employees, edit details, set roles, collect WA numbers, terminate
 // ═════════════════════════════════════════════════════════════════════════════
 function TabStaff({ apiClient, showToast }) {
   const [employees, setEmployees] = useState([]);
@@ -933,7 +933,12 @@ function TabStaff({ apiClient, showToast }) {
   const [loading,   setLoading]   = useState(true);
   const [showForm,  setShowForm]  = useState(false);
   const [saving,    setSaving]    = useState(false);
-  const [filter,    setFilter]    = useState('active'); // active | terminated
+  const [filter,    setFilter]    = useState('active');
+  // Edit state — id of employee currently being edited + its draft values
+  const [editingId,   setEditingId]   = useState(null);
+  const [editForm,    setEditForm]    = useState({});
+  const [editSaving,  setEditSaving]  = useState(false);
+
   const [form, setForm] = useState({
     full_name: '', email: '', phone: '', whatsapp_number: '', role: '',
   });
@@ -954,6 +959,43 @@ function TabStaff({ apiClient, showToast }) {
   useEffect(() => { load(); }, [load]);
 
   const setF = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const setEF = (k, v) => setEditForm(p => ({ ...p, [k]: v }));
+
+  // ── Open inline edit form ────────────────────────────────────────────────
+  const startEdit = (emp) => {
+    setEditingId(emp.id);
+    setEditForm({
+      full_name:       emp.full_name       ?? '',
+      phone:           emp.phone           ?? '',
+      whatsapp_number: emp.whatsapp_number ?? '',
+      role:            emp.role            ?? '',
+    });
+    setShowForm(false); // close add form if open
+  };
+
+  const cancelEdit = () => { setEditingId(null); setEditForm({}); };
+
+  // ── Save edited employee ─────────────────────────────────────────────────
+  const saveEdit = async (emp) => {
+    if (!editForm.full_name?.trim()) return showToast('Name is required', 'error');
+    if (!editForm.role)              return showToast('Role is required', 'error');
+    setEditSaving(true);
+    try {
+      await apiClient.put(`/api/staff/${emp.id}`, {
+        full_name:       editForm.full_name.trim(),
+        phone:           editForm.phone           || null,
+        whatsapp_number: editForm.whatsapp_number || null,
+        role:            editForm.role,
+      });
+      showToast(`${editForm.full_name} updated`);
+      cancelEdit();
+      await load();
+    } catch (e) {
+      showToast(e.response?.data?.error ?? 'Failed to save changes', 'error');
+    } finally {
+      setEditSaving(false);
+    }
+  };
 
   const onboard = async () => {
     if (!form.full_name) return showToast('Name is required', 'error');
@@ -1079,37 +1121,113 @@ function TabStaff({ apiClient, showToast }) {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {displayed.map(emp => {
-            const rc = ROLE_COLORS[emp.role] ?? { bg: C.surfaceBg, color: C.text };
+            const rc        = ROLE_COLORS[emp.role] ?? { bg: C.surfaceBg, color: C.text };
+            const isEditing = editingId === emp.id;
             return (
-              <div key={emp.id} style={{ background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 10, padding: '14px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                    <span style={{ fontSize: 13, fontWeight: 500, color: C.text }}>{emp.full_name}</span>
-                    <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: rc.bg, color: rc.color }}>
-                      {emp.role.replace('_', ' ')}
-                    </span>
-                    {!emp.is_active && <span style={{ fontSize: 10, color: C.danger }}>● Terminated</span>}
-                  </div>
-                  <div style={{ fontSize: 11, color: C.textMuted }}>
-                    {emp.email}
-                    {emp.whatsapp_number && <span style={{ marginLeft: 10 }}>📱 {emp.whatsapp_number}</span>}
-                  </div>
-                  {emp.terminated_at && (
-                    <div style={{ fontSize: 11, color: C.danger, marginTop: 3 }}>
-                      Terminated {new Date(emp.terminated_at).toLocaleDateString('en-IN')} · {emp.termination_note}
+              <div key={emp.id} style={{ background: C.cardBg, border: `0.5px solid ${isEditing ? C.primary : C.border}`, borderRadius: 10, overflow: 'hidden', transition: 'border-color .15s' }}>
+
+                {/* ── Employee summary row ── */}
+                <div style={{ padding: '14px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: C.text }}>{emp.full_name}</span>
+                      <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: rc.bg, color: rc.color }}>
+                        {emp.role.replace('_', ' ')}
+                      </span>
+                      {!emp.is_active && <span style={{ fontSize: 10, color: C.danger }}>● Terminated</span>}
                     </div>
-                  )}
-                  {emp.is_active && emp.last_login && (
-                    <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>
-                      Last login: {new Date(emp.last_login).toLocaleDateString('en-IN')}
+                    <div style={{ fontSize: 11, color: C.textMuted }}>
+                      {emp.email}
+                      {emp.phone          && <span style={{ marginLeft: 10 }}>📞 {emp.phone}</span>}
+                      {emp.whatsapp_number && <span style={{ marginLeft: 10 }}>📱 {emp.whatsapp_number}</span>}
+                    </div>
+                    {emp.terminated_at && (
+                      <div style={{ fontSize: 11, color: C.danger, marginTop: 3 }}>
+                        Terminated {new Date(emp.terminated_at).toLocaleDateString('en-IN')} · {emp.termination_note}
+                      </div>
+                    )}
+                    {emp.is_active && emp.last_login && (
+                      <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>
+                        Last login: {new Date(emp.last_login).toLocaleDateString('en-IN')}
+                      </div>
+                    )}
+                  </div>
+
+                  {emp.is_active && (
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <Btn
+                        variant="ghost"
+                        style={{ fontSize: 11 }}
+                        onClick={() => isEditing ? cancelEdit() : startEdit(emp)}
+                      >
+                        {isEditing ? 'Cancel' : 'Edit'}
+                      </Btn>
+                      <Btn variant="danger" style={{ fontSize: 11 }} onClick={() => terminate(emp)}>
+                        Terminate
+                      </Btn>
                     </div>
                   )}
                 </div>
-                {emp.is_active && (
-                  <Btn variant="danger" style={{ fontSize: 11 }} onClick={() => terminate(emp)}>
-                    Terminate
-                  </Btn>
+
+                {/* ── Inline edit form (slides open) ── */}
+                {isEditing && (
+                  <div style={{ borderTop: `0.5px solid ${C.border}`, background: C.primaryLight, padding: '16px 16px 14px' }}>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: C.primaryDark, marginBottom: 12 }}>
+                      Edit employee details
+                      <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 400, marginLeft: 8 }}>Email cannot be changed (used for login)</span>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                      <div>
+                        <Label required>Full name</Label>
+                        <Input value={editForm.full_name} onChange={v => setEF('full_name', v)} placeholder="Senthil Kumar" />
+                      </div>
+                      <div>
+                        <Label required>Role</Label>
+                        <Select
+                          value={editForm.role}
+                          onChange={v => setEF('role', v)}
+                          options={roles.map(r => ({ value: r.value, label: r.label }))}
+                        />
+                        {editForm.role && (
+                          <div style={{ fontSize: 11, color: C.textMuted, marginTop: 3 }}>
+                            {roles.find(r => r.value === editForm.role)?.description}
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <Label>Phone</Label>
+                        <Input value={editForm.phone} onChange={v => setEF('phone', v)} placeholder="9876543210" />
+                      </div>
+                      <div>
+                        <Label>
+                          WhatsApp number
+                          {NOTIFY_ROLES.includes(editForm.role) && (
+                            <span style={{ color: C.success, marginLeft: 6, fontSize: 10 }}>● Notifications here</span>
+                          )}
+                        </Label>
+                        <Input value={editForm.whatsapp_number} onChange={v => setEF('whatsapp_number', v)} placeholder="919876543210" />
+                        {NOTIFY_ROLES.includes(editForm.role) && (
+                          <div style={{ fontSize: 11, color: C.textMuted, marginTop: 3 }}>
+                            {{
+                              manager:       'Receives: new tokens, large party, order ready, feedback alerts',
+                              kitchen_staff: 'Receives: new order notifications (backup to KDS)',
+                              captain:       'Receives: takeaway orders ready to collect',
+                              waiter:        'Receives: food ready to serve at table',
+                              owner:         'Receives: all manager notifications + billing alerts',
+                            }[editForm.role] ?? ''}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <Btn onClick={() => saveEdit(emp)} loading={editSaving}>Save changes</Btn>
+                      <Btn variant="ghost" onClick={cancelEdit}>Cancel</Btn>
+                    </div>
+                  </div>
                 )}
+
               </div>
             );
           })}
@@ -1129,10 +1247,197 @@ const TABS = [
   { id: 'kitchen',    label: '🍳 Kitchen'     },
   { id: 'whatsapp',   label: '💬 WhatsApp'    },
   { id: 'staff',      label: '👥 Staff'       },
+  // Brand tab — only visible when user is brand_owner (injected below via filteredTabs)
+  { id: 'brand',      label: '🔗 Brand',  brandOnly: true },
 ];
 
+// ═════════════════════════════════════════════════════════════════════════════
+// TAB: Brand (brand_owner only)
+// ═════════════════════════════════════════════════════════════════════════════
+function TabBrand({ apiClient, showToast, user }) {
+  const brandId = user?.brand_id ?? user?.brand?.id ?? null;
+
+  const [brand,   setBrand]   = useState(null);
+  const [outlets, setOutlets] = useState([]);
+  const [saving,  setSaving]  = useState(false);
+  const [pushing, setPushing] = useState(false);
+  const [form,    setForm]    = useState({});
+  const [newOutlet, setNewOutlet] = useState({ name: '', city: '', outlet_code: '', whatsapp_number: '', phone_number_id: '', access_token: '', table_count: 0 });
+  const [showOutletForm, setShowOutletForm] = useState(false);
+  const [activeSection, setActiveSection] = useState('brand'); // brand | outlets | waba
+
+  useEffect(() => {
+    if (!brandId) return;
+    apiClient.get(`/api/brands/${brandId}`).then(r => {
+      setBrand(r.data.brand);
+      setForm({ name: r.data.brand.name, legal_name: r.data.brand.legal_name ?? '', logo_url: r.data.brand.logo_url ?? '', waba_id: r.data.brand.waba_id ?? '', meta_business_id: r.data.brand.meta_business_id ?? '', contact_phone: r.data.brand.contact_phone ?? '' });
+    }).catch(() => {});
+    apiClient.get(`/api/brands/${brandId}/outlets`).then(r => setOutlets(r.data.outlets ?? [])).catch(() => {});
+  }, [brandId]);
+
+  async function saveBrand() {
+    if (!brandId) return;
+    setSaving(true);
+    try {
+      await apiClient.put(`/api/brands/${brandId}`, form);
+      showToast('Brand settings saved');
+    } catch (e) {
+      showToast(e.response?.data?.error ?? 'Save failed', 'error');
+    } finally { setSaving(false); }
+  }
+
+  async function addOutlet() {
+    if (!newOutlet.name.trim()) return;
+    setSaving(true);
+    try {
+      await apiClient.post(`/api/brands/${brandId}/outlets`, newOutlet);
+      const r = await apiClient.get(`/api/brands/${brandId}/outlets`);
+      setOutlets(r.data.outlets ?? []);
+      setNewOutlet({ name: '', city: '', outlet_code: '', whatsapp_number: '', phone_number_id: '', access_token: '', table_count: 0 });
+      setShowOutletForm(false);
+      showToast('Outlet added');
+    } catch (e) {
+      showToast(e.response?.data?.error ?? 'Failed to add outlet', 'error');
+    } finally { setSaving(false); }
+  }
+
+  async function deactivateOutlet(id, name) {
+    if (!window.confirm(`Deactivate "${name}"? This will disable the outlet but not delete its data.`)) return;
+    try {
+      await apiClient.delete(`/api/brands/${brandId}/outlets/${id}`);
+      setOutlets(prev => prev.map(o => o.id === id ? { ...o, is_active: false } : o));
+      showToast(`${name} deactivated`);
+    } catch (e) {
+      showToast(e.response?.data?.error ?? 'Failed', 'error');
+    }
+  }
+
+  if (!brandId) return <p style={{ color: C.textMuted, fontSize: 13, padding: 20 }}>No brand assigned to this account.</p>;
+
+  const F = (label, key, opts = {}) => (
+    <div style={{ marginBottom: 14 }}>
+      <label style={{ fontSize: 11, color: C.textMuted, display: 'block', marginBottom: 4 }}>{label}</label>
+      <input
+        type={opts.type ?? 'text'}
+        value={form[key] ?? ''}
+        onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))}
+        placeholder={opts.placeholder ?? ''}
+        style={{ width: '100%', padding: '8px 10px', border: `0.5px solid ${C.border}`, borderRadius: 8, fontSize: 13 }}
+      />
+    </div>
+  );
+
+  const sectionBtns = [
+    { id: 'brand',   label: 'Brand' },
+    { id: 'outlets', label: 'Outlets' },
+    { id: 'waba',    label: 'WABA' },
+  ];
+
+  return (
+    <div>
+      {/* Sub-tab bar */}
+      <div style={{ display: 'flex', gap: 3, marginBottom: 18, background: C.pageBg, border: `0.5px solid ${C.border}`, borderRadius: 8, padding: 3, width: 'fit-content' }}>
+        {sectionBtns.map(b => (
+          <button key={b.id} onClick={() => setActiveSection(b.id)} style={{
+            padding: '5px 14px', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: activeSection === b.id ? 500 : 400,
+            background: activeSection === b.id ? C.primary : 'transparent',
+            color: activeSection === b.id ? '#fff' : C.textMuted, border: 'none',
+          }}>{b.label}</button>
+        ))}
+      </div>
+
+      {/* Brand info */}
+      {activeSection === 'brand' && (
+        <div>
+          <p style={{ fontSize: 13, fontWeight: 500, margin: '0 0 14px' }}>Brand Details</p>
+          {F('Brand display name *', 'name')}
+          {F('Legal / registered name', 'legal_name')}
+          {F('Logo URL', 'logo_url', { placeholder: 'https://…' })}
+          {F('Contact phone', 'contact_phone')}
+          <button onClick={saveBrand} disabled={saving}
+            style={{ padding: '8px 22px', background: saving ? '#aaa' : C.primary, color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: saving ? 'default' : 'pointer' }}>
+            {saving ? 'Saving…' : 'Save brand'}
+          </button>
+        </div>
+      )}
+
+      {/* Outlets */}
+      {activeSection === 'outlets' && (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <p style={{ fontSize: 13, fontWeight: 500, margin: 0 }}>{outlets.length} outlet{outlets.length !== 1 ? 's' : ''}</p>
+            <button onClick={() => setShowOutletForm(p => !p)}
+              style={{ padding: '6px 14px', background: C.primary, color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>
+              {showOutletForm ? '✕ Cancel' : '+ Add outlet'}
+            </button>
+          </div>
+
+          {showOutletForm && (
+            <div style={{ background: '#F4F4F0', padding: 16, borderRadius: 10, marginBottom: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                {[['Outlet name *', 'name'], ['City', 'city'], ['Short code', 'outlet_code'], ['WhatsApp number', 'whatsapp_number'], ['Meta phone_number_id', 'phone_number_id'], ['Tables to auto-create', 'table_count']].map(([lbl, key]) => (
+                  <div key={key}>
+                    <label style={{ fontSize: 11, color: C.textMuted, display: 'block', marginBottom: 3 }}>{lbl}</label>
+                    <input type={key === 'table_count' ? 'number' : 'text'}
+                      value={newOutlet[key]} onChange={e => setNewOutlet(p => ({ ...p, [key]: e.target.value }))}
+                      style={{ width: '100%', padding: '7px 10px', border: `0.5px solid ${C.border}`, borderRadius: 7, fontSize: 13 }} />
+                  </div>
+                ))}
+              </div>
+              <button onClick={addOutlet} disabled={saving}
+                style={{ padding: '7px 18px', background: C.success, color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>
+                {saving ? 'Adding…' : 'Add outlet'}
+              </button>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {outlets.map(outlet => (
+              <div key={outlet.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', background: C.pageBg, borderRadius: 10, border: `0.5px solid ${C.border}` }}>
+                <div>
+                  <p style={{ margin: 0, fontSize: 13, fontWeight: 500 }}>{outlet.name}</p>
+                  <p style={{ margin: '2px 0 0', fontSize: 11, color: C.textMuted }}>{[outlet.outlet_code, outlet.city, outlet.whatsapp_number].filter(Boolean).join(' · ')}</p>
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: outlet.is_active ? 'rgba(29,158,117,.1)' : '#eee', color: outlet.is_active ? C.success : C.textMuted }}>{outlet.is_active ? 'Active' : 'Inactive'}</span>
+                  {outlet.is_active && (
+                    <button onClick={() => deactivateOutlet(outlet.id, outlet.name)}
+                      style={{ padding: '4px 12px', background: 'transparent', border: `0.5px solid ${C.danger}`, color: C.danger, borderRadius: 7, fontSize: 11, cursor: 'pointer' }}>
+                      Deactivate
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* WABA */}
+      {activeSection === 'waba' && (
+        <div>
+          <p style={{ fontSize: 13, fontWeight: 500, margin: '0 0 4px' }}>WhatsApp Business Account</p>
+          <p style={{ fontSize: 12, color: C.textMuted, margin: '0 0 16px' }}>
+            One WABA is shared across all outlets. Each outlet has its own phone number registered under this WABA.
+          </p>
+          {F('WABA ID', 'waba_id', { placeholder: '567890123456789' })}
+          {F('Meta Business Manager ID', 'meta_business_id', { placeholder: '123456789' })}
+          <div style={{ background: '#FFF8EC', border: '0.5px solid #F4D78A', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: '#7A5A00' }}>
+            💡 The shared access token for this WABA is set per-outlet via Settings → WhatsApp tab in each outlet's Settings page.
+          </div>
+          <button onClick={saveBrand} disabled={saving}
+            style={{ padding: '8px 22px', background: saving ? '#aaa' : C.primary, color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: saving ? 'default' : 'pointer' }}>
+            {saving ? 'Saving…' : 'Save WABA settings'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SettingsPanel() {
-  const { apiClient } = useAuth();
+  const { apiClient, user } = useAuth();
+  const isBrandOwner = user?.role === 'brand_owner';
   const [activeTab, setActiveTab] = useState('tables');
   const [toast, setToast] = useState({ msg: '', type: 'success' });
 
@@ -1141,6 +1446,8 @@ export default function SettingsPanel() {
     setTimeout(() => setToast({ msg: '', type: 'success' }), 3500);
   }, []);
 
+  const filteredTabs = TABS.filter(t => !t.brandOnly || isBrandOwner);
+
   const tabContent = {
     tables:     <TabTables     apiClient={apiClient} showToast={showToast} />,
     restaurant: <TabRestaurant apiClient={apiClient} showToast={showToast} />,
@@ -1148,6 +1455,7 @@ export default function SettingsPanel() {
     kitchen:    <TabKitchen    apiClient={apiClient} showToast={showToast} />,
     whatsapp:   <TabWhatsApp   apiClient={apiClient} showToast={showToast} />,
     staff:      <TabStaff      apiClient={apiClient} showToast={showToast} />,
+    brand:      <TabBrand      apiClient={apiClient} showToast={showToast} user={user} />,
   };
 
   return (
@@ -1164,7 +1472,7 @@ export default function SettingsPanel() {
       <div style={{ maxWidth: 860, margin: '0 auto', padding: '24px 16px' }}>
         {/* Tab bar */}
         <div style={{ display: 'flex', gap: 3, marginBottom: 20, background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 10, padding: 4, width: 'fit-content', flexWrap: 'wrap' }}>
-          {TABS.map(tab => (
+          {filteredTabs.map(tab => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
               padding: '7px 14px', borderRadius: 7, fontSize: 12, fontWeight: activeTab === tab.id ? 500 : 400,
               cursor: 'pointer', transition: 'all .15s', whiteSpace: 'nowrap',
