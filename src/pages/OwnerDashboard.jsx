@@ -451,9 +451,9 @@ function useKotStats(restaurantId) {
   const fetch = useCallback(async () => {
     if (!restaurantId) return;
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    const { data, error } = await supabase.from("kot_tickets").select("status, created_at, served_at").eq("restaurant_id", restaurantId).gte("created_at", today.toISOString());
+    const { data, error } = await supabase.from("kot_tickets").select("status, created_at, completed_at").eq("restaurant_id", restaurantId).gte("created_at", today.toISOString());
     if (error || !data) { setStats({ open: 0, inProgress: 0, served: 0, avgTime: null, delayed: 0, fastestItem: null, slowestItem: null }); return; }
-    const times = data.filter(k => k.served_at).map(k => (new Date(k.served_at) - new Date(k.created_at)) / 60000);
+    const times = data.filter(k => k.completed_at).map(k => (new Date(k.completed_at) - new Date(k.created_at)) / 60000);
     setStats({ open: data.filter(k => k.status === "open").length, inProgress: data.filter(k => k.status === "in_progress").length, served: data.filter(k => k.status === "served").length, avgTime: times.length ? Math.round(times.reduce((s, v) => s + v, 0) / times.length) : null, delayed: times.filter(t => t > 20).length, fastestItem: null, slowestItem: null });
   }, [restaurantId]);
   useEffect(() => {
