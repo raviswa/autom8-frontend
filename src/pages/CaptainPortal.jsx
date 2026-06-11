@@ -1,4 +1,4 @@
-// src/pages/CaptainPortal.jsx
+// src/pages/CaptainPortal.jsx 
 // ============================================================================
 // Captain / Steward portal — Takeaway QR fulfillment.
 // The captain scans the customer's QR code to mark their takeaway order
