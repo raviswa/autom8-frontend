@@ -1,4 +1,4 @@
-// src/pages/BrandDashboard.jsx
+// src/pages/BrandDashboard.jsx 
 // ============================================================================
 // Brand Owner / Brand Manager dashboard.
 // Shows aggregate KPIs across all outlets + per-outlet cards.
