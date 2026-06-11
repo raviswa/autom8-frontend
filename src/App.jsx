@@ -2,7 +2,7 @@
 // AUTOM8 FRONTEND — MAIN APP
 // ============================================================================
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { AuthProvider, useAuth }                            from './contexts/AuthContext';
 import { WebSocketProvider }                                from './contexts/WebSocketContext';
 import { SubscriptionProvider, useSubscription, FEATURES }  from './contexts/SubscriptionContext';
@@ -11,6 +11,8 @@ import { KOTPrintTemplate } from './components/KOTPrint';
 export const kotRef = React.createRef();
 import LoginPage          from './pages/LoginPage';
 import OwnerDashboard     from './pages/OwnerDashboard';
+import BrandDashboard     from './pages/BrandDashboard';
+import CaptainPortal      from './pages/CaptainPortal';
 import MarketingDashboard from './pages/MarketingDashboard';
 import ManagerPortal      from './pages/ManagerPortal';
 import KDSScreen          from './pages/KDSScreen';
@@ -49,7 +51,7 @@ function Spinner() {
   );
 }
 
-// ── Simple toast (used by SettingsPanel) ──────────────────────────────────────
+// ── Simple toast ──────────────────────────────────────────────────────────────
 function useToast() {
   const [toast, setToast] = React.useState(null);
   const showToast = React.useCallback((msg, type = 'success') => {
@@ -70,6 +72,23 @@ function useToast() {
   return { showToast, ToastUI };
 }
 
+// ── Outlet drill-down wrapper (brand owner viewing a single outlet) ────────────
+// Reads :outletId from URL params and passes it to OwnerDashboard as restaurantId.
+function OutletDrillDown() {
+  const { outletId } = useParams();
+  const { user, logout, apiClient } = useAuth();
+  // Try to find the outlet name from the cached outlets list on the user object
+  const outletName = user?.outlets?.find(o => o.id === outletId)?.name ?? 'Outlet';
+  return (
+    <OwnerDashboard
+      restaurantId={outletId}
+      restaurantName={outletName}
+      onLogout={logout}
+      apiClient={apiClient}
+    />
+  );
+}
+
 // ── Routes ────────────────────────────────────────────────────────────────────
 function AppRoutes() {
   const { user, loading, logout, apiClient } = useAuth();
@@ -78,16 +97,22 @@ function AppRoutes() {
 
   if (loading || subLoading) return <Spinner />;
 
-  const restaurantId   = user?.restaurant_id ?? user?.restaurantId ?? '46fb9b9e-431a-43c9-9edb-d316b0fef216';
-  const restaurantName = user?.restaurant_name ?? user?.restaurantName ?? 'Hotel Munafe';
+  // Brand owners have restaurant_id = null — fall back to the first outlet id if needed
+  const restaurantId   = user?.restaurant_id ?? user?.restaurantId ?? user?.outlets?.[0]?.id ?? null;
+  const restaurantName = user?.restaurant_name ?? user?.restaurantName
+    ?? user?.brand?.name ?? 'Munafe';
 
   const defaultRoute = () => {
     if (!user) return '/login';
     const roleMap = {
+      brand_owner:   '/dashboard/brand',
+      brand_manager: '/dashboard/brand',
       owner:         '/dashboard/owner',
       manager:       '/dashboard/manager',
       kitchen_staff: '/dashboard/kitchen',
       marketing:     '/dashboard/marketing',
+      captain:       '/dashboard/captain',
+      waiter:        '/dashboard/kitchen',  // waiters land on KDS (read-only view)
     };
     return roleMap[user.role] ?? `/dashboard/${user.role}`;
   };
@@ -100,13 +125,33 @@ function AppRoutes() {
         {/* ── Public ── */}
         <Route path="/login" element={<LoginPage />} />
 
-        {/* Walk-in form */}
+        {/* Walk-in form (public kiosk) */}
         <Route
           path="/checkin"
           element={
             <FeatureRoute feature={FEATURES.TOKEN_MANAGEMENT}>
               <WalkInForm />
             </FeatureRoute>
+          }
+        />
+
+        {/* ── Brand Owner — chain dashboard ── */}
+        <Route
+          path="/dashboard/brand"
+          element={
+            <ProtectedRoute allowedRoles={['brand_owner', 'brand_manager']}>
+              <BrandDashboard />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* ── Brand Owner — outlet drill-down (reuses OwnerDashboard scoped to outlet) ── */}
+        <Route
+          path="/dashboard/brand/outlet/:outletId"
+          element={
+            <ProtectedRoute allowedRoles={['brand_owner', 'brand_manager']}>
+              <OutletDrillDown />
+            </ProtectedRoute>
           }
         />
 
@@ -125,11 +170,11 @@ function AppRoutes() {
           }
         />
 
-        {/* ── Settings ── (owner only) ── */}
+        {/* ── Settings — owner + brand_owner ── */}
         <Route
           path="/settings"
           element={
-            <ProtectedRoute allowedRoles={['owner']}>
+            <ProtectedRoute allowedRoles={['owner', 'brand_owner']}>
               <SettingsPanel apiClient={apiClient} showToast={showToast} />
             </ProtectedRoute>
           }
@@ -139,7 +184,7 @@ function AppRoutes() {
         <Route
           path="/dashboard/marketing"
           element={
-            <ProtectedRoute allowedRoles={['marketing', 'owner']}>
+            <ProtectedRoute allowedRoles={['marketing', 'owner', 'brand_owner', 'brand_manager']}>
               <MarketingDashboard
                 restaurantId={restaurantId}
                 restaurantName={restaurantName}
@@ -160,15 +205,25 @@ function AppRoutes() {
           }
         />
 
-        {/* ── KDS ── */}
+        {/* ── KDS (kitchen + waiters get read-only view) ── */}
         <Route
           path="/dashboard/kitchen"
           element={
-            <ProtectedRoute allowedRoles={['kitchen_staff', 'owner', 'manager']}>
+            <ProtectedRoute allowedRoles={['kitchen_staff', 'owner', 'manager', 'waiter']}>
               {hasAnyOf(FEATURES.DINE_IN, FEATURES.TAKEAWAY, FEATURES.DELIVERY)
                 ? <KDSScreen />
                 : <FeatureWall feature={FEATURES.DINE_IN} />
               }
+            </ProtectedRoute>
+          }
+        />
+
+        {/* ── Captain Portal — takeaway QR fulfillment ── */}
+        <Route
+          path="/dashboard/captain"
+          element={
+            <ProtectedRoute allowedRoles={['captain', 'owner', 'manager']}>
+              <CaptainPortal />
             </ProtectedRoute>
           }
         />
