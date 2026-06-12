@@ -358,6 +358,12 @@ export default function ManagerPortal() {
   const [rejectReason,    setRejectReason]    = useState('');
   const [processingId,    setProcessingId]    = useState(null);
 
+  const [showWalkInModal,   setShowWalkInModal]   = useState(false);
+  const [walkInName,        setWalkInName]        = useState('');
+  const [walkInPhone,       setWalkInPhone]       = useState('');
+  const [walkInPax,         setWalkInPax]         = useState(2);
+  const [walkInSubmitting,  setWalkInSubmitting]  = useState(false);
+
   // Table status management
   const [tableStatusModal,    setTableStatusModal]    = useState(null); // { tableId, tableNumber, currentStatus }
   const [pendingStatus,       setPendingStatus]       = useState('');   // 'reserved' | 'dirty'
@@ -580,6 +586,32 @@ export default function ManagerPortal() {
     finally { setProcessingId(null); setRejectReason(''); }
   };
 
+  const addWalkInToQueue = async () => {
+    if (!walkInName.trim()) { showToast('Customer name is required'); return; }
+    const digits = walkInPhone.replace(/\D/g, '');
+    if (!digits || digits.length < 10) { showToast('Enter a valid 10-digit phone'); return; }
+    setWalkInSubmitting(true);
+    try {
+      await apiClient.post('/api/tokens', {
+        name: walkInName.trim(),
+        phone: digits,
+        type: 'dinein',
+        pax: Math.max(1, parseInt(walkInPax, 10) || 1),
+        restaurant_id: user?.restaurant_id,
+      });
+      showToast(`${walkInName.trim()} added to queue`);
+      setShowWalkInModal(false);
+      setWalkInName('');
+      setWalkInPhone('');
+      setWalkInPax(2);
+      await fetchTokens();
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to add walk-in');
+    } finally {
+      setWalkInSubmitting(false);
+    }
+  };
+
   // ── Token actions ─────────────────────────────────────────────────────────
   const assignTable = async (token) => {
     const tableId = assignTableSel[token.id];
@@ -735,6 +767,38 @@ export default function ManagerPortal() {
     <div style={{ minHeight: "100vh", background: C.pageBg }}>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <Toast msg={toastMsg} />
+
+      {/* ── Add walk-in modal ────────────────────────────────────────────── */}
+      {showWalkInModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16 }}>
+          <div style={{ ...CARD, maxWidth: 400, width: "100%", padding: 0, overflow: "hidden" }}>
+            <div style={{ background: C.primaryLight, borderBottom: `0.5px solid ${C.primaryBorder}`, padding: "16px 20px" }}>
+              <h3 style={{ fontSize: 15, fontWeight: 500, color: C.primaryDark, margin: 0 }}>Add walk-in to queue</h3>
+              <p style={{ fontSize: 12, color: C.textSub, margin: "2px 0 0" }}>For WhatsApp bookings that failed to sync</p>
+            </div>
+            <div style={{ padding: "20px 20px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 500, color: C.textSub, marginBottom: 5, display: "block" }}>Customer name</label>
+                <input value={walkInName} onChange={e => setWalkInName(e.target.value)} placeholder="Ravi Sharma" style={inputStyle} />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 500, color: C.textSub, marginBottom: 5, display: "block" }}>WhatsApp phone</label>
+                <input value={walkInPhone} onChange={e => setWalkInPhone(e.target.value)} placeholder="917305362067" style={inputStyle} />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 500, color: C.textSub, marginBottom: 5, display: "block" }}>Party size</label>
+                <input type="number" min={1} max={20} value={walkInPax} onChange={e => setWalkInPax(e.target.value)} style={inputStyle} />
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Btn variant="secondary" onClick={() => setShowWalkInModal(false)} style={{ flex: 1 }}>Cancel</Btn>
+                <Btn variant="primary" onClick={addWalkInToQueue} disabled={walkInSubmitting} style={{ flex: 1 }}>
+                  {walkInSubmitting ? <Spinner size={14} /> : 'Add to queue'}
+                </Btn>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Reject modal ─────────────────────────────────────────────────── */}
       {rejectModal && (
@@ -1201,9 +1265,17 @@ export default function ManagerPortal() {
             )}
 
             <div>
-              <SectionLabel>Waiting for table — {waitingTokens.length} token{waitingTokens.length !== 1 ? 's' : ''}</SectionLabel>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                <SectionLabel>Waiting for table — {waitingTokens.length} token{waitingTokens.length !== 1 ? 's' : ''}</SectionLabel>
+                <Btn variant="primary" onClick={() => setShowWalkInModal(true)}>+ Add walk-in</Btn>
+              </div>
               {waitingTokens.length === 0 ? (
-                <div style={{ ...CARD, textAlign: "center", padding: "32px 20px", color: C.textMuted, fontSize: 13 }}>No customers waiting right now.</div>
+                <div style={{ ...CARD, textAlign: "center", padding: "32px 20px", color: C.textMuted, fontSize: 13 }}>
+                  No customers waiting right now.
+                  <div style={{ marginTop: 12 }}>
+                    <Btn variant="primary" onClick={() => setShowWalkInModal(true)}>+ Add walk-in manually</Btn>
+                  </div>
+                </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   {waitingTokens.map(token => {
