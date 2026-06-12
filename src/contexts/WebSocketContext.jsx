@@ -3,68 +3,95 @@
 // src/contexts/WebSocketContext.jsx
 // ============================================================================
 
-import React, { createContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from './AuthContext';
 
 const WebSocketContext = createContext();
 
+function resolveWsBase() {
+  if (import.meta.env.VITE_WS_URL) {
+    return import.meta.env.VITE_WS_URL.split('?')[0].replace(/\/$/, '');
+  }
+  const apiUrl = import.meta.env.VITE_API_URL;
+  if (apiUrl) {
+    return apiUrl.replace(/^http/i, 'ws').replace(/\/$/, '') + '/ws';
+  }
+  if (window.location.hostname === 'app.autom8.works') {
+    return 'wss://api.autom8.works/ws';
+  }
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${wsProtocol}//${window.location.hostname}:3001/ws`;
+}
+
 export function WebSocketProvider({ children }) {
-  const { user } = useAuth();
+  const { user, apiClient } = useAuth();
   const [ws, setWs] = useState(null);
   const [connected, setConnected] = useState(false);
   const [updates, setUpdates] = useState([]);
+  const reconnectTimer = useRef(null);
 
   useEffect(() => {
-    if (!user?.restaurant_id) return;
+    let cancelled = false;
+    let socket = null;
 
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const apiHost = import.meta.env.VITE_API_URL?.split('//')[1] || 'localhost:3001';
-    const baseWs = import.meta.env.VITE_WS_URL
-      || `${wsProtocol}//${apiHost}/ws`;
-    const wsUrl = `${baseWs}${baseWs.includes('?') ? '&' : '?'}restaurant_id=${encodeURIComponent(user.restaurant_id)}`;
+    const connect = async (attempt = 0) => {
+      let restaurantId = user?.restaurant_id;
 
-    const websocket = new WebSocket(wsUrl);
-
-    websocket.onopen = () => {
-      console.log('WebSocket connected');
-      setConnected(true);
-      
-      // Subscribe to restaurant updates
-      websocket.send(JSON.stringify({
-        type: 'SUBSCRIBE',
-        userId: user.id,
-        restaurantId: user.restaurant_id
-      }));
-    };
-
-    websocket.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      
-      if (data.type === 'SUBSCRIBED') {
-        console.log('Subscribed to updates');
-      } else {
-        // Handle incoming updates
-        setUpdates(prev => [data, ...prev.slice(0, 49)]); // Keep last 50 updates
+      if (!restaurantId && apiClient) {
+        try {
+          const res = await apiClient.get('/api/dashboard/waba');
+          restaurantId = res.data?.restaurant?.id ?? null;
+        } catch (_) {}
       }
+
+      if (!restaurantId || cancelled) {
+        setConnected(false);
+        return;
+      }
+
+      const base = resolveWsBase();
+      const wsUrl = `${base}?restaurant_id=${encodeURIComponent(restaurantId)}`;
+      socket = new WebSocket(wsUrl);
+
+      socket.onopen = () => {
+        if (cancelled) return;
+        console.log('[WebSocket] connected', restaurantId);
+        setConnected(true);
+        setWs(socket);
+      };
+
+      socket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'CONNECTED' || data.type === 'SUBSCRIBED') return;
+          setUpdates(prev => [data, ...prev.slice(0, 49)]);
+        } catch (err) {
+          console.error('[WebSocket] parse error:', err);
+        }
+      };
+
+      socket.onerror = (error) => {
+        console.error('[WebSocket] error:', error);
+      };
+
+      socket.onclose = () => {
+        if (cancelled) return;
+        console.log('[WebSocket] disconnected');
+        setConnected(false);
+        setWs(null);
+        const delay = Math.min(30_000, 2_000 * (attempt + 1));
+        reconnectTimer.current = setTimeout(() => connect(attempt + 1), delay);
+      };
     };
 
-    websocket.onerror = (error) => {
-      console.error('WebSocket error:', error);
-    };
-
-    websocket.onclose = () => {
-      console.log('WebSocket disconnected');
-      setConnected(false);
-    };
-
-    setWs(websocket);
+    connect();
 
     return () => {
-      if (websocket.readyState === WebSocket.OPEN) {
-        websocket.close();
-      }
+      cancelled = true;
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      if (socket?.readyState === WebSocket.OPEN) socket.close();
     };
-  }, [user]);
+  }, [user, apiClient]);
 
   const send = useCallback((message) => {
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -72,12 +99,7 @@ export function WebSocketProvider({ children }) {
     }
   }, [ws]);
 
-  const value = {
-    connected,
-    updates,
-    send,
-    ws
-  };
+  const value = { connected, updates, send, ws };
 
   return (
     <WebSocketContext.Provider value={value}>

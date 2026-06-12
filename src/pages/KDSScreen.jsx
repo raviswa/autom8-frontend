@@ -499,6 +499,7 @@ export default function KDSScreen() {
   const [view,     setView]       = useState('live');
   const [sound,    setSound]      = useState(true);
   const [printMsg, setPrintMsg]   = useState('');   // transient "Printing KOT…" toast
+  const [kitchenWorkflow, setKitchenWorkflow] = useState('KOT_only');
 
   // Track order numbers that have already been auto-printed this session
   // so a polling refresh doesn't re-print the same KOT
@@ -522,6 +523,12 @@ const fetchFeed = useCallback(async () => {
     setLoading(false);
   }
 }, [apiClient]);
+
+  useEffect(() => {
+    apiClient.get('/api/dashboard/waba')
+      .then(res => setKitchenWorkflow(res.data?.restaurant?.kitchen_workflow || 'KOT_only'))
+      .catch(() => {});
+  }, [apiClient]);
 
   useEffect(() => {
     fetchFeed();
@@ -551,15 +558,21 @@ const fetchFeed = useCallback(async () => {
 
     if (sound) playBeep();
 
-    // Fetch fresh items so the KOT has real item names, then print
+    const workflow = latest.kitchen_workflow || kitchenWorkflow;
+    const shouldPrintKot = workflow === 'KOT_only' || workflow === 'Both_KOT_and_KDS';
+
     fetchFeed().then(freshItems => {
-      const kotData = buildKOTFromWSPayload(latest, freshItems);
-      printKOT(kotData);
-      showPrintToast(`KOT printed for #${orderNum}`);
+      if (shouldPrintKot) {
+        const kotData = buildKOTFromWSPayload(latest, freshItems);
+        printKOT(kotData);
+        showPrintToast(`KOT printed for #${orderNum}`);
+      } else {
+        showPrintToast(`New order #${orderNum} on KDS`);
+      }
     });
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [updates]);
+  }, [updates, kitchenWorkflow]);
 
   function showPrintToast(msg) {
     setPrintMsg(msg);
