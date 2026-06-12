@@ -6,6 +6,7 @@
 import React, { createContext, useState, useCallback, useEffect } from 'react';
 import { createClient } from "@supabase/supabase-js";
 import axios from 'axios';
+import { resolveApiBase } from '../config/api';
 
 export const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -15,7 +16,7 @@ export const supabase = createClient(
 const AuthContext = createContext();
 
 const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3001',
+  baseURL: resolveApiBase(),
   headers: {
     'Content-Type': 'application/json'
   }
@@ -32,7 +33,9 @@ export function AuthProvider({ children }) {
       const token = localStorage.getItem('authToken');
       const refreshTokenValue = localStorage.getItem('refreshToken');
 
-      if (token) {
+      const onLoginPage = typeof window !== 'undefined' && window.location.pathname === '/login';
+
+      if (token && !onLoginPage) {
         try {
           const userData = JSON.parse(localStorage.getItem('userData'));
           setUser(userData);
@@ -82,9 +85,14 @@ const requestInterceptor = apiClient.interceptors.request.use(
       async (error) => {
         const originalRequest = error.config;
 
-        if ((error.response?.status === 401 || error.response?.status === 403) 
-            && !originalRequest._retry 
-            && !originalRequest.url?.includes('/api/auth/refresh')) { 
+        const url = String(originalRequest.url || '');
+        const isPublicAuth = url.includes('/api/auth/login')
+          || url.includes('/api/auth/signup')
+          || url.includes('/api/auth/refresh');
+
+        if ((error.response?.status === 401 || error.response?.status === 403)
+            && !originalRequest._retry
+            && !isPublicAuth) {
 
           originalRequest._retry = true;
           try {
@@ -133,6 +141,13 @@ const requestInterceptor = apiClient.interceptors.request.use(
 
   const loginWithEmail = useCallback(async (email, password) => {
     setError(null);
+    // Drop any stale session so login is not sent with an old Bearer token
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('refreshToken');
+    localStorage.removeItem('userData');
+    delete apiClient.defaults.headers.common['Authorization'];
+    setUser(null);
+
     try {
       const response = await apiClient.post('/api/auth/login', { email, password });
 
@@ -155,7 +170,10 @@ const requestInterceptor = apiClient.interceptors.request.use(
       setUser(userData);
       return userData;
     } catch (err) {
-      const message = err.response?.data?.error || 'Login failed';
+      const message = err.response?.data?.error
+        || (err.code === 'ERR_NETWORK' ? 'Cannot reach API server. Please try again.' : null)
+        || err.message
+        || 'Login failed';
       setError(message);
       throw new Error(message);
     }

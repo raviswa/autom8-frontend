@@ -5,26 +5,9 @@
 
 import React, { createContext, useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from './AuthContext';
+import { resolveWsBase } from '../config/api';
 
 const WebSocketContext = createContext();
-
-function resolveWsBase() {
-  // Production app hostname always wins — avoids stale Railway VITE_WS_URL in builds
-  if (window.location.hostname === 'app.autom8.works') {
-    return 'wss://api.autom8.works/ws';
-  }
-  if (import.meta.env.VITE_WS_URL) {
-    const base = import.meta.env.VITE_WS_URL.split('?')[0].replace(/\/$/, '');
-    return base.endsWith('/ws') ? base : `${base}/ws`;
-  }
-  const apiUrl = import.meta.env.VITE_API_URL;
-  if (apiUrl) {
-    const wsBase = apiUrl.replace(/^http/i, 'ws').replace(/\/$/, '');
-    return wsBase.endsWith('/ws') ? wsBase : `${wsBase}/ws`;
-  }
-  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${wsProtocol}//${window.location.hostname}:3001/ws`;
-}
 
 export function WebSocketProvider({ children }) {
   const { user, apiClient } = useAuth();
@@ -34,6 +17,12 @@ export function WebSocketProvider({ children }) {
   const reconnectTimer = useRef(null);
 
   useEffect(() => {
+    if (!user) {
+      setConnected(false);
+      setWs(null);
+      return undefined;
+    }
+
     let cancelled = false;
     let socket = null;
 

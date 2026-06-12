@@ -27,8 +27,13 @@ export default function LoginPage() {
       // Navigate based on role
       const roleRoutes = {
         owner: '/dashboard/owner',
+        brand_owner: '/dashboard/brand',
+        brand_manager: '/dashboard/brand',
         manager: '/dashboard/manager',
-        kitchen_staff: '/dashboard/kitchen'
+        kitchen_staff: '/dashboard/kitchen',
+        marketing: '/dashboard/marketing',
+        captain: '/dashboard/captain',
+        waiter: '/dashboard/kitchen',
       };
       
       navigate(roleRoutes[user.role] || '/');
