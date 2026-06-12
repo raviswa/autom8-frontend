@@ -19,6 +19,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { useAuth } from '../contexts/AuthContext';
+import { useWebSocket } from '../contexts/WebSocketContext';
 import { useKOTPrint } from '../components/KOTPrint';
 import { kotRef } from '../App';
 import { format } from 'date-fns';
@@ -326,6 +327,7 @@ function validateRow(row, index) {
 // ============================================================================
 export default function ManagerPortal() {
   const { user, apiClient, logout } = useAuth();
+  const { updates } = useWebSocket();
   const { printConsolidated } = useKOTPrint(kotRef);
 
   const [tables,        setTables]        = useState([]);
@@ -379,7 +381,18 @@ export default function ManagerPortal() {
   const showToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 3500); };
 
   // ── Fetchers ─────────────────────────────────────────────────────────────
-  const fetchTokens    = useCallback(async () => { try { const r = await apiClient.get('/api/tokens');     setTokens(r.data.tokens || r.data || []); } catch(e) {} }, [apiClient]);
+  const fetchTokens    = useCallback(async () => {
+    try {
+      const r = await apiClient.get('/api/tokens');
+      setTokens(r.data.tokens || r.data || []);
+    } catch (e) {
+      console.error('[ManagerPortal] fetchTokens failed:', e.response?.data || e.message);
+      if (e.response?.status === 401) {
+        setToastMsg('Queue unavailable — no restaurant linked to your account. Contact admin.');
+        setTimeout(() => setToastMsg(''), 5000);
+      }
+    }
+  }, [apiClient]);
   const fetchTables    = useCallback(async () => { try { const r = await apiClient.get('/api/tables');     setTables(r.data.tables || r.data || []); } catch(e) {} }, [apiClient]);
   const fetchOrders    = useCallback(async () => { try { const r = await apiClient.get('/api/orders');     setOrders(r.data.orders || r.data || []); } catch(e) {} }, [apiClient]);
   const fetchMenuItems = useCallback(async () => { try { const r = await apiClient.get('/api/menu-items?ignore_slot=true'); setMenuItems(r.data.items || r.data || []); } catch(e) {} }, [apiClient]);
@@ -391,6 +404,15 @@ export default function ManagerPortal() {
     const quick = setInterval(async () => { await fetchTokens(); await fetchTables(); await fetchOrders(); }, 8000);
     return () => { clearInterval(full); clearInterval(quick); };
   }, [fetchData, fetchTokens, fetchTables, fetchOrders]);
+
+  useEffect(() => {
+    const latest = updates[0];
+    if (!latest) return;
+    if (['TOKEN_NEW', 'TOKEN_ASSIGNED', 'TOKEN_APPROVED', 'TOKEN_COMPLETED', 'TOKEN_REJECTED'].includes(latest.type)) {
+      fetchTokens();
+      fetchTables();
+    }
+  }, [updates, fetchTokens, fetchTables]);
 
   // ── Countdown ticker — updates every second for reservation timers ────────
   useEffect(() => {

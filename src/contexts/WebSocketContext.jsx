@@ -15,11 +15,13 @@ export function WebSocketProvider({ children }) {
   const [updates, setUpdates] = useState([]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user?.restaurant_id) return;
 
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = import.meta.env.VITE_WS_URL || 
-      `${wsProtocol}//${import.meta.env.VITE_API_URL?.split('//')[1] || 'localhost:3001'}`;
+    const apiHost = import.meta.env.VITE_API_URL?.split('//')[1] || 'localhost:3001';
+    const baseWs = import.meta.env.VITE_WS_URL
+      || `${wsProtocol}//${apiHost}/ws`;
+    const wsUrl = `${baseWs}${baseWs.includes('?') ? '&' : '?'}restaurant_id=${encodeURIComponent(user.restaurant_id)}`;
 
     const websocket = new WebSocket(wsUrl);
 
