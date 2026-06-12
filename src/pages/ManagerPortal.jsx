@@ -492,9 +492,6 @@ export default function ManagerPortal() {
       else if (order && orderAction === 'cancel') await apiClient.delete(`/api/orders/${order.id}`);
       if (token) { try { await apiClient.put(`/api/tokens/${token.id}/complete`); } catch(e) {} }
       await apiClient.put(`/api/tables/${tableId}/status`, { status: 'available' });
-      if (token?.phone) {
-        await apiClient.post('/api/feedback/queue', { customer_phone: token.phone, customer_name: token.name, token_number: token.id, table_number: String(tableNumber) }).catch(()=>{});
-      }
       // Clear any local reservation expiry
       setReservationExpiry(prev => { const n = { ...prev }; delete n[tableId]; return n; });
       await fetchTables(); await fetchOrders(); await fetchTokens();
