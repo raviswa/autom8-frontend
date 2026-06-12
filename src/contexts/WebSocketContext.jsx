@@ -9,15 +9,18 @@ import { useAuth } from './AuthContext';
 const WebSocketContext = createContext();
 
 function resolveWsBase() {
+  // Production app hostname always wins — avoids stale Railway VITE_WS_URL in builds
+  if (window.location.hostname === 'app.autom8.works') {
+    return 'wss://api.autom8.works/ws';
+  }
   if (import.meta.env.VITE_WS_URL) {
-    return import.meta.env.VITE_WS_URL.split('?')[0].replace(/\/$/, '');
+    const base = import.meta.env.VITE_WS_URL.split('?')[0].replace(/\/$/, '');
+    return base.endsWith('/ws') ? base : `${base}/ws`;
   }
   const apiUrl = import.meta.env.VITE_API_URL;
   if (apiUrl) {
-    return apiUrl.replace(/^http/i, 'ws').replace(/\/$/, '') + '/ws';
-  }
-  if (window.location.hostname === 'app.autom8.works') {
-    return 'wss://api.autom8.works/ws';
+    const wsBase = apiUrl.replace(/^http/i, 'ws').replace(/\/$/, '');
+    return wsBase.endsWith('/ws') ? wsBase : `${wsBase}/ws`;
   }
   const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${wsProtocol}//${window.location.hostname}:3001/ws`;

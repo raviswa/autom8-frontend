@@ -58,16 +58,19 @@ export function AuthProvider({ children }) {
 const requestInterceptor = apiClient.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('authToken');
+    const isAuthRoute = String(config.url || '').includes('/api/auth/');
     if (token) {
       config.headers['Authorization'] = `Bearer ${token}`;
-    }
-    try {
-      const userData = JSON.parse(localStorage.getItem('userData') || 'null');
-      const outletId = userData?.restaurant_id ?? userData?.outlets?.[0]?.id;
-      if (outletId) {
-        config.headers['x-restaurant-id'] = outletId;
+      if (!isAuthRoute) {
+        try {
+          const userData = JSON.parse(localStorage.getItem('userData') || 'null');
+          const outletId = userData?.restaurant_id ?? userData?.outlets?.[0]?.id;
+          if (outletId) {
+            config.headers['x-restaurant-id'] = outletId;
+          }
+        } catch (_) {}
       }
-    } catch (_) {}
+    }
     return config;
   },
   (error) => Promise.reject(error)

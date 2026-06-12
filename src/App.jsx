@@ -124,6 +124,7 @@ function AppRoutes() {
 
         {/* ── Public ── */}
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/unauthorized" element={<Navigate to="/login" replace />} />
 
         {/* Walk-in form (public kiosk) */}
         <Route
