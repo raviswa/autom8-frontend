@@ -96,15 +96,19 @@ const SLOT_DB_TO_LABEL = {
 const RESERVATION_DURATIONS = [30, 60, 90, 120];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function toUTC(iso) {
-  if (!iso) return iso;
-  return iso.toString().replace(' ', 'T').replace(/([+-]\d{2}:\d{2}|Z)$/, '') + 'Z';
-}
 function safeFormat(dateVal, fmt) {
   if (!dateVal) return '—';
   try {
-    const d = new Date(toUTC(dateVal));
+    const d = new Date(dateVal);
     if (isNaN(d.getTime())) return '—';
+    if (fmt === 'HH:mm') {
+      return d.toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      });
+    }
     return format(d, fmt);
   } catch { return '—'; }
 }
