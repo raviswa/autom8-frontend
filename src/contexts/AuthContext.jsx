@@ -61,6 +61,13 @@ const requestInterceptor = apiClient.interceptors.request.use(
     if (token) {
       config.headers['Authorization'] = `Bearer ${token}`;
     }
+    try {
+      const userData = JSON.parse(localStorage.getItem('userData') || 'null');
+      const outletId = userData?.restaurant_id ?? userData?.outlets?.[0]?.id;
+      if (outletId) {
+        config.headers['x-restaurant-id'] = outletId;
+      }
+    } catch (_) {}
     return config;
   },
   (error) => Promise.reject(error)
