@@ -171,11 +171,11 @@ function AppRoutes() {
           }
         />
 
-        {/* ── Settings — owner + brand_owner ── */}
+        {/* ── Settings — owner + brand_owner; manager sees Staff tab only ── */}
         <Route
           path="/settings"
           element={
-            <ProtectedRoute allowedRoles={['owner', 'brand_owner']}>
+            <ProtectedRoute allowedRoles={['owner', 'brand_owner', 'manager']}>
               <SettingsPanel apiClient={apiClient} showToast={showToast} />
             </ProtectedRoute>
           }

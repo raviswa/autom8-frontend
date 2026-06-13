@@ -17,6 +17,7 @@
 // ============================================================================
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { useAuth } from '../contexts/AuthContext';
 import { useWebSocket } from '../contexts/WebSocketContext';
@@ -1180,6 +1181,16 @@ export default function ManagerPortal() {
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <span style={{ fontSize: 12, color: C.textSub }}>👤 {user?.full_name || user?.email}</span>
+              <Link
+                to="/settings"
+                style={{
+                  fontSize: 12, fontWeight: 500, color: C.primaryDark, textDecoration: 'none',
+                  padding: '6px 12px', borderRadius: 8, border: `0.5px solid ${C.primaryBorder}`,
+                  background: C.primaryLight,
+                }}
+              >
+                👥 Team
+              </Link>
               <Btn onClick={() => openNewOrderModal(null)}>+ New order</Btn>
               <Btn variant="danger" onClick={logout}>Logout</Btn>
             </div>

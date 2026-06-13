@@ -9,10 +9,11 @@
  *   WhatsApp    — WA number, WABA ID, manager phone, access token
  *
  * Uses the same design tokens (C) as ManagerPortal.jsx.
- * Drop into any route that is only reachable by role === 'owner'.
+ * Drop into /settings — owner sees all tabs; manager sees Staff (Team) only.
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
 // ─── Design tokens (matches ManagerPortal) ────────────────────────────────────
@@ -927,6 +928,28 @@ function TabWhatsApp({ apiClient, showToast }) {
 // TAB 6 — STAFF
 // Onboard employees, edit details, set roles, collect WA numbers, terminate
 // ═════════════════════════════════════════════════════════════════════════════
+
+const STAFF_NOTIFY_ROLES = ['manager', 'kitchen_staff', 'captain', 'waiter', 'owner'];
+
+function validateStaffWhatsApp(raw, role) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  const required = STAFF_NOTIFY_ROLES.includes(role);
+
+  if (!digits) {
+    if (required) {
+      return 'WhatsApp number is required for this role (12 digits with country code, e.g. 919876543210).';
+    }
+    return null;
+  }
+  if (digits.length === 10) {
+    return 'Enter the full number with country code (e.g. 917305362067), not just the 10-digit mobile.';
+  }
+  if (digits.length < 11 || digits.length > 15) {
+    return 'WhatsApp number must be 11–15 digits including country code (e.g. 919876543210).';
+  }
+  return null;
+}
+
 function TabStaff({ apiClient, showToast }) {
   const [employees, setEmployees] = useState([]);
   const [roles,     setRoles]     = useState([]);
@@ -979,12 +1002,17 @@ function TabStaff({ apiClient, showToast }) {
   const saveEdit = async (emp) => {
     if (!editForm.full_name?.trim()) return showToast('Name is required', 'error');
     if (!editForm.role)              return showToast('Role is required', 'error');
+    const waErr = validateStaffWhatsApp(editForm.whatsapp_number, editForm.role);
+    if (waErr) return showToast(waErr, 'error');
+    const normalizedWa = editForm.whatsapp_number
+      ? String(editForm.whatsapp_number).replace(/\D/g, '')
+      : null;
     setEditSaving(true);
     try {
       await apiClient.put(`/api/staff/${emp.id}`, {
         full_name:       editForm.full_name.trim(),
         phone:           editForm.phone           || null,
-        whatsapp_number: editForm.whatsapp_number || null,
+        whatsapp_number: normalizedWa,
         role:            editForm.role,
       });
       showToast(`${editForm.full_name} updated`);
@@ -1001,9 +1029,17 @@ function TabStaff({ apiClient, showToast }) {
     if (!form.full_name) return showToast('Name is required', 'error');
     if (!form.email)     return showToast('Email is required', 'error');
     if (!form.role)      return showToast('Role is required', 'error');
+    const waErr = validateStaffWhatsApp(form.whatsapp_number, form.role);
+    if (waErr) return showToast(waErr, 'error');
+    const payload = {
+      ...form,
+      whatsapp_number: form.whatsapp_number
+        ? String(form.whatsapp_number).replace(/\D/g, '')
+        : '',
+    };
     setSaving(true);
     try {
-      await apiClient.post('/api/staff', form);
+      await apiClient.post('/api/staff', payload);
       showToast(`${form.full_name} added${form.whatsapp_number ? ' — WhatsApp invite sent' : ''}`);
       setShowForm(false);
       setForm({ full_name: '', email: '', phone: '', whatsapp_number: '', role: '' });
@@ -1031,7 +1067,7 @@ function TabStaff({ apiClient, showToast }) {
     marketing:     { bg: '#FFF7ED', color: '#9A3412' },
   };
 
-  const NOTIFY_ROLES = ['manager', 'kitchen_staff', 'captain', 'waiter', 'owner'];
+  const NOTIFY_ROLES = STAFF_NOTIFY_ROLES;
 
   const active     = employees.filter(e => e.is_active);
   const terminated = employees.filter(e => !e.is_active);
@@ -1077,11 +1113,18 @@ function TabStaff({ apiClient, showToast }) {
             <div><Label>Phone</Label><Input value={form.phone} onChange={v => setF('phone', v)} placeholder="9876543210" /></div>
           </div>
           <div style={{ marginBottom: 14 }}>
-            <Label>
+            <Label required={NOTIFY_ROLES.includes(form.role)}>
               WhatsApp number
-              {NOTIFY_ROLES.includes(form.role) && <span style={{ color: C.success, marginLeft: 6, fontSize: 10 }}>● Notifications will be sent here</span>}
+              {NOTIFY_ROLES.includes(form.role) && <span style={{ color: C.success, marginLeft: 6, fontSize: 10 }}>● Required for notifications</span>}
             </Label>
-            <Input value={form.whatsapp_number} onChange={v => setF('whatsapp_number', v)} placeholder="919876543210 (with country code)" />
+            <Input
+              value={form.whatsapp_number}
+              onChange={v => setF('whatsapp_number', v)}
+              placeholder="919876543210"
+            />
+            <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+              12 digits including country code (India: 91 + 10-digit mobile). No + or spaces needed.
+            </div>
             {NOTIFY_ROLES.includes(form.role) && (
               <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
                 {{
@@ -1200,13 +1243,16 @@ function TabStaff({ apiClient, showToast }) {
                         <Input value={editForm.phone} onChange={v => setEF('phone', v)} placeholder="9876543210" />
                       </div>
                       <div>
-                        <Label>
+                        <Label required={NOTIFY_ROLES.includes(editForm.role)}>
                           WhatsApp number
                           {NOTIFY_ROLES.includes(editForm.role) && (
-                            <span style={{ color: C.success, marginLeft: 6, fontSize: 10 }}>● Notifications here</span>
+                            <span style={{ color: C.success, marginLeft: 6, fontSize: 10 }}>● Required for notifications</span>
                           )}
                         </Label>
                         <Input value={editForm.whatsapp_number} onChange={v => setEF('whatsapp_number', v)} placeholder="919876543210" />
+                        <div style={{ fontSize: 11, color: C.textMuted, marginTop: 3 }}>
+                          12 digits with country code (e.g. 917305362067).
+                        </div>
                         {NOTIFY_ROLES.includes(editForm.role) && (
                           <div style={{ fontSize: 11, color: C.textMuted, marginTop: 3 }}>
                             {{
@@ -1438,7 +1484,8 @@ function TabBrand({ apiClient, showToast, user }) {
 export default function SettingsPanel() {
   const { apiClient, user } = useAuth();
   const isBrandOwner = user?.role === 'brand_owner';
-  const [activeTab, setActiveTab] = useState('tables');
+  const isManagerOnly = user?.role === 'manager';
+  const [activeTab, setActiveTab] = useState(isManagerOnly ? 'staff' : 'tables');
   const [toast, setToast] = useState({ msg: '', type: 'success' });
 
   const showToast = useCallback((msg, type = 'success') => {
@@ -1446,7 +1493,11 @@ export default function SettingsPanel() {
     setTimeout(() => setToast({ msg: '', type: 'success' }), 3500);
   }, []);
 
-  const filteredTabs = TABS.filter(t => !t.brandOnly || isBrandOwner);
+  const filteredTabs = TABS.filter(t => {
+    if (isManagerOnly) return t.id === 'staff';
+    if (t.brandOnly && !isBrandOwner) return false;
+    return true;
+  });
 
   const tabContent = {
     tables:     <TabTables     apiClient={apiClient} showToast={showToast} />,
@@ -1464,13 +1515,29 @@ export default function SettingsPanel() {
       <Toast msg={toast.msg} type={toast.type} />
 
       {/* Header */}
-      <div style={{ background: C.cardBg, borderBottom: `0.5px solid ${C.border}`, padding: '16px 24px' }}>
-        <h1 style={{ fontSize: 18, fontWeight: 500, color: C.text, margin: 0 }}>Settings</h1>
-        <p style={{ fontSize: 12, color: C.textMuted, margin: '2px 0 0' }}>Manage your restaurant configuration</p>
+      <div style={{ background: C.cardBg, borderBottom: `0.5px solid ${C.border}`, padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <div>
+        <h1 style={{ fontSize: 18, fontWeight: 500, color: C.text, margin: 0 }}>
+          {isManagerOnly ? 'Team' : 'Settings'}
+        </h1>
+        <p style={{ fontSize: 12, color: C.textMuted, margin: '2px 0 0' }}>
+          {isManagerOnly
+            ? 'Onboard staff and manage WhatsApp numbers for operational alerts'
+            : 'Manage your restaurant configuration'}
+        </p>
+        </div>
+        {isManagerOnly && (
+          <Link
+            to="/dashboard/manager"
+            style={{ fontSize: 12, color: C.primaryDark, textDecoration: 'none', fontWeight: 500 }}
+          >
+            ← Back to manager portal
+          </Link>
+        )}
       </div>
 
       <div style={{ maxWidth: 860, margin: '0 auto', padding: '24px 16px' }}>
-        {/* Tab bar */}
+        {!isManagerOnly && (
         <div style={{ display: 'flex', gap: 3, marginBottom: 20, background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 10, padding: 4, width: 'fit-content', flexWrap: 'wrap' }}>
           {filteredTabs.map(tab => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
@@ -1484,6 +1551,7 @@ export default function SettingsPanel() {
             </button>
           ))}
         </div>
+        )}
 
         {/* Content card */}
         <div style={CARD}>
