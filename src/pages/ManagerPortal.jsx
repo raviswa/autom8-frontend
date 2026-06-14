@@ -436,6 +436,7 @@ export default function ManagerPortal() {
   const [menuCategory,   setMenuCategory]   = useState('all');
   const [kitchenStatus,  setKitchenStatus]  = useState(null);
   const [kitchenToggling,setKitchenToggling]= useState(false);
+  const [kitchenBusyToggling, setKitchenBusyToggling] = useState(false);
   const fileInputRef = useRef(null);
 
   const showToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 3500); };
@@ -587,6 +588,21 @@ export default function ManagerPortal() {
       showToast(e.response?.data?.error || `Failed to ${label}`);
     } finally {
       setKitchenToggling(false);
+    }
+  };
+
+  const toggleKitchenBusy = async () => {
+    if (!kitchenStatus || kitchenBusyToggling) return;
+    const nextBusy = !kitchenStatus.kitchen_busy;
+    setKitchenBusyToggling(true);
+    try {
+      await apiClient.post('/api/catalog/kitchen-busy-toggle', { busy: nextBusy });
+      showToast(nextBusy ? 'Kitchen marked busy — customers will see a delay note' : 'Kitchen marked normal');
+      await fetchKitchenStatus();
+    } catch (e) {
+      showToast(e.response?.data?.error || 'Failed to update kitchen busy status');
+    } finally {
+      setKitchenBusyToggling(false);
     }
   };
 
@@ -1324,6 +1340,33 @@ export default function ManagerPortal() {
                     display: 'inline-block',
                   }} />
                   Kitchen: {kitchenToggling ? 'Updating…' : kitchenStatus.is_open ? 'Open' : 'Closed'}
+                </button>
+              )}
+              {kitchenStatus && (
+                <button
+                  onClick={toggleKitchenBusy}
+                  disabled={kitchenBusyToggling}
+                  title={
+                    kitchenStatus.kitchen_busy
+                      ? 'Kitchen is busy — customers see a high-volume delay note. Tap to mark normal.'
+                      : 'Mark kitchen busy during rush — adds delay note to takeaway/delivery confirmations.'
+                  }
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    fontSize: 12, fontWeight: 500, padding: '6px 12px', borderRadius: 8,
+                    cursor: kitchenBusyToggling ? 'wait' : 'pointer',
+                    border: `0.5px solid ${kitchenStatus.kitchen_busy ? '#f59e0b' : C.border}`,
+                    background: kitchenStatus.kitchen_busy ? '#fffbeb' : C.cardBg,
+                    color: kitchenStatus.kitchen_busy ? '#b45309' : C.textMuted,
+                    opacity: kitchenBusyToggling ? 0.7 : 1,
+                  }}
+                >
+                  <span style={{
+                    width: 8, height: 8, borderRadius: '50%',
+                    background: kitchenStatus.kitchen_busy ? '#f59e0b' : C.border,
+                    display: 'inline-block',
+                  }} />
+                  {kitchenBusyToggling ? 'Updating…' : kitchenStatus.kitchen_busy ? 'Busy kitchen' : 'Mark busy'}
                 </button>
               )}
               <Link

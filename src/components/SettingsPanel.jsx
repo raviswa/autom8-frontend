@@ -639,6 +639,8 @@ function TabKitchen({ apiClient, showToast }) {
         kitchen_workflow:        d.kitchen_workflow ?? 'KOT_only',
         takeaway_fulfillment_mode: d.takeaway_fulfillment_mode ?? 'single_counter',
         parcel_charge_per_item:    d.parcel_charge_per_item ?? 0,
+        takeaway_ready_range:      d.takeaway_ready_range ?? '',
+        delivery_ready_range:      d.delivery_ready_range ?? '',
         has_breakfast: d.opening_hours?.breakfast !== false,
         breakfast_start: d.opening_hours?.breakfast_start ?? '06:00',
         breakfast_end:   d.opening_hours?.breakfast_end   ?? '11:00',
@@ -695,6 +697,8 @@ function TabKitchen({ apiClient, showToast }) {
         kitchen_workflow:           form.kitchen_workflow,
         takeaway_fulfillment_mode:  form.takeaway_fulfillment_mode,
         parcel_charge_per_item:     parseFloat(form.parcel_charge_per_item) || 0,
+        takeaway_ready_range:       (form.takeaway_ready_range || '').trim() || null,
+        delivery_ready_range:       (form.delivery_ready_range || '').trim() || null,
         fulfillment_sections:       sections,
         opening_hours: {
           breakfast: form.has_breakfast, breakfast_start: form.breakfast_start, breakfast_end: form.breakfast_end,
@@ -759,6 +763,30 @@ function TabKitchen({ apiClient, showToast }) {
         />
         <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
           Added per cart quantity for takeaway and door delivery, before GST. Set 0 to disable (e.g. 10, 15, or 20).
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+        <div>
+          <Label>Takeaway ready time (mins range)</Label>
+          <Input
+            value={form.takeaway_ready_range}
+            onChange={v => set('takeaway_ready_range', v)}
+            placeholder="20-30"
+          />
+          <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+            Optional. Shown as &quot;Usually ready in …&quot; on order confirmation — not a guarantee.
+          </div>
+        </div>
+        <div>
+          <Label>Delivery time (mins range)</Label>
+          <Input
+            value={form.delivery_ready_range}
+            onChange={v => set('delivery_ready_range', v)}
+            placeholder="30-45"
+          />
+          <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+            Optional. Shown on delivery confirmation. Manager can flag busy kitchen for a delay note.
+          </div>
         </div>
       </div>
       <SectionTitle>Takeaway fulfillment</SectionTitle>
