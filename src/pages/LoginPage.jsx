@@ -4,17 +4,19 @@
 // ============================================================================
 
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { loginWithEmail, loginWithFacebook, error } = useAuth();
   
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [localError, setLocalError] = useState('');
+  const successMessage = location.state?.message;
 
   const handleEmailLogin = async (e) => {
     e.preventDefault();
@@ -96,7 +98,12 @@ export default function LoginPage() {
 
         {/* Login Card */}
         <div className="bg-white rounded-2xl shadow-2xl p-8 backdrop-blur-md bg-opacity-95">
-          {/* Error Message */}
+          {/* Success / Error Message */}
+          {successMessage && (
+            <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+              <p className="text-green-800 text-sm font-medium">{successMessage}</p>
+            </div>
+          )}
           {(error || localError) && (
             <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
               <p className="text-red-700 text-sm font-medium">{error || localError}</p>
@@ -121,9 +128,14 @@ export default function LoginPage() {
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
-                Password
-              </label>
+              <div className="flex items-center justify-between mb-2">
+                <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+                  Password
+                </label>
+                <Link to="/forgot-password" className="text-sm text-blue-600 hover:text-blue-800">
+                  Forgot password?
+                </Link>
+              </div>
               <input
                 id="password"
                 type="password"
@@ -175,7 +187,7 @@ export default function LoginPage() {
 
           {/* Footer Links */}
           <div className="mt-8 text-center text-sm text-gray-600 border-t pt-6">
-            <p>Contact your restaurant administrator for account access.</p>
+            <p>Need access? Ask your restaurant administrator or use forgot password above.</p>
             <p className="mt-2 text-xs text-gray-500">© 2024 Autom8 - All rights reserved</p>
           </div>
         </div>

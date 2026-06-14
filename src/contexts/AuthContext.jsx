@@ -10,7 +10,12 @@ import { resolveApiBase } from '../config/api';
 
 export const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY
+  import.meta.env.VITE_SUPABASE_ANON_KEY,
+  {
+    auth: {
+      detectSessionInUrl: true,
+    },
+  },
 );
 
 const AuthContext = createContext();
@@ -33,7 +38,8 @@ export function AuthProvider({ children }) {
       const token = localStorage.getItem('authToken');
       const refreshTokenValue = localStorage.getItem('refreshToken');
 
-      const onLoginPage = typeof window !== 'undefined' && window.location.pathname === '/login';
+      const onLoginPage = typeof window !== 'undefined'
+        && ['/login', '/forgot-password', '/reset-password'].includes(window.location.pathname);
 
       if (token && !onLoginPage) {
         try {
@@ -88,7 +94,8 @@ const requestInterceptor = apiClient.interceptors.request.use(
         const url = String(originalRequest.url || '');
         const isPublicAuth = url.includes('/api/auth/login')
           || url.includes('/api/auth/signup')
-          || url.includes('/api/auth/refresh');
+          || url.includes('/api/auth/refresh')
+          || url.includes('/api/auth/forgot-password');
 
         if ((error.response?.status === 401 || error.response?.status === 403)
             && !originalRequest._retry
@@ -264,6 +271,37 @@ const requestInterceptor = apiClient.interceptors.request.use(
     }
   }, [logout]);
 
+  const requestPasswordReset = useCallback(async (email) => {
+    setError(null);
+    try {
+      const response = await apiClient.post('/api/auth/forgot-password', { email });
+      return response.data;
+    } catch (err) {
+      const message = err.response?.data?.error || 'Could not send reset email';
+      setError(message);
+      throw new Error(message);
+    }
+  }, []);
+
+  const completePasswordReset = useCallback(async (password) => {
+    setError(null);
+    try {
+      const { error: updateErr } = await supabase.auth.updateUser({ password });
+      if (updateErr) throw updateErr;
+
+      await supabase.auth.signOut();
+      localStorage.removeItem('authToken');
+      localStorage.removeItem('refreshToken');
+      localStorage.removeItem('userData');
+      delete apiClient.defaults.headers.common['Authorization'];
+      setUser(null);
+    } catch (err) {
+      const message = err.message || 'Could not update password';
+      setError(message);
+      throw new Error(message);
+    }
+  }, []);
+
   const value = {
     user,
     loading,
@@ -273,6 +311,9 @@ const requestInterceptor = apiClient.interceptors.request.use(
     signup,
     logout,
     refreshToken,
+    requestPasswordReset,
+    completePasswordReset,
+    supabaseClient: supabase,
     apiClient
   };
 

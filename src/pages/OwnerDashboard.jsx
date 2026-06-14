@@ -2,7 +2,8 @@
 
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { supabase, useAuth } from "../contexts/AuthContext";
-import { Link } from 'react-router-dom';
+import { Link } from "react-router-dom";
+import OwnerInsights from "../components/OwnerInsights";
 
 // ── Export to Excel (no npm install — uses plain CSV download) ────────────────
 function exportToCSV(rows, filename) {
@@ -238,18 +239,38 @@ function TopMenuItems({ items }) {
   );
 }
 
-function TableOccupancy({ tables }) {
+function TableOccupancy({ tables, takeawayActive = 0, queueWaiting = 0 }) {
   const occupied = tables?.filter(t => t.status === "occupied").length ?? 0;
   const waiting  = tables?.filter(t => t.status === "waiting").length ?? 0;
   const free     = tables?.filter(t => t.status === "free").length ?? 0;
   const total    = tables?.length ?? 0;
   const occRate  = total ? Math.round((occupied / total) * 100) : 0;
+  const livePulse = takeawayActive + queueWaiting + occupied;
   return (
     <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "16px 20px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <span style={{ fontSize: 14, fontWeight: 500, color: "#111" }}>Table occupancy</span>
         <span style={{ fontSize: 11, color: "#aaa" }}>live now</span>
       </div>
+      {(takeawayActive > 0 || queueWaiting > 0) && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+          {takeawayActive > 0 && (
+            <span style={{ fontSize: 11, fontWeight: 500, color: "#185FA5", background: "#E6F1FB", padding: "4px 10px", borderRadius: 20 }}>
+              Takeaway active: {takeawayActive}
+            </span>
+          )}
+          {queueWaiting > 0 && (
+            <span style={{ fontSize: 11, fontWeight: 500, color: "#633806", background: "#FAEEDA", padding: "4px 10px", borderRadius: 20 }}>
+              Queue waiting: {queueWaiting}
+            </span>
+          )}
+        </div>
+      )}
+      {livePulse === 0 && (
+        <div style={{ fontSize: 11, color: "#aaa", marginBottom: 10, lineHeight: 1.45 }}>
+          No tables occupied right now. Takeaway orders don&apos;t use tables — see badges above when active.
+        </div>
+      )}
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
         <div style={{ minWidth: 90 }}>
           <div style={{ fontSize: 26, fontWeight: 500, color: "#111" }}>{occupied}<span style={{ fontSize: 15, color: "#aaa" }}>/{total}</span></div>
@@ -310,6 +331,8 @@ function KRow({ label, value, danger, warn }) {
 }
 
 function KotStatus({ stats }) {
+  const total = (stats?.open ?? 0) + (stats?.inProgress ?? 0) + (stats?.served ?? 0);
+  const isEmpty = total === 0;
   return (
     <StatCard title="KOT status" sub="kitchen orders today">
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
@@ -317,6 +340,11 @@ function KotStatus({ stats }) {
         <MiniStat label="In progress" value={stats?.inProgress ?? 0} color="#BA7517" />
         <MiniStat label="Served"      value={stats?.served ?? 0}     color="#1D9E75" />
       </div>
+      {isEmpty && (
+        <div style={{ fontSize: 11, color: "#888", background: "#F7F7F5", borderRadius: 8, padding: "10px 12px", marginBottom: 10, lineHeight: 1.5 }}>
+          No KOT tickets yet today. Tracking begins when the kitchen marks the first order in progress on KDS.
+        </div>
+      )}
       <KRow label="Avg KOT time"         value={stats?.avgTime != null ? `${stats.avgTime} min` : "—"} />
       <KRow label="Delayed (>20 min)"    value={stats?.delayed != null ? `${stats.delayed} KOTs` : "—"} danger={(stats?.delayed ?? 0) > 0} />
       <KRow label="Fastest item"         value={stats?.fastestItem ?? "—"} />
@@ -326,25 +354,35 @@ function KotStatus({ stats }) {
 }
 
 function CancellationVoids({ stats }) {
+  const sessionAborts = stats?.sessionAborts ?? stats?.bookingCancels ?? 0;
+  const totalSessions = stats?.totalSessions ?? stats?.totalBookings ?? 0;
+  const sessionsCompleted = stats?.sessionsCompleted ?? 0;
+  const abortRate = stats?.sessionAbortRate ?? stats?.bookingRate;
+
   return (
-    <StatCard title="Cancellations &amp; voids" sub="selected period">
+    <StatCard title="Session outcomes &amp; voids" sub="selected period">
+      <div style={{
+        fontSize: 12, color: "#633806", background: "#FAEEDA", border: "0.5px solid #FAC775",
+        borderRadius: 8, padding: "10px 12px", marginBottom: 14, lineHeight: 1.55,
+      }}>
+        <strong>Not the same as lost revenue.</strong> WhatsApp &quot;aborts&quot; are usually customers tapping Home or restarting — not no-shows.
+        Completed visits below are normal check-outs.
+      </div>
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 11, fontWeight: 500, color: "#888", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>
-          Booking cancellations (WhatsApp)
+          WhatsApp session outcomes
         </div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-          <MiniStat label="Cancelled"      value={stats?.bookingCancels ?? 0} color="#A32D2D" />
-          <MiniStat label="Total bookings" value={stats?.totalBookings   ?? 0} />
-          <MiniStat label="Rate"           value={stats?.bookingRate != null ? `${stats.bookingRate}%` : "—"} color="#BA7517" />
-        </div>
-        <div style={{ fontSize: 11, color: "#aaa", padding: "6px 8px", background: "#FFF8F5", borderRadius: 6 }}>
-          Customer-level: booking resets, flow cancellations, service type cancellations
+        <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+          <MiniStat label="Completed visits" value={sessionsCompleted} color="#1D9E75" />
+          <MiniStat label="Customer aborted" value={sessionAborts} color={sessionAborts > 0 ? "#BA7517" : "#111"} />
+          <MiniStat label="Total sessions"   value={totalSessions} />
+          <MiniStat label="Abort rate"       value={abortRate != null ? `${abortRate}%` : "—"} color="#BA7517" />
         </div>
       </div>
       <div style={{ borderTop: "0.5px solid #F0F0EE", marginBottom: 14 }} />
       <div>
         <div style={{ fontSize: 11, fontWeight: 500, color: "#888", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>
-          Order cancellations (Manager)
+          Order cancellations (Manager portal)
         </div>
         <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
           <MiniStat label="Cancelled"    value={stats?.cancelled   ?? 0} color="#A32D2D" />
@@ -369,13 +407,19 @@ function useKpiData(restaurantId, startISO, endISO) {
     (async () => {
       const [{ data: orders }, { data: tokens }] = await Promise.all([
         supabase.from("orders").select("total_amount").eq("restaurant_id", restaurantId).not("status", "eq", "cancelled").gte("created_at", startISO).lte("created_at", endISO),
-        supabase.from("walk_in_tokens").select("arrived_at, seated_at").eq("restaurant_id", restaurantId).gte("arrived_at", startISO).lte("arrived_at", endISO),
+        supabase.from("walk_in_tokens").select("arrived_at, seated_at, completed_at").eq("restaurant_id", restaurantId).gte("arrived_at", startISO).lte("arrived_at", endISO),
       ]);
       const totalRevenue = (orders ?? []).reduce((s, o) => s + (o.total_amount ?? 0), 0);
       const totalOrders  = (orders ?? []).length;
-      const seated = (tokens ?? []).filter(t => t.seated_at);
-      const avgMins = seated.length ? Math.round(seated.reduce((s, t) => s + (new Date(t.seated_at) - new Date(t.arrived_at ?? t.created_at)) / 60000, 0) / seated.length) : null;
-      setData({ totalRevenue, totalOrders, aov: totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0, totalCovers: (orders ?? []).length, tokensIssued: (tokens ?? []).length, avgDining: avgMins, avgWait: avgMins });
+      const seated = (tokens ?? []).filter(t => t.seated_at && t.arrived_at);
+      const avgWait = seated.length
+        ? Math.round(seated.reduce((s, t) => s + (new Date(t.seated_at) - new Date(t.arrived_at)) / 60000, 0) / seated.length)
+        : null;
+      const completed = (tokens ?? []).filter(t => t.seated_at && t.completed_at);
+      const avgDining = completed.length
+        ? Math.round(completed.reduce((s, t) => s + (new Date(t.completed_at) - new Date(t.seated_at)) / 60000, 0) / completed.length)
+        : null;
+      setData({ totalRevenue, totalOrders, aov: totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0, totalCovers: (orders ?? []).length, tokensIssued: (tokens ?? []).length, avgDining, avgWait });
     })();
   }, [restaurantId, startISO, endISO]);
   return data;
@@ -432,18 +476,34 @@ function useMenuItems(restaurantId, startISO, endISO) {
 }
 
 function useTables(restaurantId) {
-  const [tables, setTables] = useState([]);
+  const [snapshot, setSnapshot] = useState({ tables: [], takeawayActive: 0, queueWaiting: 0 });
+  const ACTIVE_ORDER_STATUSES = ['pending', 'confirmed', 'in_progress'];
   const fetch = useCallback(async () => {
     if (!restaurantId) return;
-    const { data } = await supabase.from("tables").select("id, table_number, section, status").eq("restaurant_id", restaurantId).order("table_number", { ascending: true });
-    if (data) setTables(data);
+    const [{ data: rawTables }, { data: orders }, { data: tokens }] = await Promise.all([
+      supabase.from("tables").select("id, table_number, section, status, capacity").eq("restaurant_id", restaurantId).order("table_number", { ascending: true }),
+      supabase.from("orders").select("table_id, status").eq("restaurant_id", restaurantId).in("status", ACTIVE_ORDER_STATUSES),
+      supabase.from("walk_in_tokens").select("table_id, status, type").eq("restaurant_id", restaurantId).in("status", ["waiting", "seated", "takeaway", "pending_approval"]),
+    ]);
+    const enriched = (rawTables ?? []).map(t => {
+      const hasOrder = (orders ?? []).some(o => o.table_id === t.id);
+      const seatedTok = (tokens ?? []).find(tok => tok.table_id === t.id && tok.status === "seated");
+      let status = "free";
+      if (hasOrder || seatedTok) status = "occupied";
+      else if (t.status === "reserved") status = "waiting";
+      return { ...t, status };
+    });
+    const takeawayActive = (tokens ?? []).filter(t => t.status === "takeaway" || t.type === "takeaway").length;
+    const queueWaiting = (tokens ?? []).filter(t => t.status === "waiting").length;
+    setSnapshot({ tables: enriched, takeawayActive, queueWaiting });
   }, [restaurantId]);
   useEffect(() => {
     fetch();
+    const interval = setInterval(fetch, 12000);
     const ch = supabase.channel(`tables-${restaurantId}`).on("postgres_changes", { event: "*", schema: "public", table: "tables", filter: `restaurant_id=eq.${restaurantId}` }, fetch).subscribe();
-    return () => supabase.removeChannel(ch);
+    return () => { clearInterval(interval); supabase.removeChannel(ch); };
   }, [restaurantId, fetch]);
-  return tables;
+  return snapshot;
 }
 
 function useKotStats(restaurantId) {
@@ -474,7 +534,7 @@ function useCancelStats(apiClient, restaurantId, startISO, endISO) {
         const res = await apiClient.get('/api/dashboard/cancel-stats', { params: { start: startISO, end: endISO } });
         if (cancelled) return;
         const d = res.data;
-        setStats({ cancelled: d.orderCancels, revLost: d.orderRevLost, totalOrders: d.totalOrders, rate: d.orderRate, bookingCancels: d.bookingCancels, totalBookings: d.totalBookings, bookingRate: d.bookingRate });
+        setStats({ cancelled: d.orderCancels, revLost: d.orderRevLost, totalOrders: d.totalOrders, rate: d.orderRate, bookingCancels: d.bookingCancels, totalBookings: d.totalBookings, bookingRate: d.bookingRate, sessionAborts: d.sessionAborts, totalSessions: d.totalSessions, sessionsCompleted: d.sessionsCompleted, sessionAbortRate: d.sessionAbortRate });
       } catch (err) { console.error('[useCancelStats]', err.message); }
     })();
     return () => { cancelled = true; };
@@ -566,6 +626,14 @@ function WABAPanel({ info }) {
 }
 
 // ─── WhatsApp Orders Table ─────────────────────────────────────────────────────
+function formatPartySize(order) {
+  const svc = String(order.service_type || order.event_type || "").toLowerCase();
+  if (svc === "takeaway" || svc === "delivery") return "n/a";
+  if (!order.party_size) return "—";
+  if (order.party_size >= 8) return `${order.party_size} (Large)`;
+  return String(order.party_size);
+}
+
 function WAOrdersTable({ orders, rangeLabel }) {
   const [search, setSearch] = useState("");
   const filtered = useMemo(() => {
@@ -623,8 +691,8 @@ function WAOrdersTable({ orders, rangeLabel }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead style={{ position: "sticky", top: 0, background: "#fff", zIndex: 1 }}>
               <tr style={{ borderBottom: "0.5px solid #E8E8E5" }}>
-                {["Date & Time","Name","Phone","Service","Token","Pax","Amount","Status"].map(h => (
-                  <th key={h} style={{ textAlign: "left", color: "#aaa", fontWeight: 400, fontSize: 11, padding: "8px 8px 8px 0", whiteSpace: "nowrap", background: "#fff" }}>{h}</th>
+                {["Date & Time","Name","Phone","Service","Token","Party (dine-in)","Amount","Status"].map(h => (
+                  <th key={h} style={{ textAlign: "left", color: "#aaa", fontWeight: 400, fontSize: 11, padding: "8px 8px 8px 0", whiteSpace: "nowrap", background: "#fff" }} title={h === "Party (dine-in)" ? "Party size for dine-in only. Takeaway/delivery show n/a." : undefined}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -636,7 +704,7 @@ function WAOrdersTable({ orders, rangeLabel }) {
                   <td style={{ padding: "7px 8px 7px 0", color: "#555", whiteSpace: "nowrap" }}>{o.customers?.phone ? `+${o.customers.phone}` : "—"}</td>
                   <td style={{ padding: "7px 8px 7px 0", color: "#555", whiteSpace: "nowrap", textTransform: "capitalize" }}>{(o.service_type || o.event_type || "—").replace(/_/g, " ")}</td>
                   <td style={{ padding: "7px 8px 7px 0", color: "#555", fontFamily: "monospace" }}>{o.token_number || "—"}</td>
-                  <td style={{ padding: "7px 8px 7px 0", color: "#555", textAlign: "center" }}>{o.party_size || "—"}</td>
+                  <td style={{ padding: "7px 8px 7px 0", color: "#555", textAlign: "center", fontSize: 11 }}>{formatPartySize(o)}</td>
                   <td style={{ padding: "7px 8px 7px 0", fontWeight: 500, color: "#111", whiteSpace: "nowrap" }}>{o.total_amount != null ? `₹${Number(o.total_amount).toLocaleString("en-IN")}` : "—"}</td>
                   <td style={{ padding: "7px 8px 7px 0" }}>
                     <span style={{ fontSize: 11, fontWeight: 500, color: statusColor(o.status), background: statusColor(o.status) + "18", padding: "2px 7px", borderRadius: 5, textTransform: "capitalize" }}>{o.status || "—"}</span>
@@ -691,7 +759,7 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
   const kpi         = useKpiData(restaurantId, startISO, endISO);
   const chartData   = useChartData(restaurantId, startISO, endISO, preset);
   const menuItems   = useMenuItems(restaurantId, startISO, endISO);
-  const tables      = useTables(restaurantId);
+  const tableSnapshot = useTables(restaurantId);
   const kotStats    = useKotStats(restaurantId);
   const cancelStats = useCancelStats(apiClient, restaurantId, startISO, endISO);
   const wabaInfo    = useWABAInfo(apiClient);
@@ -708,10 +776,10 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
     { icon: "👥", label: "Total covers",    value: kpi?.totalCovers ?? "—",               neutral: true, sub: "selected period", tooltip: "Total orders placed. Each order = 1 cover." },
   ];
   const row2 = [
-    { icon: "🔄", label: "Table turns",    value: kpi && tables?.length ? (kpi.totalOrders / tables.length).toFixed(1) : "—", sub: "selected period", tooltip: "Total orders ÷ tables." },
-    { icon: "⏱",  label: "Avg dining time",value: kpi?.avgDining ? `${kpi.avgDining} min` : "—", sub: "Benchmark: 90 min", tooltip: "Avg mins from walk-in to table completion." },
+    { icon: "🔄", label: "Table turns",    value: kpi && tableSnapshot.tables?.length ? (kpi.totalOrders / tableSnapshot.tables.length).toFixed(1) : "—", sub: "selected period", tooltip: "Total orders ÷ tables." },
+    { icon: "⏱",  label: "Avg dining time",value: kpi?.avgDining ? `${kpi.avgDining} min` : "—", sub: "Benchmark: 90 min", tooltip: "Avg mins from table assignment to visit completion." },
     { icon: "🎟",  label: "Tokens issued",  value: kpi?.tokensIssued ?? "—", sub: "selected period", tooltip: "Walk-in customers who received a queue token." },
-    { icon: "⏳", label: "Avg wait time",  value: kpi?.avgWait ? `${kpi.avgWait} min` : "—", sub: "selected period", tooltip: "Avg mins from check-in to table assignment." },
+    { icon: "⏳", label: "Avg wait time",  value: kpi?.avgWait ? `${kpi.avgWait} min` : "—", sub: "selected period", tooltip: "Avg mins from check-in to table assignment (queue only)." },
   ];
 
   const btnStyle = (active) => ({
@@ -745,6 +813,18 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
             <button style={{ ...btnStyle(!!customStart), display: "flex", alignItems: "center", gap: 5 }} onClick={() => setShowCal(v => !v)}>
               📅 {customStart ? `${fmtDate(customStart)} – ${fmtDate(customEnd)}` : "Custom"}
             </button>
+            <div style={{ width: 1, height: 18, background: "#E0E0DC" }} />
+            <Link
+              to="/settings?tab=kitchen"
+              style={{
+                fontSize: 12, padding: "4px 12px", borderRadius: 8,
+                border: "0.5px solid #B5D4F4", background: "#E6F1FB",
+                color: "#185FA5", cursor: "pointer", textDecoration: "none",
+                display: "inline-flex", alignItems: "center", gap: 4,
+              }}
+            >
+              Kitchen hours
+            </Link>
             <div style={{ width: 1, height: 18, background: "#E0E0DC" }} />
             {/* ⚙️ Settings link — navigates to /settings */}
             <Link
@@ -801,7 +881,11 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
         {/* Menu + Tables */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12, marginBottom: 12 }}>
           <TopMenuItems items={menuItems} />
-          <TableOccupancy tables={tables} />
+          <TableOccupancy
+            tables={tableSnapshot.tables}
+            takeawayActive={tableSnapshot.takeawayActive}
+            queueWaiting={tableSnapshot.queueWaiting}
+          />
         </div>
 
         {/* WABA + WhatsApp orders */}
@@ -811,10 +895,12 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
         </div>
 
         {/* KOT + Cancellations */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12, marginBottom: 12 }}>
           <KotStatus stats={kotStats} />
           <CancellationVoids stats={cancelStats} />
         </div>
+
+        <OwnerInsights apiClient={apiClient} startISO={startISO} endISO={endISO} rangeLabel={rangeLabel} />
 
       </div>
     </div>

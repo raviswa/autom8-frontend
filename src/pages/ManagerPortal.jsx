@@ -91,7 +91,9 @@ const SLOT_DB_TO_LABEL = {
   morning_tiffin: 'Morning Tiffin',
   lunch:          'Lunch',
   evening_snacks: 'Evening Snacks',
+  snacks:         'Evening Snacks',
   dinner_tiffin:  'Dinner Tiffin',
+  dinner:         'Dinner',
 };
 
 // Reservation duration options (minutes)
@@ -123,6 +125,47 @@ function reservationCountdown(expiresAt) {
   const mins = Math.floor(diff / 60000);
   const secs = Math.floor((diff % 60000) / 1000);
   return `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
+function tokenWaitMinutes(arrivedAt) {
+  if (!arrivedAt) return 0;
+  return Math.max(0, Math.floor((Date.now() - new Date(arrivedAt).getTime()) / 60000));
+}
+
+const TOKEN_AGE_STYLES = {
+  fresh:   { cardBorder: C.border,        avatarBg: C.warningLight, avatarColor: C.warningDark },
+  caution: { cardBorder: C.warningBorder, avatarBg: '#FFF3CD',      avatarColor: '#856404'     },
+  warning: { cardBorder: '#F0A500',       avatarBg: '#FFE4B5',      avatarColor: '#B45309'     },
+  critical:{ cardBorder: C.dangerBorder,  avatarBg: C.dangerLight,  avatarColor: C.dangerDark  },
+};
+
+function tokenAgeStyle(arrivedAt) {
+  const mins = tokenWaitMinutes(arrivedAt);
+  if (mins >= 90) return TOKEN_AGE_STYLES.critical;
+  if (mins >= 45) return TOKEN_AGE_STYLES.warning;
+  if (mins >= 20) return TOKEN_AGE_STYLES.caution;
+  return TOKEN_AGE_STYLES.fresh;
+}
+
+function formatSeatLabel(capacity) {
+  if (!capacity) return null;
+  return `${capacity}-seater`;
+}
+
+function formatMenuCategory(category) {
+  return (category || 'General').trim();
+}
+
+function formatMenuSlot(timeSlot) {
+  if (!timeSlot || timeSlot === 'all') return null;
+  return SLOT_DB_TO_LABEL[timeSlot] || timeSlot.replace(/_/g, ' ');
+}
+
+function menuSlotsAreMeaningful(items) {
+  const slots = new Set(
+    (items || []).map(i => i.time_slot).filter(s => s && s !== 'all')
+  );
+  return slots.size > 0;
 }
 
 // ─── UI Primitives ────────────────────────────────────────────────────────────
@@ -212,7 +255,7 @@ function SectionLabel({ children }) {
   );
 }
 
-function StatCard({ label, value, colorStyle }) {
+function StatCard({ label, value, colorStyle, hint }) {
   return (
     <div style={{
       borderRadius: 10, padding: "14px 16px",
@@ -223,6 +266,11 @@ function StatCard({ label, value, colorStyle }) {
       <div style={{ fontSize: 12, fontWeight: 500, color: colorStyle.color, opacity: 0.8, marginTop: 2 }}>
         {label}
       </div>
+      {hint && (
+        <div style={{ fontSize: 10, color: colorStyle.color, opacity: 0.65, marginTop: 6, lineHeight: 1.4 }}>
+          {hint}
+        </div>
+      )}
     </div>
   );
 }
@@ -383,6 +431,10 @@ export default function ManagerPortal() {
   const [uploadResult,   setUploadResult]   = useState(null);
   const [downloadingTpl, setDownloadingTpl] = useState(false);
   const [togglingId,     setTogglingId]     = useState(null);
+  const [menuSearch,     setMenuSearch]     = useState('');
+  const [menuCategory,   setMenuCategory]   = useState('all');
+  const [kitchenStatus,  setKitchenStatus]  = useState(null);
+  const [kitchenToggling,setKitchenToggling]= useState(false);
   const fileInputRef = useRef(null);
 
   const showToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 3500); };
@@ -403,7 +455,18 @@ export default function ManagerPortal() {
   const fetchTables    = useCallback(async () => { try { const r = await apiClient.get('/api/tables');     setTables(r.data.tables || r.data || []); } catch(e) {} }, [apiClient]);
   const fetchOrders    = useCallback(async () => { try { const r = await apiClient.get('/api/orders');     setOrders(r.data.orders || r.data || []); } catch(e) {} }, [apiClient]);
   const fetchMenuItems = useCallback(async () => { try { const r = await apiClient.get('/api/menu-items?ignore_slot=true'); setMenuItems(r.data.items || r.data || []); } catch(e) {} }, [apiClient]);
-  const fetchData      = useCallback(async () => { await Promise.all([fetchTables(), fetchOrders(), fetchTokens(), fetchMenuItems()]); setLoading(false); }, [fetchTables, fetchOrders, fetchTokens, fetchMenuItems]);
+  const fetchKitchenStatus = useCallback(async () => {
+    try {
+      const r = await apiClient.get('/api/catalog/kitchen-status');
+      setKitchenStatus(r.data);
+    } catch (e) {
+      console.error('[ManagerPortal] fetchKitchenStatus failed:', e.response?.data || e.message);
+    }
+  }, [apiClient]);
+  const fetchData      = useCallback(async () => {
+    await Promise.all([fetchTables(), fetchOrders(), fetchTokens(), fetchMenuItems(), fetchKitchenStatus()]);
+    setLoading(false);
+  }, [fetchTables, fetchOrders, fetchTokens, fetchMenuItems, fetchKitchenStatus]);
 
   useEffect(() => {
     fetchData();
@@ -481,6 +544,50 @@ export default function ManagerPortal() {
   const takeawayTokens     = normTokens.filter(t => t.status === 'takeaway');
   const pendingApprTokens  = normTokens.filter(t => t.status === 'pending_approval');
   const freeTablesCount    = tables.filter(t => getTableStatus(t).status === 'available').length;
+
+  const showMenuSlotColumn = menuSlotsAreMeaningful(menuItems);
+  const menuCategories = [...new Set(menuItems.map(i => formatMenuCategory(i.category)))].sort();
+  const filteredMenuItems = [...menuItems]
+    .filter(item => {
+      if (menuCategory !== 'all' && formatMenuCategory(item.category) !== menuCategory) return false;
+      if (menuSearch.trim()) {
+        const q = menuSearch.trim().toLowerCase();
+        if (!(item.name || '').toLowerCase().includes(q)) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      const aS = a.is_stocked ?? a.is_available ?? true;
+      const bS = b.is_stocked ?? b.is_available ?? true;
+      if (aS !== bS) return aS ? -1 : 1;
+      const catCmp = formatMenuCategory(a.category).localeCompare(formatMenuCategory(b.category));
+      if (catCmp !== 0) return catCmp;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+  const groupedMenuItems = filteredMenuItems.reduce((acc, item) => {
+    const cat = formatMenuCategory(item.category);
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(item);
+    return acc;
+  }, {});
+  const groupedMenuCategories = Object.keys(groupedMenuItems).sort();
+
+  const toggleKitchen = async () => {
+    if (!kitchenStatus || kitchenToggling) return;
+    const nextOpen = !kitchenStatus.is_open;
+    const label = nextOpen ? 'open kitchen for WhatsApp orders' : 'close kitchen for WhatsApp orders';
+    if (!window.confirm(`${nextOpen ? 'Open' : 'Close'} the kitchen? Customers will ${nextOpen ? 'be able to' : 'not be able to'} order via WhatsApp.`)) return;
+    setKitchenToggling(true);
+    try {
+      await apiClient.post('/api/catalog/kitchen-toggle', { open: nextOpen });
+      showToast(nextOpen ? 'Kitchen is now open' : 'Kitchen is now closed');
+      await Promise.all([fetchKitchenStatus(), fetchMenuItems()]);
+    } catch (e) {
+      showToast(e.response?.data?.error || `Failed to ${label}`);
+    } finally {
+      setKitchenToggling(false);
+    }
+  };
 
   // ── Open new-order modal ──────────────────────────────────────────────────
   const openNewOrderModal = (tableId = null) => {
@@ -1180,6 +1287,43 @@ export default function ManagerPortal() {
               <p style={{ fontSize: 13, color: C.textMuted, margin: "2px 0 0" }}>Manage tables, orders and kitchen operations</p>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {kitchenStatus && (
+                <button
+                  onClick={toggleKitchen}
+                  disabled={kitchenToggling}
+                  title={
+                    kitchenStatus.is_open
+                      ? 'Kitchen is open — WhatsApp customers can order. Tap to close.'
+                      : `Kitchen is closed${kitchenStatus.schedule_open ? '' : ` · schedule resumes ${kitchenStatus.next_open_label}`}. Tap to open.`
+                  }
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    fontSize: 12, fontWeight: 500, padding: '6px 12px', borderRadius: 8,
+                    cursor: kitchenToggling ? 'wait' : 'pointer',
+                    border: `0.5px solid ${kitchenStatus.is_open ? C.successBorder : C.dangerBorder}`,
+                    background: kitchenStatus.is_open ? C.successLight : C.dangerLight,
+                    color: kitchenStatus.is_open ? C.successDark : C.dangerDark,
+                    opacity: kitchenToggling ? 0.7 : 1,
+                  }}
+                >
+                  <span style={{
+                    width: 8, height: 8, borderRadius: '50%',
+                    background: kitchenStatus.is_open ? C.success : C.danger,
+                    display: 'inline-block',
+                  }} />
+                  Kitchen: {kitchenToggling ? 'Updating…' : kitchenStatus.is_open ? 'Open' : 'Closed'}
+                </button>
+              )}
+              <Link
+                to="/settings?tab=kitchen"
+                style={{
+                  fontSize: 11, fontWeight: 500, color: C.primaryDark, textDecoration: 'none',
+                  padding: '6px 10px', borderRadius: 8, border: `0.5px solid ${C.primaryBorder}`,
+                  background: C.primaryLight,
+                }}
+              >
+                Kitchen hours →
+              </Link>
               <span style={{ fontSize: 12, color: C.textSub }}>👤 {user?.full_name || user?.email}</span>
               <Link
                 to="/settings"
@@ -1201,9 +1345,28 @@ export default function ManagerPortal() {
       <div style={{ maxWidth: 1280, margin: "0 auto", padding: "24px" }}>
 
         {/* ── Stats strip ───────────────────────────────────────────────── */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 10, marginBottom: 20 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 10, marginBottom: 20 }}>
           {[
-            { label: "Approval needed", value: pendingApprTokens.length,  colorStyle: { bg: C.accentLight,  border: C.accentBorder,  color: C.accentDark  } },
+            {
+              label: "Kitchen",
+              value: kitchenStatus ? (kitchenStatus.is_open ? 'Open' : 'Closed') : '—',
+              colorStyle: kitchenStatus?.is_open
+                ? { bg: C.successLight, border: C.successBorder, color: C.successDark }
+                : { bg: C.dangerLight,  border: C.dangerBorder,  color: C.dangerDark  },
+              hint: kitchenStatus
+                ? (kitchenStatus.is_open
+                    ? (kitchenStatus.current_slot_label ? `${kitchenStatus.current_slot_label} menu live` : 'Manual override active')
+                    : `WhatsApp ordering paused${kitchenStatus.schedule_open ? '' : ` · opens ${kitchenStatus.next_open_label}`}`)
+                : null,
+            },
+            {
+              label: "Approval needed",
+              value: pendingApprTokens.length,
+              colorStyle: { bg: C.accentLight,  border: C.accentBorder,  color: C.accentDark  },
+              hint: pendingApprTokens.length === 0
+                ? 'Parties of 8+ need manager approval for table splits'
+                : 'Large parties waiting for your table split decision',
+            },
             { label: "Waiting",         value: waitingTokens.length,       colorStyle: { bg: C.warningLight, border: C.warningBorder, color: C.warningDark } },
             { label: "Seated",          value: seatedTokens.length,        colorStyle: { bg: C.successLight, border: C.successBorder, color: C.successDark } },
             { label: "Takeaway",        value: takeawayTokens.length,      colorStyle: { bg: C.primaryLight, border: C.primaryBorder, color: C.primaryDark } },
@@ -1292,15 +1455,23 @@ export default function ManagerPortal() {
                   {waitingTokens.map(token => {
                     const avail    = availableTablesFor(token.pax);
                     const isAssign = assigningToken === token.id;
+                    const age      = tokenAgeStyle(token.arrived_at);
+                    const waitMins = tokenWaitMinutes(token.arrived_at);
                     return (
-                      <div key={token.id} style={{ ...CARD, display: "flex", alignItems: "flex-start", gap: 16 }}>
-                        <div style={{ width: 44, height: 44, borderRadius: "50%", background: C.warningLight, color: C.warningDark, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 500, flexShrink: 0 }}>
+                      <div key={token.id} style={{ ...CARD, display: "flex", alignItems: "flex-start", gap: 16, border: `0.5px solid ${age.cardBorder}` }}>
+                        <div style={{ width: 44, height: 44, borderRadius: "50%", background: age.avatarBg, color: age.avatarColor, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 500, flexShrink: 0 }}>
                           {String(token.id).replace('T-', '')}
                         </div>
                         <div style={{ flex: 1 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
                             <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>{token.id}</span>
                             <Pill label="Waiting" variant="amber" />
+                            {waitMins >= 20 && (
+                              <Pill
+                                label={waitMins >= 90 ? `${waitMins}m — urgent` : `${waitMins}m waiting`}
+                                variant={waitMins >= 90 ? 'red' : waitMins >= 45 ? 'amber' : 'gray'}
+                              />
+                            )}
                           </div>
                           <p style={{ fontSize: 12, color: C.textSub, margin: "0 0 8px" }}>
                             {token.name} · {token.pax} {token.pax === 1 ? 'person' : 'people'} · Arrived {safeFormat(token.arrived_at, 'HH:mm')}
@@ -1322,6 +1493,14 @@ export default function ManagerPortal() {
                       </div>
                     );
                   })}
+                </div>
+              )}
+              {waitingTokens.length > 0 && (
+                <div style={{ display: 'flex', gap: 14, marginTop: 10, flexWrap: 'wrap', fontSize: 10, color: C.textMuted }}>
+                  <span>Wait time:</span>
+                  <span style={{ color: C.warningDark }}>● 20+ min</span>
+                  <span style={{ color: '#B45309' }}>● 45+ min</span>
+                  <span style={{ color: C.dangerDark }}>● 90+ min — urgent</span>
                 </div>
               )}
             </div>
@@ -1355,8 +1534,10 @@ export default function ManagerPortal() {
               <div>
                 <SectionLabel>Takeaway — {takeawayTokens.length}</SectionLabel>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 10 }}>
-                  {takeawayTokens.map(token => (
-                    <div key={token.id} style={{ ...CARD, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                  {takeawayTokens.map(token => {
+                    const waitMins = tokenWaitMinutes(token.arrived_at);
+                    return (
+                    <div key={token.id} style={{ ...CARD, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, border: waitMins >= 45 ? `0.5px solid ${waitMins >= 90 ? C.dangerBorder : '#F0A500'}` : undefined }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                         <div style={{ width: 38, height: 38, borderRadius: "50%", background: C.primaryLight, color: C.primaryDark, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 500, fontSize: 12, flexShrink: 0 }}>
                           {String(token.id).replace('T-', '')}
@@ -1365,13 +1546,14 @@ export default function ManagerPortal() {
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                             <span style={{ fontSize: 13, fontWeight: 500, color: C.text }}>{token.id}</span>
                             <Pill label="Takeaway" variant="blue" />
+                            {waitMins >= 20 && <Pill label={`${waitMins}m`} variant={waitMins >= 90 ? 'red' : 'amber'} />}
                           </div>
                           <p style={{ fontSize: 11, color: C.textMuted, margin: "1px 0 0" }}>{token.name} · {safeFormat(token.arrived_at, 'HH:mm')}</p>
                         </div>
                       </div>
                       <Btn variant="ghost" onClick={() => dismissToken(token.id)} style={{ fontSize: 11, padding: "5px 10px" }}>Done</Btn>
                     </div>
-                  ))}
+                  );})}
                 </div>
               </div>
             )}
@@ -1407,6 +1589,11 @@ export default function ManagerPortal() {
                     display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
                   }}>
                     <div style={{ fontSize: 12, fontWeight: 500, color: s.text }}>Table {table.table_number}</div>
+                    {formatSeatLabel(table.capacity) && (
+                      <div style={{ fontSize: 10, color: s.text, opacity: 0.85, fontWeight: 500 }}>
+                        {formatSeatLabel(table.capacity)}
+                      </div>
+                    )}
                     <div style={{ fontSize: 22, margin: "4px 0" }}>
                       {status === 'available' ? '🪑' : status === 'occupied' ? '🍽️' : status === 'reserved' ? '🔒' : '🧹'}
                     </div>
@@ -1666,38 +1853,96 @@ export default function ManagerPortal() {
 
             {/* Current menu table */}
             <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <div style={{ fontSize: 14, fontWeight: 500, color: C.text }}>Current menu <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 400 }}>({menuItems.length} items · all slots)</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+                <div style={{ fontSize: 14, fontWeight: 500, color: C.text }}>
+                  Current menu{' '}
+                  <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 400 }}>
+                    ({filteredMenuItems.length}{filteredMenuItems.length !== menuItems.length ? ` of ${menuItems.length}` : ''} items)
+                  </span>
+                </div>
                 <span style={{ fontSize: 11, color: C.textMuted }}>Toggle to mark in/out of stock instantly</span>
               </div>
+
+              {menuItems.length > 0 && (
+                <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <input
+                    type="search"
+                    value={menuSearch}
+                    onChange={e => setMenuSearch(e.target.value)}
+                    placeholder="Search menu items…"
+                    style={{
+                      flex: '1 1 220px', minWidth: 180, fontSize: 12, padding: '8px 12px',
+                      borderRadius: 8, border: `0.5px solid ${C.border}`, outline: 'none',
+                    }}
+                  />
+                  <select
+                    value={menuCategory}
+                    onChange={e => setMenuCategory(e.target.value)}
+                    style={{
+                      fontSize: 12, padding: '8px 12px', borderRadius: 8,
+                      border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.text,
+                    }}
+                  >
+                    <option value="all">All categories</option>
+                    {menuCategories.map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               {menuItems.length === 0 ? (
                 <div style={{ ...CARD, textAlign: "center", padding: "40px 20px", color: C.textMuted, fontSize: 13 }}>No menu items yet. Upload the catalog Excel to get started.</div>
+              ) : filteredMenuItems.length === 0 ? (
+                <div style={{ ...CARD, textAlign: "center", padding: "32px 20px", color: C.textMuted, fontSize: 13 }}>
+                  No items match your search. Try a different term or category.
+                </div>
               ) : (
                 <div style={{ ...CARD, padding: 0, overflowX: "auto" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                     <thead>
                       <tr style={{ borderBottom: `0.5px solid ${C.border}`, background: C.surfaceBg }}>
-                        {["Name","Slot","Price","Image","In stock"].map((h, i) => (
-                          <th key={h} style={{ padding: "10px 14px", textAlign: i >= 2 ? "right" : "left", fontSize: 11, fontWeight: 500, color: C.textMuted }}>{h}</th>
+                        {(showMenuSlotColumn
+                          ? ["Name", "Category", "Slot", "Price", "Image", "In stock"]
+                          : ["Name", "Category", "Price", "Image", "In stock"]
+                        ).map((h, i) => (
+                          <th key={h} style={{ padding: "10px 14px", textAlign: i >= (showMenuSlotColumn ? 3 : 2) ? "right" : "left", fontSize: 11, fontWeight: 500, color: C.textMuted }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {[...menuItems].sort((a, b) => {
-                        const aS = a.is_stocked ?? a.is_available ?? true;
-                        const bS = b.is_stocked ?? b.is_available ?? true;
-                        if (aS !== bS) return aS ? -1 : 1;
-                        return (a.name || '').localeCompare(b.name || '');
-                      }).map(item => {
+                      {groupedMenuCategories.map(cat => (
+                        <React.Fragment key={cat}>
+                          <tr style={{ background: C.surfaceBg }}>
+                            <td
+                              colSpan={showMenuSlotColumn ? 6 : 5}
+                              style={{ padding: "8px 14px", fontSize: 11, fontWeight: 600, color: C.textSub, letterSpacing: '0.04em', textTransform: 'uppercase' }}
+                            >
+                              {cat} ({groupedMenuItems[cat].length})
+                            </td>
+                          </tr>
+                          {groupedMenuItems[cat].map(item => {
                         const inStock  = item.is_stocked ?? item.is_available;
                         const isToggle = togglingId === item.id;
+                        const slotLabel = formatMenuSlot(item.time_slot);
                         return (
                           <tr key={item.id} style={{ borderBottom: `0.5px solid ${C.border}`, opacity: inStock ? 1 : 0.55 }}>
                             <td style={{ padding: "10px 14px" }}>
                               <span style={{ fontWeight: 500, color: C.text }}>{item.name}</span>
                               {!inStock && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 500, color: C.danger, background: C.dangerLight, padding: "1px 6px", borderRadius: 20 }}>Out of stock</span>}
                             </td>
-                            <td style={{ padding: "10px 14px" }}><span style={{ fontSize: 10, background: C.surfaceBg, color: C.textSub, padding: "2px 8px", borderRadius: 20, fontWeight: 500 }}>{SLOT_DB_TO_LABEL[item.time_slot] || item.time_slot}</span></td>
+                            <td style={{ padding: "10px 14px" }}>
+                              <span style={{ fontSize: 10, background: C.primaryLight, color: C.primaryDark, padding: "2px 8px", borderRadius: 20, fontWeight: 500 }}>
+                                {formatMenuCategory(item.category)}
+                              </span>
+                            </td>
+                            {showMenuSlotColumn && (
+                              <td style={{ padding: "10px 14px" }}>
+                                {slotLabel
+                                  ? <span style={{ fontSize: 10, background: C.surfaceBg, color: C.textSub, padding: "2px 8px", borderRadius: 20, fontWeight: 500 }}>{slotLabel}</span>
+                                  : <span style={{ color: C.textMuted }}>—</span>}
+                              </td>
+                            )}
                             <td style={{ padding: "10px 14px", textAlign: "right", fontWeight: 500, color: C.text }}>₹{Number(item.price).toFixed(2)}</td>
                             <td style={{ padding: "10px 14px", textAlign: "right" }}>
                               {item.image_url
@@ -1722,7 +1967,9 @@ export default function ManagerPortal() {
                             </td>
                           </tr>
                         );
-                      })}
+                          })}
+                        </React.Fragment>
+                      ))}
                     </tbody>
                   </table>
                 </div>

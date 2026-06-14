@@ -18,6 +18,7 @@ export function SubscriptionProvider({ children }) {
   const { user, apiClient } = useAuth();
 
   const [features, setFeatures]         = useState([]);
+  const [paidFeatures, setPaidFeatures] = useState([]);
   const [subscription, setSubscription] = useState(null);
   const [loading, setLoading]           = useState(true);
 
@@ -43,6 +44,7 @@ export function SubscriptionProvider({ children }) {
   const fetchSubscription = useCallback(async () => {
     if (!user) {
       setFeatures([]);
+      setPaidFeatures([]);
       setSubscription(null);
       setLoading(false);
       return;
@@ -52,12 +54,18 @@ export function SubscriptionProvider({ children }) {
 
     try {
       const res = await apiClient.get('/api/subscription');
-      const fetched = res.data.features || res.data.subscribed_features || [];
-      setFeatures(fetched.length > 0 ? fetched : Object.values(FEATURES));
-      setSubscription(res.data.subscription || null);
+      const enabled = res.data.enabled_features
+        || res.data.features
+        || res.data.subscribed_features
+        || [];
+      const paid = res.data.paid_features || enabled;
+      setFeatures(enabled.length > 0 ? enabled : Object.values(FEATURES));
+      setPaidFeatures(paid.length > 0 ? paid : Object.values(FEATURES));
+      setSubscription(res.data.subscription || res.data || null);
     } catch {
       // Network/auth error: assume all features so no one gets locked out.
       setFeatures(Object.values(FEATURES));
+      setPaidFeatures(Object.values(FEATURES));
     } finally {
       setLoading(false);
     }
@@ -68,11 +76,12 @@ export function SubscriptionProvider({ children }) {
   }, [fetchSubscription]);
 
   const hasFeature = (feature) => features.includes(feature);
+  const hasPaidFeature = (feature) => paidFeatures.includes(feature);
   const hasAnyOf   = (...featureList) => featureList.some(f => features.includes(f));
 
   return (
     <SubscriptionContext.Provider value={{
-      features, subscription, loading, hasFeature, hasAnyOf,
+      features, paidFeatures, subscription, loading, hasFeature, hasPaidFeature, hasAnyOf,
       refresh: fetchSubscription,
     }}>
       {children}

@@ -10,6 +10,8 @@ import { SubscriptionProvider, useSubscription, FEATURES }  from './contexts/Sub
 import { KOTPrintTemplate } from './components/KOTPrint';
 export const kotRef = React.createRef();
 import LoginPage          from './pages/LoginPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import ResetPasswordPage  from './pages/ResetPasswordPage';
 import OwnerDashboard     from './pages/OwnerDashboard';
 import BrandDashboard     from './pages/BrandDashboard';
 import CaptainPortal      from './pages/CaptainPortal';
@@ -124,6 +126,8 @@ function AppRoutes() {
 
         {/* ── Public ── */}
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/unauthorized" element={<Navigate to="/login" replace />} />
 
         {/* Walk-in form (public kiosk) */}

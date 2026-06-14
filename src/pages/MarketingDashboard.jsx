@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, Fragment } from "react";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -43,6 +43,36 @@ function fmtDateTime(iso) {
   const d = new Date(iso);
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " " +
     d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+}
+
+function normalizeTemplateName(raw) {
+  return raw.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
+}
+
+function charCountColor(len, max = 1024) {
+  if (len >= 950) return C.danger;
+  if (len >= 800) return C.warning;
+  return C.textMuted;
+}
+
+function Tooltip({ text, children, style }) {
+  return (
+    <span title={text} style={{ cursor: "help", display: "inline-flex", alignItems: "center", ...style }}>
+      {children}
+    </span>
+  );
+}
+
+function resolvePreviewText(text, previewName, restaurantName) {
+  if (!text) return "";
+  return text
+    .replace(/\{\{name\}\}/gi, previewName || "Ravi")
+    .replace(/\{\{restaurant\}\}/gi, restaurantName || "Hotel Munafe")
+    .replace(/\{\{date\}\}/gi, new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }))
+    .replace(/\{\{token\}\}/gi, "T-042")
+    .replace(/\{\{order\}\}/gi, "ORD-001")
+    .replace(/\*([^*]+)\*/g, (_, t) => t)
+    .replace(/_([^_]+)_/g, (_, t) => t);
 }
 
 // ─── UI Primitives ────────────────────────────────────────────────────────────
@@ -157,7 +187,7 @@ const SEG_ACCENTS = {
 };
 
 // ─── AI Segment Suggester ─────────────────────────────────────────────────────
-function AISegmentSuggester({ apiClient, onSegmentSelected, onMessageDrafted }) {
+function AISegmentSuggester({ apiClient, onSegmentSelected, onMessageDrafted, onCreateTemplate }) {
   const [goal, setGoal] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -228,7 +258,14 @@ function AISegmentSuggester({ apiClient, onSegmentSelected, onMessageDrafted }) 
                 {result.suggested_message}
               </div>
             )}
-            <Btn onClick={apply} variant="green">Use this segment →</Btn>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Btn onClick={apply} variant="green">Use this segment →</Btn>
+              {result.suggested_message && onCreateTemplate && (
+                <Btn variant="secondary" onClick={() => onCreateTemplate({ goal: goal || result.reasoning, message: result.suggested_message, segment: result.segment })}>
+                  I need a template for this →
+                </Btn>
+              )}
+            </div>
           </div>
         );
       })()}
@@ -298,13 +335,15 @@ function SegmentCards({ counts, loading, selected, onSelect }) {
 }
 
 // ─── Broadcast Composer ───────────────────────────────────────────────────────
-function BroadcastComposer({ apiClient, selectedSegment, draftMessage, segmentCounts, onSent }) {
+function BroadcastComposer({ apiClient, selectedSegment, draftMessage, segmentCounts, onSent, cloneFrom, previewName, restaurantName }) {
   const [segment,       setSegment]       = useState(selectedSegment || "recent");
   const [templates,     setTemplates]     = useState([]);
   const [templateName,  setTemplateName]  = useState("");
   const [customMessage, setCustomMessage] = useState(draftMessage || "");
   const [useTemplate,   setUseTemplate]   = useState(false);
   const [campaignName,  setCampaignName]  = useState("");
+  const [sendMode,      setSendMode]      = useState("now");
+  const [scheduledAt,   setScheduledAt]   = useState("");
   const [sending,       setSending]       = useState(false);
   const [sent,          setSent]          = useState(null);
   const [error,         setError]         = useState(null);
@@ -312,6 +351,22 @@ function BroadcastComposer({ apiClient, selectedSegment, draftMessage, segmentCo
 
   useEffect(() => { if (selectedSegment) setSegment(selectedSegment); }, [selectedSegment]);
   useEffect(() => { if (draftMessage)    setCustomMessage(draftMessage); }, [draftMessage]);
+  useEffect(() => {
+    if (!cloneFrom) return;
+    setCampaignName(cloneFrom.name ? `${cloneFrom.name} (copy)` : "");
+    setSegment(cloneFrom.segment_type || cloneFrom.segment || "recent");
+    if (cloneFrom.template_name) {
+      setUseTemplate(true);
+      setTemplateName(cloneFrom.template_name);
+      setCustomMessage("");
+    } else if (cloneFrom.custom_message) {
+      setUseTemplate(false);
+      setCustomMessage(cloneFrom.custom_message);
+      setTemplateName("");
+    }
+    setSent(null);
+    setError(null);
+  }, [cloneFrom]);
 
   useEffect(() => {
     setLoadingTpls(true);
@@ -329,11 +384,16 @@ function BroadcastComposer({ apiClient, selectedSegment, draftMessage, segmentCo
     if (!campaignName.trim()) { setError("Campaign name is required"); return; }
     if (!useTemplate && !customMessage.trim()) { setError("Message is required"); return; }
     if (useTemplate && !templateName) { setError("Select a template"); return; }
+    if (sendMode === "later" && !scheduledAt) { setError("Pick a date and time to schedule"); return; }
+    if (sendMode === "later" && new Date(scheduledAt).getTime() <= Date.now() + 60_000) {
+      setError("Scheduled time must be at least 1 minute in the future"); return;
+    }
     setSending(true); setError(null); setSent(null);
     try {
       const res = await apiClient.post("/api/marketing/broadcast", {
         name: campaignName, segment, template_name: useTemplate ? templateName : null,
         custom_message: useTemplate ? null : customMessage,
+        scheduled_at: sendMode === "later" ? new Date(scheduledAt).toISOString() : null,
       });
       setSent(res.data); onSent?.();
     } catch (err) {
@@ -360,11 +420,26 @@ function BroadcastComposer({ apiClient, selectedSegment, draftMessage, segmentCo
 
       {sent ? (
         <div style={{ textAlign: "center", padding: "24px 0" }}>
-          <div style={{ fontSize: 32, marginBottom: 10 }}>✅</div>
-          <div style={{ fontSize: 14, fontWeight: 500, color: C.text, marginBottom: 4 }}>Campaign sent</div>
-          <div style={{ fontSize: 12, color: C.textMuted }}>{sent.sent_count} messages dispatched</div>
-          <Btn variant="secondary" style={{ marginTop: 14 }} onClick={() => { setSent(null); setCampaignName(""); setCustomMessage(""); }}>
-            Send another
+          <div style={{ fontSize: 32, marginBottom: 10 }}>{sent.scheduled ? "📅" : "✅"}</div>
+          <div style={{ fontSize: 14, fontWeight: 500, color: C.text, marginBottom: 4 }}>
+            {sent.scheduled ? "Campaign scheduled" : "Campaign sent"}
+          </div>
+          <div style={{ fontSize: 12, color: C.textMuted }}>
+            {sent.scheduled
+              ? `${sent.recipient_count} messages queued for ${fmtDateTime(sent.scheduled_at)}`
+              : `${sent.sent_count ?? sent.recipient_count} messages dispatched`}
+          </div>
+          {!sent.scheduled && (
+            <div style={{ marginTop: 14, background: C.successLight, border: `0.5px solid ${C.successBorder}`, borderRadius: 10, padding: "12px 16px", textAlign: "left" }}>
+              <div style={{ fontSize: 11, fontWeight: 500, color: C.successDark, marginBottom: 6 }}>Campaign ROI (updates within 48h)</div>
+              <div style={{ fontSize: 12, color: C.textSub, lineHeight: 1.7 }}>
+                You sent to <strong>{sent.recipient_count ?? sent.sent_count}</strong> customers.
+                Check History for orders and revenue attributed within 48 hours.
+              </div>
+            </div>
+          )}
+          <Btn variant="secondary" style={{ marginTop: 14 }} onClick={() => { setSent(null); setCampaignName(""); setCustomMessage(""); setSendMode("now"); setScheduledAt(""); }}>
+            {sent.scheduled ? "Schedule another" : "Send another"}
           </Btn>
         </div>
       ) : (
@@ -406,6 +481,12 @@ function BroadcastComposer({ apiClient, selectedSegment, draftMessage, segmentCo
                 style={{ ...inputStyle, resize: "vertical", lineHeight: 1.7 }}
               />
               <div style={{ fontSize: 10, color: C.textMuted, textAlign: "right", marginTop: 3 }}>{customMessage.length} chars</div>
+              {customMessage.trim() && (
+                <div style={{ marginTop: 8, background: C.surfaceBg, borderRadius: 8, padding: "8px 10px", fontSize: 11, color: C.textSub, lineHeight: 1.6 }}>
+                  <span style={{ fontSize: 10, color: C.textMuted }}>Preview: </span>
+                  {resolvePreviewText(customMessage, previewName, restaurantName)}
+                </div>
+              )}
             </div>
           ) : (
             <div>
@@ -440,9 +521,31 @@ function BroadcastComposer({ apiClient, selectedSegment, draftMessage, segmentCo
 
           {error && <AlertBanner type="error">{error}</AlertBanner>}
 
-          <Btn onClick={send} disabled={sending} style={{ alignSelf: "flex-end", padding: "8px 20px" }}>
-            {sending ? <><Spinner size={14} /> &nbsp;Sending…</> : `Send to ${recipientCount} customers`}
-          </Btn>
+          <div>
+            <label style={labelStyle}>When to send</label>
+            <div style={{ display: "flex", gap: 8, marginBottom: sendMode === "later" ? 10 : 0 }}>
+              <button style={toggleBtnStyle(sendMode === "now")} onClick={() => setSendMode("now")}>Send now</button>
+              <button style={toggleBtnStyle(sendMode === "later")} onClick={() => setSendMode("later")}>
+                Schedule for later <Pill label="Pro" variant="purple" />
+              </button>
+            </div>
+            {sendMode === "later" && (
+              <input
+                type="datetime-local"
+                value={scheduledAt}
+                onChange={e => setScheduledAt(e.target.value)}
+                min={new Date(Date.now() + 120_000).toISOString().slice(0, 16)}
+                style={inputStyle}
+              />
+            )}
+          </div>
+
+          <div style={{ display: "flex", gap: 10, alignSelf: "flex-end", flexWrap: "wrap" }}>
+            <Btn onClick={send} disabled={sending} style={{ padding: "8px 20px" }}>
+              {sending ? <><Spinner size={14} /> &nbsp;{sendMode === "later" ? "Scheduling…" : "Sending…"}</>
+                : sendMode === "later" ? `Schedule for ${recipientCount} customers` : `Send to ${recipientCount} customers`}
+            </Btn>
+          </div>
         </div>
       )}
     </Card>
@@ -472,21 +575,36 @@ const BUTTON_TYPES = {
   COPY_CODE:    { label: "Copy offer code",   icon: "🎟" },
 };
 
-function TemplateCreateModal({ apiClient, onClose, onCreated }) {
+function TemplateCreateModal({ apiClient, onClose, onCreated, initialContext, previewName, restaurantName }) {
   const [form, setForm] = useState({
     name: "", category: "MARKETING", language: "en", headerType: "NONE",
-    headerText: "", mediaFile: null, mediaPreviewUrl: null, body: "", footer: "", buttons: [],
+    headerText: "", mediaFile: null, mediaPreviewUrl: null,
+    body: initialContext?.message || "",
+    footer: "Reply STOP to opt out",
+    buttons: [],
   });
   const [saving, setSaving] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [draftId, setDraftId] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
   const [showVarMenu, setShowVarMenu] = useState(false);
   const [showBtnMenu, setShowBtnMenu] = useState(false);
   const [aiRewriting, setAiRewriting] = useState(false);
+  const [aiGenerating, setAiGenerating] = useState(false);
+  const [showAiGenerate, setShowAiGenerate] = useState(false);
+  const [aiGoal, setAiGoal] = useState(initialContext?.goal_key || "win_back");
   const bodyRef = useRef(null);
 
+  const previewVars = RESTAURANT_VARIABLES.map(v =>
+    v.insert === "{{name}}" ? { ...v, preview: previewName || v.preview } : v
+  );
+
   const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
+
+  const onNameChange = (raw) => set("name", normalizeTemplateName(raw));
+  const nameValid = !form.name || /^[a-z0-9_]+$/.test(form.name);
 
   const insertVariable = (token) => {
     const el = bodyRef.current;
@@ -528,17 +646,43 @@ function TemplateCreateModal({ apiClient, onClose, onCreated }) {
     setAiRewriting(false);
   };
 
-  const previewText = (text) => {
-    if (!text) return "";
-    return text
-      .replace(/\{\{name\}\}/gi,       RESTAURANT_VARIABLES[0].preview)
-      .replace(/\{\{restaurant\}\}/gi, RESTAURANT_VARIABLES[1].preview)
-      .replace(/\{\{date\}\}/gi,       RESTAURANT_VARIABLES[2].preview)
-      .replace(/\{\{token\}\}/gi,      RESTAURANT_VARIABLES[3].preview)
-      .replace(/\{\{order\}\}/gi,      RESTAURANT_VARIABLES[4].preview)
-      .replace(/\*([^*]+)\*/g,         (_, t) => t)
-      .replace(/_([^_]+)_/g,           (_, t) => t);
+  const aiGenerate = async () => {
+    setAiGenerating(true); setError(null);
+    try {
+      const res = await apiClient.post("/api/marketing/ai-generate", {
+        goal_key: aiGoal,
+        goal_text: initialContext?.goal,
+        language: form.language,
+        category: form.category,
+        restaurant_name: restaurantName,
+      });
+      set("name", res.data.template_name || form.name);
+      set("body", res.data.body || form.body);
+      set("footer", res.data.footer || form.footer);
+      if (res.data.category) set("category", res.data.category);
+      setShowAiGenerate(false);
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+    }
+    setAiGenerating(false);
   };
+
+  const saveDraft = async () => {
+    setSavingDraft(true); setError(null);
+    try {
+      const res = await apiClient.post("/api/marketing/template-drafts", {
+        id: draftId,
+        name: form.name || "untitled_draft",
+        payload: { ...form, mediaFile: null, mediaPreviewUrl: null },
+      });
+      setDraftId(res.data.draft?.id);
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+    }
+    setSavingDraft(false);
+  };
+
+  const previewText = (text) => resolvePreviewText(text, previewName, restaurantName);
 
   const submit = async () => {
     if (!form.name.trim()) { setError("Template name is required"); return; }
@@ -565,8 +709,8 @@ function TemplateCreateModal({ apiClient, onClose, onCreated }) {
         }] : []),
         {
           type: "BODY", text: form.body,
-          ...(form.body.match(/\{\{[^}]+\}\}/g) ? {
-            example: { body_text: [(form.body.match(/\{\{[^}]+\}\}/g) || []).map(v => RESTAURANT_VARIABLES.find(r => r.insert === v)?.preview || "sample")] }
+            ...(form.body.match(/\{\{[^}]+\}\}/g) ? {
+            example: { body_text: [(form.body.match(/\{\{[^}]+\}\}/g) || []).map(v => previewVars.find(r => r.insert === v)?.preview || "sample")] }
           } : {}),
         },
         ...(form.footer.trim() ? [{ type: "FOOTER", text: form.footer }] : []),
@@ -621,8 +765,20 @@ function TemplateCreateModal({ apiClient, onClose, onCreated }) {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
               <div>
                 <label style={labelStyle}>Template name *</label>
-                <input value={form.name} onChange={e => set("name", e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))} placeholder="lowercase_with_underscores" style={inputStyle} />
-                <div style={{ fontSize: 10, color: C.textMuted, marginTop: 3 }}>Lowercase letters, numbers, underscores only</div>
+                <input
+                  value={form.name}
+                  onChange={e => onNameChange(e.target.value)}
+                  placeholder="vada_pav_offer_june"
+                  style={{
+                    ...inputStyle,
+                    borderColor: form.name && !nameValid ? C.danger : C.border,
+                  }}
+                />
+                {form.name && !nameValid ? (
+                  <div style={{ fontSize: 10, color: C.danger, marginTop: 3 }}>Use lowercase letters, numbers, and underscores only</div>
+                ) : (
+                  <div style={{ fontSize: 10, color: C.textMuted, marginTop: 3 }}>Spaces auto-convert to underscores · lowercase only</div>
+                )}
               </div>
               <div>
                 <label style={labelStyle}>Locale *</label>
@@ -634,7 +790,12 @@ function TemplateCreateModal({ apiClient, onClose, onCreated }) {
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
               <div>
-                <label style={labelStyle}>Category *</label>
+                <label style={labelStyle}>
+                  Category *{" "}
+                  <Tooltip text="Use Utility for order confirmations and transactional updates (lower cost, no marketing frequency limits). Use Marketing for promotions and re-engagement.">
+                    <span style={{ fontSize: 10, color: C.textMuted }}>ⓘ</span>
+                  </Tooltip>
+                </label>
                 <div style={{ display: "flex", gap: 8 }}>
                   {["UTILITY","MARKETING"].map(cat => (
                     <button key={cat} onClick={() => set("category", cat)} style={{
@@ -647,6 +808,9 @@ function TemplateCreateModal({ apiClient, onClose, onCreated }) {
                       {cat.charAt(0) + cat.slice(1).toLowerCase()}
                     </button>
                   ))}
+                </div>
+                <div style={{ fontSize: 10, color: C.textMuted, marginTop: 4, lineHeight: 1.5 }}>
+                  Utility = confirmations · Marketing = promos &amp; win-back
                 </div>
               </div>
               <div>
@@ -709,7 +873,7 @@ function TemplateCreateModal({ apiClient, onClose, onCreated }) {
                   </button>
                   {showVarMenu && (
                     <div style={{ position: "absolute", top: "110%", left: 0, background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,.1)", zIndex: 10, minWidth: 180, overflow: "hidden" }}>
-                      {RESTAURANT_VARIABLES.map(v => (
+                      {previewVars.map(v => (
                         <div key={v.insert} onClick={() => insertVariable(v.insert)}
                           style={{ padding: "9px 14px", fontSize: 12, cursor: "pointer", color: C.textSub, borderBottom: `0.5px solid ${C.border}` }}
                           onMouseEnter={e => e.target.style.background = C.surfaceBg}
@@ -724,15 +888,37 @@ function TemplateCreateModal({ apiClient, onClose, onCreated }) {
                   style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, border: `0.5px solid ${C.border}`, background: C.cardBg, cursor: "pointer", color: C.accent, fontWeight: 500 }}>
                   Name
                 </button>
-                <button onClick={aiRewrite} disabled={aiRewriting || !form.body.trim()}
-                  style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, border: `0.5px solid ${C.border}`, background: C.cardBg, cursor: "pointer", color: C.primary, display: "flex", alignItems: "center", gap: 4, opacity: !form.body.trim() ? 0.4 : 1 }}>
-                  {aiRewriting ? <><Spinner size={12} /> Rewriting…</> : "✦ AI rewrite"}
+                <Tooltip text="AI will improve your message for higher engagement while keeping it WhatsApp-compliant. Requires a draft first.">
+                  <button onClick={aiRewrite} disabled={aiRewriting || !form.body.trim()}
+                    style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, border: `0.5px solid ${C.border}`, background: C.cardBg, cursor: "pointer", color: C.primary, display: "flex", alignItems: "center", gap: 4, opacity: !form.body.trim() ? 0.4 : 1 }}>
+                    {aiRewriting ? <><Spinner size={12} /> Rewriting…</> : "✦ AI rewrite"}
+                  </button>
+                </Tooltip>
+                <button onClick={() => setShowAiGenerate(v => !v)}
+                  style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, border: `0.5px solid ${C.accentBorder}`, background: C.accentLight, cursor: "pointer", color: C.accentDark, fontWeight: 500 }}>
+                  ✦ Generate with AI
                 </button>
               </div>
+              {showAiGenerate && (
+                <div style={{ background: C.accentLight, border: `0.5px solid ${C.accentBorder}`, borderRadius: 8, padding: "10px 12px", marginBottom: 8 }}>
+                  <div style={{ fontSize: 11, color: C.textSub, marginBottom: 8 }}>What&apos;s the goal of this message?</div>
+                  <select value={aiGoal} onChange={e => setAiGoal(e.target.value)} style={{ ...inputStyle, marginBottom: 8, appearance: "auto" }}>
+                    <option value="win_back">Bring back lapsed customers</option>
+                    <option value="special">Announce a special</option>
+                    <option value="loyalty">Reward loyal customers</option>
+                    <option value="welcome">Welcome first-time customers</option>
+                  </select>
+                  <Btn onClick={aiGenerate} disabled={aiGenerating} style={{ fontSize: 11, padding: "6px 12px" }}>
+                    {aiGenerating ? <><Spinner size={12} /> Generating…</> : "Generate template"}
+                  </Btn>
+                </div>
+              )}
               <textarea ref={bodyRef} value={form.body} onChange={e => set("body", e.target.value)} rows={6} maxLength={1024}
                 placeholder="Type your message. Use *bold* or _italic_ for formatting."
                 style={{ ...inputStyle, resize: "vertical", lineHeight: 1.7 }} />
-              <div style={{ fontSize: 10, color: C.textMuted, textAlign: "right", marginTop: 3 }}>{form.body.length} / 1024</div>
+              <div style={{ fontSize: 10, color: charCountColor(form.body.length), textAlign: "right", marginTop: 3, fontWeight: form.body.length >= 800 ? 500 : 400 }}>
+                {form.body.length} / 1024
+              </div>
             </div>
 
             <div>
@@ -807,6 +993,9 @@ function TemplateCreateModal({ apiClient, onClose, onCreated }) {
 
             <div style={{ display: "flex", gap: 10, paddingBottom: 8 }}>
               <Btn variant="secondary" onClick={onClose} style={{ minWidth: 80 }}>Cancel</Btn>
+              <Btn variant="secondary" onClick={saveDraft} disabled={savingDraft || success} style={{ minWidth: 100 }}>
+                {savingDraft ? <><Spinner size={14} /> Saving…</> : draftId ? "Update draft" : "Save draft"}
+              </Btn>
               <Btn onClick={submit} disabled={saving || success} style={{ flex: 1, padding: "10px", fontSize: 13 }}>
                 {uploading ? <><Spinner size={14} /> Uploading media…</> : saving ? <><Spinner size={14} /> Submitting…</> : "Save template"}
               </Btn>
@@ -878,10 +1067,19 @@ function TemplateCreateModal({ apiClient, onClose, onCreated }) {
 }
 
 // ─── Template Viewer ──────────────────────────────────────────────────────────
-function TemplateViewer({ apiClient }) {
+function TemplateViewer({ apiClient, previewName, restaurantName, templateModalContext, onClearTemplateContext }) {
   const [templates, setTemplates] = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [modalContext, setModalContext] = useState(null);
+
+  useEffect(() => {
+    if (templateModalContext) {
+      setModalContext(templateModalContext);
+      setShowModal(true);
+      onClearTemplateContext?.();
+    }
+  }, [templateModalContext, onClearTemplateContext]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -914,14 +1112,23 @@ function TemplateViewer({ apiClient }) {
 
   return (
     <>
-      {showModal && <TemplateCreateModal apiClient={apiClient} onClose={() => setShowModal(false)} onCreated={() => { setShowModal(false); setTimeout(load, 1000); }} />}
+      {showModal && (
+        <TemplateCreateModal
+          apiClient={apiClient}
+          previewName={previewName}
+          restaurantName={restaurantName}
+          initialContext={modalContext}
+          onClose={() => { setShowModal(false); setModalContext(null); }}
+          onCreated={() => { setShowModal(false); setModalContext(null); setTimeout(load, 1000); }}
+        />
+      )}
       <Card>
         <CardHeader
           title={<>Message templates <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 400, marginLeft: 6 }}>{templates.length} total</span></>}
           right={
             <div style={{ display: "flex", gap: 8 }}>
               <Btn variant="ghost" onClick={load} style={{ fontSize: 11, padding: "4px 10px" }}>Sync</Btn>
-              <Btn onClick={() => setShowModal(true)} style={{ padding: "5px 12px" }}>+ New template</Btn>
+              <Btn onClick={() => { setModalContext(null); setShowModal(true); }} style={{ padding: "5px 12px" }}>+ New template</Btn>
             </div>
           }
         />
@@ -932,7 +1139,7 @@ function TemplateViewer({ apiClient }) {
             <div style={{ fontSize: 28, marginBottom: 10 }}>📋</div>
             <div style={{ fontWeight: 500, marginBottom: 6, color: C.text }}>No templates yet</div>
             <div style={{ marginBottom: 16 }}>Create your first template to start sending campaigns.</div>
-            <Btn onClick={() => setShowModal(true)}>+ Create template</Btn>
+            <Btn onClick={() => { setModalContext(null); setShowModal(true); }}>+ Create template</Btn>
           </div>
         ) : (
           <div>
@@ -956,9 +1163,10 @@ function TemplateViewer({ apiClient }) {
 }
 
 // ─── Campaign History ─────────────────────────────────────────────────────────
-function CampaignHistory({ apiClient, refreshTrigger }) {
+function CampaignHistory({ apiClient, refreshTrigger, onCloneCampaign, onResendCampaign }) {
   const [campaigns, setCampaigns] = useState([]);
   const [loading,   setLoading]   = useState(true);
+  const [expanded,  setExpanded]  = useState(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -970,7 +1178,7 @@ function CampaignHistory({ apiClient, refreshTrigger }) {
 
   useEffect(() => { load(); }, [load, refreshTrigger]);
 
-  const statusVariant = s => ({ completed: "green", sending: "blue", failed: "red", draft: "gray" })[s] ?? "gray";
+  const statusVariant = s => ({ completed: "green", sending: "blue", failed: "red", draft: "gray", scheduled: "purple" })[s] ?? "gray";
 
   return (
     <Card>
@@ -989,7 +1197,7 @@ function CampaignHistory({ apiClient, refreshTrigger }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr style={{ borderBottom: `0.5px solid ${C.border}` }}>
-                {["Campaign","Segment","Sent","Status","Date"].map(h => (
+                {["Campaign","Segment","Sent","Status","Date","Actions"].map(h => (
                   <th key={h} style={{ textAlign: "left", color: C.textMuted, fontWeight: 400, fontSize: 11, paddingBottom: 8 }}>{h}</th>
                 ))}
               </tr>
@@ -997,19 +1205,194 @@ function CampaignHistory({ apiClient, refreshTrigger }) {
             <tbody>
               {campaigns.map((c, i) => {
                 const seg = SEGMENTS.find(s => s.key === c.segment_type);
+                const roi = c.roi || {};
+                const isOpen = expanded === c.id;
                 return (
-                  <tr key={i} style={{ borderBottom: `0.5px solid ${C.border}` }}>
-                    <td style={{ padding: "8px 0", color: C.text, fontWeight: 500 }}>{c.name}</td>
-                    <td style={{ padding: "8px 0", color: C.textSub }}>{seg?.icon} {seg?.label ?? c.segment_type}</td>
-                    <td style={{ padding: "8px 0", color: C.text }}>{c.sent_count ?? 0} / {c.recipient_count ?? 0}</td>
-                    <td style={{ padding: "8px 0" }}><Pill label={c.status} variant={statusVariant(c.status)} /></td>
-                    <td style={{ padding: "8px 0", color: C.textMuted }}>{fmtDateTime(c.sent_at || c.created_at)}</td>
-                  </tr>
+                  <Fragment key={c.id || i}>
+                    <tr style={{ borderBottom: `0.5px solid ${C.border}` }}>
+                      <td style={{ padding: "8px 0", color: C.text, fontWeight: 500 }}>
+                        <button onClick={() => setExpanded(isOpen ? null : c.id)} style={{ background: "none", border: "none", cursor: "pointer", fontWeight: 500, color: C.text, fontSize: 12, textAlign: "left", padding: 0 }}>
+                          {c.name} {c.status === "completed" && roi.orders_48h != null ? <span style={{ color: C.textMuted, fontWeight: 400 }}>· ₹{roi.revenue_48h ?? 0}</span> : null}
+                        </button>
+                      </td>
+                      <td style={{ padding: "8px 0", color: C.textSub }}>{seg?.icon} {seg?.label ?? c.segment_type}</td>
+                      <td style={{ padding: "8px 0", color: C.text }}>{c.sent_count ?? 0} / {c.recipient_count ?? 0}</td>
+                      <td style={{ padding: "8px 0" }}><Pill label={c.status} variant={statusVariant(c.status)} /></td>
+                      <td style={{ padding: "8px 0", color: C.textMuted }}>{fmtDateTime(c.scheduled_at || c.sent_at || c.created_at)}</td>
+                      <td style={{ padding: "8px 0" }}>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          <Btn variant="ghost" style={{ fontSize: 10, padding: "3px 8px" }} onClick={() => onCloneCampaign?.(c)}>Clone</Btn>
+                          <Btn variant="ghost" style={{ fontSize: 10, padding: "3px 8px" }} onClick={() => onResendCampaign?.(c)}>Resend segment</Btn>
+                        </div>
+                      </td>
+                    </tr>
+                    {isOpen && c.status === "completed" && (
+                      <tr>
+                        <td colSpan={6} style={{ padding: "0 0 12px" }}>
+                          <div style={{ background: C.successLight, border: `0.5px solid ${C.successBorder}`, borderRadius: 8, padding: "10px 14px", fontSize: 12, color: C.textSub, lineHeight: 1.7 }}>
+                            <strong style={{ color: C.successDark }}>Campaign ROI</strong> — You sent to {roi.sent_to ?? c.sent_count ?? 0} customers.
+                            {" "}{roi.orders_48h ?? 0} placed orders within 48h.
+                            {" "}Estimated revenue attributed: <strong>₹{roi.revenue_48h ?? 0}</strong>.
+                            <span style={{ fontSize: 10, color: C.textMuted, display: "block", marginTop: 4 }}>Attribution is approximate — counts first completed order per recipient in the 48h window.</span>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 );
               })}
             </tbody>
           </table>
         </div>
+      )}
+    </Card>
+  );
+}
+
+// ─── Marketing Automations ────────────────────────────────────────────────────
+const AUTOMATION_PRESETS = [
+  { key: "lapsed_14d",        label: "14-day lapsed",     desc: "Customer hasn't ordered in 14 days → re-engagement", icon: "💤" },
+  { key: "loyalty_5th_order", label: "5th order loyalty", desc: "5th order completed → loyalty reward",             icon: "⭐" },
+  { key: "first_order",       label: "First order welcome", desc: "First order → welcome + what to try next",       icon: "👋" },
+];
+
+function AutomationsPanel({ apiClient, templates, onCreated }) {
+  const [automations, setAutomations] = useState([]);
+  const [triggers, setTriggers] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
+  const [form, setForm] = useState({ name: "", trigger_type: "lapsed_14d", template_name: "", custom_message: "" });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    apiClient.get("/api/marketing/automations")
+      .then(res => { setAutomations(res.data.automations || []); setTriggers(res.data.triggers || {}); })
+      .catch(() => setAutomations([]))
+      .finally(() => setLoading(false));
+  }, [apiClient]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const openPreset = (key) => {
+    const preset = AUTOMATION_PRESETS.find(p => p.key === key);
+    const trig = triggers[key];
+    setForm({
+      name: preset?.label || key,
+      trigger_type: key,
+      template_name: "",
+      custom_message: trig?.defaultMessage || "",
+    });
+    setShowCreate(true);
+    setError(null);
+  };
+
+  const create = async () => {
+    if (!form.name.trim()) { setError("Name is required"); return; }
+    if (!form.template_name && !form.custom_message.trim()) { setError("Select a template or enter a message"); return; }
+    setSaving(true); setError(null);
+    try {
+      await apiClient.post("/api/marketing/automations", form);
+      setShowCreate(false);
+      load();
+      onCreated?.();
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+    }
+    setSaving(false);
+  };
+
+  const toggle = async (id, is_active) => {
+    try {
+      await apiClient.patch(`/api/marketing/automations/${id}`, { is_active: !is_active });
+      load();
+    } catch (_) {}
+  };
+
+  const inputStyle = { width: "100%", fontSize: 12, padding: "8px 10px", borderRadius: 8, border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.text, outline: "none", boxSizing: "border-box" };
+  const labelStyle = { fontSize: 11, fontWeight: 500, color: C.textSub, marginBottom: 5, display: "block" };
+
+  return (
+    <Card>
+      <CardHeader
+        title="Automated triggers"
+        right={<Btn onClick={() => openPreset("lapsed_14d")} style={{ padding: "5px 12px" }}>+ Create automation</Btn>}
+      />
+      <div style={{ fontSize: 12, color: C.textSub, marginBottom: 14, lineHeight: 1.6 }}>
+        Event-triggered messages run automatically — no manual broadcast needed. Checked every 5 minutes.
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 16 }}>
+        {AUTOMATION_PRESETS.map(p => (
+          <div key={p.key} onClick={() => openPreset(p.key)} style={{
+            background: C.surfaceBg, borderRadius: 10, padding: "12px 14px", cursor: "pointer",
+            border: `0.5px solid ${C.border}`,
+          }}>
+            <div style={{ fontSize: 18, marginBottom: 6 }}>{p.icon}</div>
+            <div style={{ fontSize: 12, fontWeight: 500, color: C.text }}>{p.label}</div>
+            <div style={{ fontSize: 10, color: C.textMuted, marginTop: 4, lineHeight: 1.5 }}>{p.desc}</div>
+          </div>
+        ))}
+      </div>
+
+      {showCreate && (
+        <div style={{ background: C.surfaceBg, borderRadius: 10, padding: "14px 16px", marginBottom: 14, border: `0.5px solid ${C.border}` }}>
+          <SectionLabel>New automation</SectionLabel>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div>
+              <label style={labelStyle}>Name</label>
+              <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} style={inputStyle} />
+            </div>
+            <div>
+              <label style={labelStyle}>Trigger</label>
+              <select value={form.trigger_type} onChange={e => openPreset(e.target.value)} style={{ ...inputStyle, appearance: "auto" }}>
+                {AUTOMATION_PRESETS.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={labelStyle}>Approved template (optional)</label>
+              <select value={form.template_name} onChange={e => setForm(f => ({ ...f, template_name: e.target.value }))} style={{ ...inputStyle, appearance: "auto" }}>
+                <option value="">— Free-form message below —</option>
+                {(templates || []).filter(t => t.status === "APPROVED").map(t => (
+                  <option key={t.name} value={t.name}>{t.name}</option>
+                ))}
+              </select>
+            </div>
+            {!form.template_name && (
+              <div>
+                <label style={labelStyle}>Message</label>
+                <textarea value={form.custom_message} onChange={e => setForm(f => ({ ...f, custom_message: e.target.value }))} rows={3} style={{ ...inputStyle, resize: "vertical" }} />
+              </div>
+            )}
+            {error && <AlertBanner type="error">{error}</AlertBanner>}
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn variant="secondary" onClick={() => setShowCreate(false)}>Cancel</Btn>
+              <Btn onClick={create} disabled={saving}>{saving ? <><Spinner size={14} /> Creating…</> : "Activate automation"}</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <div style={{ display: "flex", justifyContent: "center", padding: "16px 0" }}><Spinner /></div>
+      ) : automations.length === 0 ? (
+        <div style={{ fontSize: 12, color: C.textMuted, textAlign: "center", padding: "20px 0" }}>No automations yet. Create one above.</div>
+      ) : (
+        automations.map(a => (
+          <div key={a.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: C.surfaceBg, borderRadius: 8, marginBottom: 6 }}>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 500, color: C.text }}>{a.name}</div>
+              <div style={{ fontSize: 10, color: C.textMuted }}>{AUTOMATION_PRESETS.find(p => p.key === a.trigger_type)?.desc ?? a.trigger_type}</div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <Pill label={a.is_active ? "Active" : "Paused"} variant={a.is_active ? "green" : "gray"} />
+              <Btn variant="ghost" style={{ fontSize: 10, padding: "3px 8px" }} onClick={() => toggle(a.id, a.is_active)}>
+                {a.is_active ? "Pause" : "Resume"}
+              </Btn>
+            </div>
+          </div>
+        ))
       )}
     </Card>
   );
@@ -1038,24 +1421,56 @@ function WABAStrip({ apiClient, restaurantId }) {
 export default function MarketingDashboard({ restaurantId, restaurantName, onLogout, apiClient }) {
   const [stats,         setStats]         = useState(null);
   const [segmentCounts, setSegmentCounts] = useState(null);
+  const [previewName,   setPreviewName]   = useState("Ravi");
+  const [templates,     setTemplates]     = useState([]);
   const [statsLoading,  setStatsLoading]  = useState(true);
   const [selectedSeg,   setSelectedSeg]   = useState("recent");
   const [draftMsg,      setDraftMsg]      = useState("");
+  const [cloneCampaign, setCloneCampaign] = useState(null);
+  const [templateContext, setTemplateContext] = useState(null);
   const [refreshCamps,  setRefreshCamps]  = useState(0);
   const [activeTab,     setActiveTab]     = useState("compose");
 
   useEffect(() => {
     if (!apiClient || !restaurantId) return;
     apiClient.get("/api/marketing/subscribers")
-      .then(res => { setStats(res.data.stats); setSegmentCounts(res.data.segments); })
+      .then(res => {
+        setStats(res.data.stats);
+        setSegmentCounts(res.data.segments);
+        if (res.data.preview_name) setPreviewName(res.data.preview_name);
+      })
       .catch(() => {})
       .finally(() => setStatsLoading(false));
+    apiClient.get("/api/marketing/templates")
+      .then(res => setTemplates(res.data.templates || []))
+      .catch(() => {});
   }, [apiClient, restaurantId]);
 
+  const handleClone = (c) => {
+    setCloneCampaign({ ...c, segment: c.segment_type });
+    setActiveTab("compose");
+  };
+
+  const handleResend = (c) => {
+    setCloneCampaign({
+      ...c,
+      segment: c.segment_type,
+      name: `${c.name} — ${new Date().toLocaleDateString("en-IN", { month: "short", year: "numeric" })}`,
+    });
+    setActiveTab("compose");
+  };
+
+  const handleCreateTemplate = (ctx) => {
+    const goalMap = { lapsed: "win_back", recent: "loyalty", never_returned: "welcome", high_value: "loyalty" };
+    setTemplateContext({ ...ctx, goal_key: goalMap[ctx.segment] || "win_back" });
+    setActiveTab("templates");
+  };
+
   const tabs = [
-    { key: "compose",   label: "Compose"   },
-    { key: "templates", label: "Templates" },
-    { key: "history",   label: "History"   },
+    { key: "compose",     label: "Compose"     },
+    { key: "automations", label: "Automations" },
+    { key: "templates",   label: "Templates"   },
+    { key: "history",     label: "History"     },
   ];
 
   const tabStyle = (key) => ({
@@ -1101,19 +1516,41 @@ export default function MarketingDashboard({ restaurantId, restaurantName, onLog
                 apiClient={apiClient}
                 onSegmentSelected={seg => { setSelectedSeg(seg); setActiveTab("compose"); }}
                 onMessageDrafted={msg => setDraftMsg(msg)}
+                onCreateTemplate={handleCreateTemplate}
               />
               <SegmentCards counts={segmentCounts} loading={statsLoading} selected={selectedSeg} onSelect={setSelectedSeg} />
             </div>
             <BroadcastComposer
               apiClient={apiClient} selectedSegment={selectedSeg} draftMessage={draftMsg}
-              segmentCounts={segmentCounts} onSent={() => { setRefreshCamps(r => r + 1); setActiveTab("history"); }}
+              segmentCounts={segmentCounts} cloneFrom={cloneCampaign}
+              previewName={previewName} restaurantName={restaurantName}
+              onSent={() => { setRefreshCamps(r => r + 1); setCloneCampaign(null); setActiveTab("history"); }}
             />
           </div>
         )}
 
-        {activeTab === "templates" && <TemplateViewer apiClient={apiClient} />}
+        {activeTab === "automations" && (
+          <AutomationsPanel apiClient={apiClient} templates={templates} onCreated={() => setRefreshCamps(r => r + 1)} />
+        )}
 
-        {activeTab === "history" && <CampaignHistory apiClient={apiClient} refreshTrigger={refreshCamps} />}
+        {activeTab === "templates" && (
+          <TemplateViewer
+            apiClient={apiClient}
+            previewName={previewName}
+            restaurantName={restaurantName}
+            templateModalContext={templateContext}
+            onClearTemplateContext={() => setTemplateContext(null)}
+          />
+        )}
+
+        {activeTab === "history" && (
+          <CampaignHistory
+            apiClient={apiClient}
+            refreshTrigger={refreshCamps}
+            onCloneCampaign={handleClone}
+            onResendCampaign={handleResend}
+          />
+        )}
 
       </div>
     </div>

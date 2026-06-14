@@ -13,8 +13,9 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useSubscription } from '../contexts/SubscriptionContext';
 
 // ─── Design tokens (matches ManagerPortal) ────────────────────────────────────
 const C = {
@@ -151,7 +152,12 @@ function SectionTitle({ children }) {
 
 function SaveBar({ onSave, loading, saved }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, marginTop: 24, paddingTop: 16, borderTop: `0.5px solid ${C.border}` }}>
+    <div style={{
+      display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10,
+      marginTop: 24, padding: '12px 0', borderTop: `0.5px solid ${C.border}`,
+      position: 'sticky', bottom: 0, zIndex: 5,
+      background: `linear-gradient(to top, ${C.cardBg} 85%, transparent)`,
+    }}>
       {saved && <span style={{ fontSize: 11, color: C.success }}>✓ Saved</span>}
       <Btn onClick={onSave} loading={loading}>Save changes</Btn>
     </div>
@@ -437,6 +443,9 @@ function TabRestaurant({ apiClient, showToast }) {
 
   return (
     <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <Btn onClick={save} loading={saving}>{saved ? '✓ Saved' : 'Save restaurant details'}</Btn>
+      </div>
       <div style={grid2}>
         <div><Label required>Display name</Label><Input value={form.display_name} onChange={v => set('display_name', v)} placeholder="Murugan Idli Shop" /></div>
         <div><Label>Legal / registered name</Label><Input value={form.legal_name} onChange={v => set('legal_name', v)} placeholder="Murugan Food Pvt. Ltd." /></div>
@@ -478,52 +487,65 @@ function TabRestaurant({ apiClient, showToast }) {
 
 // ═════════════════════════════════════════════════════════════════════════════
 // TAB 3 — SERVICES
-// Toggle which service types are visible to customers
+// Toggle which customer-facing services are active (within paid plan).
 // ═════════════════════════════════════════════════════════════════════════════
-function TabServices({ apiClient, showToast }) {
-  const [features, setFeatures] = useState(null);
+function TabServices({ apiClient, showToast, refreshSubscription }) {
+  const [paidFeatures,    setPaidFeatures]    = useState(null);
+  const [enabledServices, setEnabledServices] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saved,  setSaved]  = useState(false);
 
   useEffect(() => {
     apiClient.get('/api/subscription').then(r => {
-      setFeatures(r.data.subscribed_features ?? r.data.features ?? []);
+      const paid = r.data.paid_features ?? r.data.features ?? [];
+      const enabled = r.data.enabled_services
+        ?? SERVICES.map(s => s.id).filter(id => (r.data.enabled_features ?? r.data.features ?? []).includes(id));
+      setPaidFeatures(paid);
+      setEnabledServices(enabled);
     }).catch(() => {
-      // fall back to waba endpoint which also returns subscribed_features
       apiClient.get('/api/dashboard/waba').then(r => {
-        setFeatures(r.data.restaurant?.subscribed_features ?? []);
+        const feats = r.data.restaurant?.subscribed_features ?? [];
+        setPaidFeatures(feats);
+        setEnabledServices(SERVICES.map(s => s.id).filter(id => feats.includes(id)));
       }).catch(() => showToast('Failed to load services', 'error'));
     });
   }, [apiClient, showToast]);
 
   const toggle = (id) => {
     setSaved(false);
-    setFeatures(f => f.includes(id) ? f.filter(x => x !== id) : [...f, id]);
+    setEnabledServices(f => f.includes(id) ? f.filter(x => x !== id) : [...f, id]);
   };
 
   const save = async () => {
-    if (features.length < 1) return showToast('At least one service must be active', 'error');
+    if (enabledServices.length < 1) return showToast('At least one service must be active', 'error');
     setSaving(true);
     try {
-      await apiClient.put('/api/restaurants/me', { subscribed_features: features });
+      await apiClient.put('/api/restaurants/me', { enabled_services: enabledServices });
       setSaved(true);
       showToast('Service configuration saved');
+      if (refreshSubscription) await refreshSubscription();
     } catch (e) { showToast(e.response?.data?.error ?? 'Save failed', 'error'); }
     finally { setSaving(false); }
   };
 
-  if (!features) return <div style={{ padding: 32, textAlign: 'center' }}><Spinner size={28} /></div>;
+  if (!paidFeatures || !enabledServices) {
+    return <div style={{ padding: 32, textAlign: 'center' }}><Spinner size={28} /></div>;
+  }
+
+  const availableServices = SERVICES.filter(svc => paidFeatures.includes(svc.id));
+  const lockedServices    = SERVICES.filter(svc => !paidFeatures.includes(svc.id));
 
   return (
     <div>
       <div style={{ fontSize: 12, color: C.textSub, marginBottom: 16, lineHeight: 1.6 }}>
         Enabled services appear as options when a customer messages your WhatsApp number.
         Disabling a service removes it from the customer-facing menu immediately.
+        Only services on your paid plan can be toggled here.
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        {SERVICES.map(svc => {
-          const on = features.includes(svc.id);
+        {availableServices.map(svc => {
+          const on = enabledServices.includes(svc.id);
           return (
             <button
               key={svc.id}
@@ -553,6 +575,38 @@ function TabServices({ apiClient, showToast }) {
           );
         })}
       </div>
+
+      {lockedServices.length > 0 && (
+        <div style={{ marginTop: 20 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
+            Not on your plan
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            {lockedServices.map(svc => (
+              <div
+                key={svc.id}
+                style={{
+                  padding: '16px', borderRadius: 10, textAlign: 'left',
+                  background: C.surfaceBg, border: `0.5px dashed ${C.border}`,
+                  opacity: 0.75,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <span style={{ fontSize: 20, filter: 'grayscale(1)' }}>{svc.icon}</span>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: C.textMuted, padding: '2px 8px', borderRadius: 20, background: C.border }}>
+                    Upgrade
+                  </span>
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: C.textMuted }}>{svc.label}</div>
+                <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>{svc.desc}</div>
+                <div style={{ fontSize: 10, color: C.textMuted, marginTop: 8 }}>
+                  Contact Autom8 to add this service to your subscription.
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <SaveBar onSave={save} loading={saving} saved={saved} />
     </div>
@@ -584,9 +638,15 @@ function TabKitchen({ apiClient, showToast }) {
         payment_mode:            d.payment_mode ?? 'prepay',
         kitchen_workflow:        d.kitchen_workflow ?? 'KOT_only',
         takeaway_fulfillment_mode: d.takeaway_fulfillment_mode ?? 'single_counter',
+        has_breakfast: d.opening_hours?.breakfast !== false,
+        breakfast_start: d.opening_hours?.breakfast_start ?? '06:00',
+        breakfast_end:   d.opening_hours?.breakfast_end   ?? '11:00',
         has_lunch:    d.opening_hours?.lunch  !== false,
         lunch_start:  d.opening_hours?.lunch_start  ?? '12:00',
         lunch_end:    d.opening_hours?.lunch_end    ?? '15:00',
+        has_snacks:   d.opening_hours?.snacks !== false,
+        snacks_start: d.opening_hours?.snacks_start ?? '15:00',
+        snacks_end:   d.opening_hours?.snacks_end   ?? '19:00',
         has_dinner:   d.opening_hours?.dinner !== false,
         dinner_start: d.opening_hours?.dinner_start ?? '19:00',
         dinner_end:   d.opening_hours?.dinner_end   ?? '23:00',
@@ -635,7 +695,9 @@ function TabKitchen({ apiClient, showToast }) {
         takeaway_fulfillment_mode:  form.takeaway_fulfillment_mode,
         fulfillment_sections:       sections,
         opening_hours: {
+          breakfast: form.has_breakfast, breakfast_start: form.breakfast_start, breakfast_end: form.breakfast_end,
           lunch: form.has_lunch, lunch_start: form.lunch_start, lunch_end: form.lunch_end,
+          snacks: form.has_snacks, snacks_start: form.snacks_start, snacks_end: form.snacks_end,
           dinner: form.has_dinner, dinner_start: form.dinner_start, dinner_end: form.dinner_end,
         },
       });
@@ -785,11 +847,29 @@ function TabKitchen({ apiClient, showToast }) {
       </div>
 
       <SectionTitle>Service slots</SectionTitle>
+      <div style={{ fontSize: 12, color: C.textSub, marginBottom: 12, lineHeight: 1.55, padding: '10px 12px', background: C.primaryLight, borderRadius: 8, border: `0.5px solid ${C.primaryBorder}` }}>
+        These hours control when WhatsApp customers can order. Toggle each meal period on or off and set open/close times.
+        For a 6am idli shop, enable <strong>Breakfast</strong> below.
+      </div>
+      <ToggleRow label="Breakfast / morning tiffin" checked={form.has_breakfast} onToggle={() => set('has_breakfast', !form.has_breakfast)} />
+      {form.has_breakfast && (
+        <div style={{ ...grid2, margin: '10px 0' }}>
+          <div><Label>Opens</Label><Input type="time" value={form.breakfast_start} onChange={v => set('breakfast_start', v)} /></div>
+          <div><Label>Closes</Label><Input type="time" value={form.breakfast_end} onChange={v => set('breakfast_end', v)} /></div>
+        </div>
+      )}
       <ToggleRow label="Lunch service" checked={form.has_lunch} onToggle={() => set('has_lunch', !form.has_lunch)} />
       {form.has_lunch && (
         <div style={{ ...grid2, margin: '10px 0' }}>
           <div><Label>Opens</Label><Input type="time" value={form.lunch_start} onChange={v => set('lunch_start', v)} /></div>
           <div><Label>Closes</Label><Input type="time" value={form.lunch_end} onChange={v => set('lunch_end', v)} /></div>
+        </div>
+      )}
+      <ToggleRow label="Evening snacks" checked={form.has_snacks} onToggle={() => set('has_snacks', !form.has_snacks)} />
+      {form.has_snacks && (
+        <div style={{ ...grid2, margin: '10px 0' }}>
+          <div><Label>Opens</Label><Input type="time" value={form.snacks_start} onChange={v => set('snacks_start', v)} /></div>
+          <div><Label>Closes</Label><Input type="time" value={form.snacks_end} onChange={v => set('snacks_end', v)} /></div>
         </div>
       )}
       <ToggleRow label="Dinner service" checked={form.has_dinner} onToggle={() => set('has_dinner', !form.has_dinner)} />
@@ -961,6 +1041,7 @@ function TabStaff({ apiClient, showToast }) {
   const [editingId,   setEditingId]   = useState(null);
   const [editForm,    setEditForm]    = useState({});
   const [editSaving,  setEditSaving]  = useState(false);
+  const [resetSending, setResetSending] = useState(null);
 
   const [form, setForm] = useState({
     full_name: '', email: '', phone: '', whatsapp_number: '', role: '',
@@ -1048,14 +1129,26 @@ function TabStaff({ apiClient, showToast }) {
     finally { setSaving(false); }
   };
 
-  const terminate = async (emp) => {
-    const note = window.prompt(`Reason for terminating ${emp.full_name}?`, 'Resigned');
+  const removeEmployee = async (emp) => {
+    const note = window.prompt(`Reason for removing ${emp.full_name}?`, 'Left the team');
     if (note === null) return; // cancelled
     try {
-      await apiClient.put(`/api/staff/${emp.id}/terminate`, { termination_note: note || 'Resigned' });
-      showToast(`${emp.full_name}'s access revoked`);
+      await apiClient.put(`/api/staff/${emp.id}/terminate`, { termination_note: note || 'Left the team' });
+      showToast(`${emp.full_name} has been deactivated`);
       await load();
-    } catch (e) { showToast(e.response?.data?.error ?? 'Failed to terminate', 'error'); }
+    } catch (e) { showToast(e.response?.data?.error ?? 'Failed to remove employee', 'error'); }
+  };
+
+  const sendPasswordReset = async (emp) => {
+    setResetSending(emp.id);
+    try {
+      const res = await apiClient.post(`/api/staff/${emp.id}/send-password-reset`);
+      showToast(res.data?.message ?? `Reset email sent to ${emp.email}`);
+    } catch (e) {
+      showToast(e.response?.data?.error ?? 'Failed to send reset email', 'error');
+    } finally {
+      setResetSending(null);
+    }
   };
 
   const ROLE_COLORS = {
@@ -1081,7 +1174,7 @@ function TabStaff({ apiClient, showToast }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
         <div>
           <div style={{ fontSize: 14, fontWeight: 500, color: C.text }}>
-            {active.length} active · {terminated.length} terminated
+            {active.length} active · {terminated.length} removed
           </div>
           <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>
             WhatsApp numbers are used to send operational notifications per role.
@@ -1146,7 +1239,7 @@ function TabStaff({ apiClient, showToast }) {
 
       {/* Filter tabs */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 14 }}>
-        {[['active', `Active (${active.length})`], ['terminated', `Terminated (${terminated.length})`]].map(([v, l]) => (
+        {[['active', `Active (${active.length})`], ['terminated', `Removed (${terminated.length})`]].map(([v, l]) => (
           <button key={v} onClick={() => setFilter(v)} style={{
             fontSize: 12, padding: '5px 14px', borderRadius: 20, cursor: 'pointer',
             background: filter === v ? C.text : C.surfaceBg,
@@ -1159,7 +1252,7 @@ function TabStaff({ apiClient, showToast }) {
       {/* Employee list */}
       {displayed.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '32px 0', color: C.textMuted, fontSize: 13 }}>
-          {filter === 'active' ? 'No active employees yet. Add your first team member.' : 'No terminated employees.'}
+          {filter === 'active' ? 'No active employees yet. Add your first team member.' : 'No removed employees.'}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1177,7 +1270,7 @@ function TabStaff({ apiClient, showToast }) {
                       <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: rc.bg, color: rc.color }}>
                         {emp.role.replace('_', ' ')}
                       </span>
-                      {!emp.is_active && <span style={{ fontSize: 10, color: C.danger }}>● Terminated</span>}
+                      {!emp.is_active && <span style={{ fontSize: 10, color: C.danger }}>● Deactivated</span>}
                     </div>
                     <div style={{ fontSize: 11, color: C.textMuted }}>
                       {emp.email}
@@ -1186,7 +1279,7 @@ function TabStaff({ apiClient, showToast }) {
                     </div>
                     {emp.terminated_at && (
                       <div style={{ fontSize: 11, color: C.danger, marginTop: 3 }}>
-                        Terminated {new Date(emp.terminated_at).toLocaleDateString('en-IN')} · {emp.termination_note}
+                        Removed {new Date(emp.terminated_at).toLocaleDateString('en-IN')} · {emp.termination_note}
                       </div>
                     )}
                     {emp.is_active && emp.last_login && (
@@ -1197,7 +1290,7 @@ function TabStaff({ apiClient, showToast }) {
                   </div>
 
                   {emp.is_active && (
-                    <div style={{ display: 'flex', gap: 6 }}>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       <Btn
                         variant="ghost"
                         style={{ fontSize: 11 }}
@@ -1205,8 +1298,16 @@ function TabStaff({ apiClient, showToast }) {
                       >
                         {isEditing ? 'Cancel' : 'Edit'}
                       </Btn>
-                      <Btn variant="danger" style={{ fontSize: 11 }} onClick={() => terminate(emp)}>
-                        Terminate
+                      <Btn
+                        variant="ghost"
+                        style={{ fontSize: 11 }}
+                        loading={resetSending === emp.id}
+                        onClick={() => sendPasswordReset(emp)}
+                      >
+                        Reset password
+                      </Btn>
+                      <Btn variant="danger" style={{ fontSize: 11 }} onClick={() => removeEmployee(emp)}>
+                        Remove
                       </Btn>
                     </div>
                   )}
@@ -1483,10 +1584,19 @@ function TabBrand({ apiClient, showToast, user }) {
 
 export default function SettingsPanel() {
   const { apiClient, user } = useAuth();
+  const { refresh: refreshSubscription } = useSubscription();
+  const [searchParams] = useSearchParams();
   const isBrandOwner = user?.role === 'brand_owner';
   const isManagerOnly = user?.role === 'manager';
   const [activeTab, setActiveTab] = useState(isManagerOnly ? 'staff' : 'tables');
   const [toast, setToast] = useState({ msg: '', type: 'success' });
+
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab && TABS.some(t => t.id === tab)) setActiveTab(tab);
+  }, [searchParams]);
+
+  const dashboardPath = isBrandOwner ? '/dashboard/brand' : '/dashboard/owner';
 
   const showToast = useCallback((msg, type = 'success') => {
     setToast({ msg, type });
@@ -1502,7 +1612,7 @@ export default function SettingsPanel() {
   const tabContent = {
     tables:     <TabTables     apiClient={apiClient} showToast={showToast} />,
     restaurant: <TabRestaurant apiClient={apiClient} showToast={showToast} />,
-    services:   <TabServices   apiClient={apiClient} showToast={showToast} />,
+    services:   <TabServices   apiClient={apiClient} showToast={showToast} refreshSubscription={refreshSubscription} />,
     kitchen:    <TabKitchen    apiClient={apiClient} showToast={showToast} />,
     whatsapp:   <TabWhatsApp   apiClient={apiClient} showToast={showToast} />,
     staff:      <TabStaff      apiClient={apiClient} showToast={showToast} />,
@@ -1526,14 +1636,24 @@ export default function SettingsPanel() {
             : 'Manage your restaurant configuration'}
         </p>
         </div>
-        {isManagerOnly && (
-          <Link
-            to="/dashboard/manager"
-            style={{ fontSize: 12, color: C.primaryDark, textDecoration: 'none', fontWeight: 500 }}
-          >
-            ← Back to manager portal
-          </Link>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {!isManagerOnly && (
+            <Link
+              to={dashboardPath}
+              style={{ fontSize: 12, color: C.primaryDark, textDecoration: 'none', fontWeight: 500 }}
+            >
+              ← Back to dashboard
+            </Link>
+          )}
+          {isManagerOnly && (
+            <Link
+              to="/dashboard/manager"
+              style={{ fontSize: 12, color: C.primaryDark, textDecoration: 'none', fontWeight: 500 }}
+            >
+              ← Back to manager portal
+            </Link>
+          )}
+        </div>
       </div>
 
       <div style={{ maxWidth: 860, margin: '0 auto', padding: '24px 16px' }}>
