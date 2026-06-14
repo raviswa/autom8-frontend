@@ -431,6 +431,7 @@ export default function ManagerPortal() {
   const [uploadResult,   setUploadResult]   = useState(null);
   const [downloadingTpl, setDownloadingTpl] = useState(false);
   const [togglingId,     setTogglingId]     = useState(null);
+  const [togglingSpecialId, setTogglingSpecialId] = useState(null);
   const [menuSearch,     setMenuSearch]     = useState('');
   const [menuCategory,   setMenuCategory]   = useState('all');
   const [kitchenStatus,  setKitchenStatus]  = useState(null);
@@ -753,6 +754,17 @@ export default function ManagerPortal() {
       showToast(newValue ? `${item.name} is back in stock` : `${item.name} marked out of stock`);
     } catch(err) { showToast(`Failed to update ${item.name}`); }
     finally { setTogglingId(null); }
+  };
+
+  const toggleSpecialToday = async (item) => {
+    setTogglingSpecialId(item.id);
+    const newValue = !item.is_special_today;
+    try {
+      await apiClient.put(`/api/menu-items/${item.id}/special-today`, { is_special_today: newValue });
+      setMenuItems(prev => prev.map(m => m.id === item.id ? { ...m, is_special_today: newValue } : m));
+      showToast(newValue ? `${item.name} marked as today's special` : `${item.name} removed from today's specials`);
+    } catch (err) { showToast(`Failed to update ${item.name}`); }
+    finally { setTogglingSpecialId(null); }
   };
 
   // ── Order helpers ─────────────────────────────────────────────────────────
@@ -1903,8 +1915,8 @@ export default function ManagerPortal() {
                     <thead>
                       <tr style={{ borderBottom: `0.5px solid ${C.border}`, background: C.surfaceBg }}>
                         {(showMenuSlotColumn
-                          ? ["Name", "Category", "Slot", "Price", "Image", "In stock"]
-                          : ["Name", "Category", "Price", "Image", "In stock"]
+                          ? ["Name", "Category", "Slot", "Price", "Image", "In stock", "Special today"]
+                          : ["Name", "Category", "Price", "Image", "In stock", "Special today"]
                         ).map((h, i) => (
                           <th key={h} style={{ padding: "10px 14px", textAlign: i >= (showMenuSlotColumn ? 3 : 2) ? "right" : "left", fontSize: 11, fontWeight: 500, color: C.textMuted }}>{h}</th>
                         ))}
@@ -1915,7 +1927,7 @@ export default function ManagerPortal() {
                         <React.Fragment key={cat}>
                           <tr style={{ background: C.surfaceBg }}>
                             <td
-                              colSpan={showMenuSlotColumn ? 6 : 5}
+                              colSpan={showMenuSlotColumn ? 7 : 6}
                               style={{ padding: "8px 14px", fontSize: 11, fontWeight: 600, color: C.textSub, letterSpacing: '0.04em', textTransform: 'uppercase' }}
                             >
                               {cat} ({groupedMenuItems[cat].length})
@@ -1924,12 +1936,15 @@ export default function ManagerPortal() {
                           {groupedMenuItems[cat].map(item => {
                         const inStock  = item.is_stocked ?? item.is_available;
                         const isToggle = togglingId === item.id;
+                        const isSpecialToggle = togglingSpecialId === item.id;
+                        const isSpecial = !!item.is_special_today;
                         const slotLabel = formatMenuSlot(item.time_slot);
                         return (
                           <tr key={item.id} style={{ borderBottom: `0.5px solid ${C.border}`, opacity: inStock ? 1 : 0.55 }}>
                             <td style={{ padding: "10px 14px" }}>
                               <span style={{ fontWeight: 500, color: C.text }}>{item.name}</span>
                               {!inStock && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 500, color: C.danger, background: C.dangerLight, padding: "1px 6px", borderRadius: 20 }}>Out of stock</span>}
+                              {isSpecial && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 500, color: '#b45309', background: '#fef3c7', padding: "1px 6px", borderRadius: 20 }}>⭐ Special</span>}
                             </td>
                             <td style={{ padding: "10px 14px" }}>
                               <span style={{ fontSize: 10, background: C.primaryLight, color: C.primaryDark, padding: "2px 8px", borderRadius: 20, fontWeight: 500 }}>
@@ -1963,6 +1978,19 @@ export default function ManagerPortal() {
                                 {isToggle
                                   ? <Spinner size={12} />
                                   : <span style={{ position: "absolute", top: 3, left: inStock ? 19 : 3, width: 14, height: 14, borderRadius: "50%", background: "#fff", transition: "left .2s" }} />}
+                              </button>
+                            </td>
+                            <td style={{ padding: "10px 14px", textAlign: "right" }}>
+                              <button onClick={() => toggleSpecialToday(item)} disabled={isSpecialToggle}
+                                title={isSpecial ? "Remove from today's specials" : "Mark as today's special"}
+                                style={{
+                                  position: "relative", display: "inline-flex", width: 36, height: 20, borderRadius: 10,
+                                  background: isSpecialToggle ? C.borderStrong : isSpecial ? '#f59e0b' : C.border,
+                                  border: "none", cursor: "pointer", padding: 0, flexShrink: 0, transition: "background .2s",
+                                }}>
+                                {isSpecialToggle
+                                  ? <Spinner size={12} />
+                                  : <span style={{ position: "absolute", top: 3, left: isSpecial ? 19 : 3, width: 14, height: 14, borderRadius: "50%", background: "#fff", transition: "left .2s" }} />}
                               </button>
                             </td>
                           </tr>
