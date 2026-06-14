@@ -147,9 +147,13 @@ function tokenAgeStyle(arrivedAt) {
   return TOKEN_AGE_STYLES.fresh;
 }
 
+function tableCapacity(capacity) {
+  const seats = Number(capacity);
+  return Number.isFinite(seats) && seats > 0 ? seats : 4;
+}
+
 function formatSeatLabel(capacity) {
-  if (!capacity) return null;
-  return `${capacity}-seater`;
+  return `${tableCapacity(capacity)}-seater`;
 }
 
 function formatMenuCategory(category) {
@@ -524,7 +528,7 @@ export default function ManagerPortal() {
   };
   const availableTablesFor = (pax) => tables.filter(t => {
     const { status } = getTableStatus(t);
-    return status === 'available' && (t.capacity == null || t.capacity >= pax);
+    return status === 'available' && tableCapacity(t.capacity) >= pax;
   });
 
   const normaliseToken = (t) => ({
@@ -1186,7 +1190,7 @@ export default function ManagerPortal() {
                         <option value="">— choose a table —</option>
                         {tables.filter(t => getTableStatus(t).status === 'available').map(t => (
                           <option key={t.id} value={t.id}>
-                            Table {t.table_number}{t.capacity ? ` (${t.capacity} seats)` : ''}{t.section ? ` · ${t.section}` : ''}
+                            Table {t.table_number} ({tableCapacity(t.capacity)} seats){t.section ? ` · ${t.section}` : ''}
                           </option>
                         ))}
                       </select>
@@ -1537,7 +1541,7 @@ export default function ManagerPortal() {
                               disabled={avail.length === 0}
                               style={{ fontSize: 12, border: `0.5px solid ${C.border}`, borderRadius: 8, padding: "6px 10px", background: C.cardBg, color: C.text, outline: "none" }}>
                               <option value="">{avail.length === 0 ? 'No tables available' : '— assign table —'}</option>
-                              {avail.map(t => <option key={t.id} value={t.id}>Table {t.table_number}{t.capacity ? ` (${t.capacity} seats)` : ''}{t.section ? ` · ${t.section}` : ''}</option>)}
+                              {avail.map(t => <option key={t.id} value={t.id}>Table {t.table_number} ({tableCapacity(t.capacity)} seats){t.section ? ` · ${t.section}` : ''}</option>)}
                             </select>
                             <Btn onClick={() => assignTable(token)} disabled={!assignTableSel[token.id] || isAssign} variant="success">
                               {isAssign ? <><Spinner size={12} /> Assigning…</> : '✓ Assign + notify'}
@@ -1644,11 +1648,12 @@ export default function ManagerPortal() {
                     display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
                   }}>
                     <div style={{ fontSize: 12, fontWeight: 500, color: s.text }}>Table {table.table_number}</div>
-                    {formatSeatLabel(table.capacity) && (
-                      <div style={{ fontSize: 10, color: s.text, opacity: 0.85, fontWeight: 500 }}>
-                        {formatSeatLabel(table.capacity)}
-                      </div>
-                    )}
+                    <div style={{
+                      fontSize: 10, color: s.text, fontWeight: 500,
+                      background: `${s.text}14`, padding: "2px 8px", borderRadius: 8,
+                    }}>
+                      {formatSeatLabel(table.capacity)}
+                    </div>
                     <div style={{ fontSize: 22, margin: "4px 0" }}>
                       {status === 'available' ? '🪑' : status === 'occupied' ? '🍽️' : status === 'reserved' ? '🔒' : '🧹'}
                     </div>
