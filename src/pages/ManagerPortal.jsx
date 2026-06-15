@@ -157,7 +157,13 @@ function formatSeatLabel(capacity) {
 }
 
 function formatMenuCategory(category) {
-  return (category || 'General').trim();
+  const c = (category || '').trim();
+  if (!c || c === 'General') return '';
+  return c;
+}
+
+function displayMenuCategory(category) {
+  return formatMenuCategory(category) || 'Uncategorized';
 }
 
 function formatMenuSlot(timeSlot) {
@@ -299,36 +305,58 @@ function AlertBanner({ type = "warn", children }) {
 }
 
 // ─── Live catalog template download ───────────────────────────────────────────
-const SLOT_DB_TO_LABEL_TMPL = {
-  morning_tiffin: 'Morning Tiffin',
-  lunch:          'Lunch',
-  evening_snacks: 'Evening Snacks',
-  dinner_tiffin:  'Dinner Tiffin',
-};
+const CATALOG_TEMPLATE_HEADERS = ['id', 'title', 'description', 'price', 'category', 'image_link', 'is_available'];
+const CATALOG_TEMPLATE_COL_WIDTHS = [
+  { wch: 8 }, { wch: 28 }, { wch: 48 }, { wch: 8 }, { wch: 18 }, { wch: 52 }, { wch: 14 },
+];
+const IMAGE_SOURCE_EXAMPLES = [
+  ['How to add dish images'],
+  [''],
+  ['Paste a direct image URL in the image_link column. These free sources work well:'],
+  ['• Unsplash — https://images.unsplash.com/photo-...?w=800'],
+  ['• Pexels   — https://images.pexels.com/photos/.../photo.jpeg?w=800'],
+  [''],
+  ['Tips:'],
+  ['• Use a direct image URL (ends in .jpg, .jpeg, .png, or .webp, or has ?w=)'],
+  ['• Right-click an image on Unsplash/Pexels → "Copy image address"'],
+  ['• Leave image_link blank if you have no photo yet — item will still save'],
+  [''],
+  ['Example URLs you can copy:'],
+  ['https://images.unsplash.com/photo-1585937421612-70a008356fbe?w=800'],
+  ['https://images.pexels.com/photos/2232/vegetables-market-sell-produce.jpg?w=800'],
+];
+
+function exportCategoryForTemplate(category) {
+  const c = (category || '').trim();
+  return c && c !== 'General' ? c : '';
+}
 
 async function downloadCatalogTemplate(apiClient, showToast, currentMenuItems = []) {
-  const HEADERS    = ['id', 'title', 'description', 'price', 'custom_label_0', 'image_link', 'is_available'];
-  const COL_WIDTHS = [{ wch: 8 }, { wch: 28 }, { wch: 48 }, { wch: 8 }, { wch: 16 }, { wch: 52 }, { wch: 14 }];
-
   const fromApiItems = (items) =>
-    items.map(item => [item.id, item.title, item.description, item.price, item.custom_label_0, item.image_link, item.is_available]);
+    items.map(item => [
+      item.id, item.title, item.description, item.price,
+      exportCategoryForTemplate(item.category), item.image_link, item.is_available,
+    ]);
 
   const fromStateItems = (items) =>
     items.map(item => [
       item.retailer_id || item.id || '',
-      item.name        || '',
+      item.name || '',
       item.description || '',
       Number(item.price) || 0,
-      SLOT_DB_TO_LABEL_TMPL[item.time_slot] || item.time_slot || 'Morning Tiffin',
-      item.image_url   || '',
+      exportCategoryForTemplate(item.category),
+      item.image_url || '',
       (item.is_stocked ?? item.is_available ?? true) ? 'TRUE' : 'FALSE',
     ]);
 
   const writeAndDownload = (rows, count, source) => {
-    const ws = XLSX.utils.aoa_to_sheet([HEADERS, ...rows]);
-    ws['!cols'] = COL_WIDTHS;
+    const catalogSheet = XLSX.utils.aoa_to_sheet([CATALOG_TEMPLATE_HEADERS, ...rows]);
+    catalogSheet['!cols'] = CATALOG_TEMPLATE_COL_WIDTHS;
+    const helpSheet = XLSX.utils.aoa_to_sheet(IMAGE_SOURCE_EXAMPLES);
+    helpSheet['!cols'] = [{ wch: 72 }];
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'WhatsApp Catalog');
+    XLSX.utils.book_append_sheet(wb, catalogSheet, 'WhatsApp Catalog');
+    XLSX.utils.book_append_sheet(wb, helpSheet, 'Image sources');
     XLSX.writeFile(wb, 'catalog_template.xlsx');
     showToast(`Template downloaded — ${count} item${count !== 1 ? 's' : ''} (${source})`);
   };
@@ -342,13 +370,18 @@ async function downloadCatalogTemplate(apiClient, showToast, currentMenuItems = 
     console.warn('[template-dl] API failed:', err.message);
   }
 
-  if (currentMenuItems && currentMenuItems.length > 0) {
-    const rows = fromStateItems(currentMenuItems);
-    writeAndDownload(rows, rows.length, 'local snapshot');
+  const stockedItems = (currentMenuItems || []).filter(
+    i => i.is_stocked !== false && (i.retailer_id || i.id)
+  );
+  if (stockedItems.length > 0) {
+    writeAndDownload(fromStateItems(stockedItems), stockedItems.length, 'local snapshot');
     return;
   }
 
-  const stubRow = ['M001', 'Idli', 'Soft steamed idlis with sambar and chutney', 50, 'Morning Tiffin', '', 'TRUE'];
+  const stubRow = [
+    'M001', 'Idli', 'Soft steamed idlis with sambar and chutney', 50, 'Tiffin',
+    'https://images.unsplash.com/photo-1585937421612-70a008356fbe?w=800', 'TRUE',
+  ];
   writeAndDownload([stubRow], 0, 'blank template — fill in your items');
   showToast('No items in database yet — blank template downloaded');
 }
@@ -360,18 +393,27 @@ function mapExcelRowToMenuItem(row) {
   const description = String(row['description'] || row['Description'] || '').trim();
   const priceRaw    = row['price'] || row['Price'] || 0;
   const price       = parseFloat(String(priceRaw).replace(/[^0-9.]/g, '')) || 0;
-  const slotRaw     = String(row['custom_label_0'] || row['time_slot'] || row['category'] || '').trim().toLowerCase();
-  const time_slot   = SLOT_LABEL_TO_DB[slotRaw] || 'morning_tiffin';
+  let category    = String(row['category'] || row['Category'] || '').trim();
+  if (!category && row['custom_label_0']) {
+    category = String(row['custom_label_0']).trim();
+  }
   const image_url   = String(row['image_link'] || row['image_url'] || row['Image Link'] || row['Image URL'] || '').trim();
   const availRaw    = row['is_available'] ?? row['Is Available'] ?? row['is_stocked'] ?? '';
   const is_available = availRaw === '' ? undefined : !['false', '0', 'no'].includes(String(availRaw).toLowerCase().trim());
-  return { id, name, description, price, time_slot, image_url, ...(is_available !== undefined ? { is_available } : {}) };
+  return {
+    id, name, description, price, category, time_slot: 'all', image_url,
+    ...(is_available !== undefined ? { is_available } : {}),
+  };
 }
 function validateRow(row, index) {
   const errors = [];
   if (!row.id)        errors.push(`Row ${index + 1}: missing id`);
   if (!row.name)      errors.push(`Row ${index + 1}: missing name/title`);
   if (row.price <= 0) errors.push(`Row ${index + 1} (${row.name || row.id}): price must be > 0`);
+  if (!row.category)  errors.push(`Row ${index + 1} (${row.name || row.id}): missing category (e.g. Tiffin, Beverages, Snacks)`);
+  if (row.image_url && !/^https?:\/\//i.test(row.image_url)) {
+    errors.push(`Row ${index + 1} (${row.name || row.id}): image_link must start with http:// or https://`);
+  }
   return errors;
 }
 
@@ -552,7 +594,7 @@ export default function ManagerPortal() {
   const freeTablesCount    = tables.filter(t => getTableStatus(t).status === 'available').length;
 
   const showMenuSlotColumn = menuSlotsAreMeaningful(menuItems);
-  const menuCategories = [...new Set(menuItems.map(i => formatMenuCategory(i.category)))].sort();
+  const menuCategories = [...new Set(menuItems.map(i => formatMenuCategory(i.category)).filter(Boolean))].sort();
   const filteredMenuItems = [...menuItems]
     .filter(item => {
       if (menuCategory !== 'all' && formatMenuCategory(item.category) !== menuCategory) return false;
@@ -566,12 +608,12 @@ export default function ManagerPortal() {
       const aS = a.is_stocked ?? a.is_available ?? true;
       const bS = b.is_stocked ?? b.is_available ?? true;
       if (aS !== bS) return aS ? -1 : 1;
-      const catCmp = formatMenuCategory(a.category).localeCompare(formatMenuCategory(b.category));
+      const catCmp = displayMenuCategory(a.category).localeCompare(displayMenuCategory(b.category));
       if (catCmp !== 0) return catCmp;
       return (a.name || '').localeCompare(b.name || '');
     });
   const groupedMenuItems = filteredMenuItems.reduce((acc, item) => {
-    const cat = formatMenuCategory(item.category);
+    const cat = displayMenuCategory(item.category);
     if (!acc[cat]) acc[cat] = [];
     acc[cat].push(item);
     return acc;
@@ -1801,7 +1843,7 @@ export default function ManagerPortal() {
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
               <div>
                 <h2 style={{ fontSize: 16, fontWeight: 500, color: C.text, margin: 0 }}>Menu management</h2>
-                <p style={{ fontSize: 12, color: C.textMuted, margin: "4px 0 0" }}>Toggle items in/out of stock instantly, or upload the catalog Excel to update prices, names and images.</p>
+                <p style={{ fontSize: 12, color: C.textMuted, margin: "4px 0 0" }}>Toggle items in/out of stock instantly, or upload the catalog Excel to update prices, names, categories and images. See the <strong>Image sources</strong> sheet in the template for photo URLs.</p>
               </div>
               <button
                 onClick={async () => { setDownloadingTpl(true); await downloadCatalogTemplate(apiClient, showToast, menuItems); setDownloadingTpl(false); }}
@@ -1856,8 +1898,8 @@ export default function ManagerPortal() {
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed" }}>
                     <thead>
                       <tr style={{ borderBottom: `0.5px solid ${C.border}`, background: C.surfaceBg }}>
-                        {["ID","Name","Slot","Price","Description","Image URL"].map((h, i) => (
-                          <th key={h} style={{ textAlign: i >= 3 ? "right" : "left", padding: "10px 14px", fontSize: 11, fontWeight: 500, color: C.textMuted, width: ["6%","18%","12%","8%","28%","28%"][i] }}>{h}</th>
+                        {["ID","Name","Category","Price","Description","Image URL"].map((h, i) => (
+                          <th key={h} style={{ textAlign: i >= 3 ? "right" : "left", padding: "10px 14px", fontSize: 11, fontWeight: 500, color: C.textMuted, width: ["6%","18%","14%","8%","26%","28%"][i] }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -1868,7 +1910,7 @@ export default function ManagerPortal() {
                           <tr key={i} style={{ borderBottom: `0.5px solid ${C.border}`, background: hasError ? C.dangerLight : "transparent" }}>
                             <td style={{ padding: "8px 14px", fontFamily: "monospace", fontSize: 11, color: C.textMuted }}>{row.id}</td>
                             <td style={{ padding: "8px 14px", fontWeight: 500, color: C.text }}>{row.name}</td>
-                            <td style={{ padding: "8px 14px" }}><span style={{ fontSize: 10, background: C.surfaceBg, color: C.textSub, padding: "2px 8px", borderRadius: 20, fontWeight: 500 }}>{SLOT_DB_TO_LABEL[row.time_slot] || row.time_slot}</span></td>
+                            <td style={{ padding: "8px 14px" }}><span style={{ fontSize: 10, background: C.surfaceBg, color: C.textSub, padding: "2px 8px", borderRadius: 20, fontWeight: 500 }}>{row.category || '—'}</span></td>
                             <td style={{ padding: "8px 14px", textAlign: "right", fontWeight: 500, color: C.text }}>₹{row.price.toFixed(2)}</td>
                             <td style={{ padding: "8px 14px", color: C.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.description}</td>
                             <td style={{ padding: "8px 14px" }}>
@@ -1996,7 +2038,7 @@ export default function ManagerPortal() {
                             </td>
                             <td style={{ padding: "10px 14px" }}>
                               <span style={{ fontSize: 10, background: C.primaryLight, color: C.primaryDark, padding: "2px 8px", borderRadius: 20, fontWeight: 500 }}>
-                                {formatMenuCategory(item.category)}
+                                {displayMenuCategory(item.category)}
                               </span>
                             </td>
                             {showMenuSlotColumn && (
