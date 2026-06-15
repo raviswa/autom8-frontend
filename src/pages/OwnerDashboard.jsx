@@ -577,6 +577,41 @@ function useWAOrders(apiClient, startISO, endISO) {
   return orders;
 }
 
+// ─── Cloud kitchen setup tip (owner dashboard) ───────────────────────────────
+function CloudKitchenLocationTip({ restaurant }) {
+  if (!restaurant || restaurant.restaurant_type !== 'cloud_kitchen') return null;
+
+  const hasCoords = restaurant.pickup_latitude != null && restaurant.pickup_longitude != null
+    && String(restaurant.pickup_latitude) !== '' && String(restaurant.pickup_longitude) !== '';
+
+  return (
+    <div style={{
+      marginBottom: 12, padding: '12px 14px', borderRadius: 12,
+      background: hasCoords ? '#F5FAFF' : '#FFFBEB',
+      border: `0.5px solid ${hasCoords ? '#B5D4F4' : '#FAC775'}`,
+      fontSize: 12, color: '#444', lineHeight: 1.6,
+    }}>
+      {!hasCoords && (
+        <div style={{ fontWeight: 600, color: '#92400E', marginBottom: 6 }}>
+          Pickup location not set — delivery distance and charges may be inaccurate.
+        </div>
+      )}
+      <div>
+        <strong>Tip:</strong> In Settings → Restaurant, paste a full{' '}
+        <span style={{ fontFamily: 'monospace', fontSize: 11 }}>maps.google.com</span> share link from Google Maps
+        (Share → copy link). Short <span style={{ fontFamily: 'monospace', fontSize: 11 }}>maps.app.goo.gl</span> links
+        often won&apos;t work — use <strong>Resolve location</strong> with your pickup address instead.
+      </div>
+      <Link
+        to="/settings?tab=restaurant"
+        style={{ display: 'inline-block', marginTop: 8, fontSize: 12, fontWeight: 500, color: '#185FA5', textDecoration: 'none' }}
+      >
+        {hasCoords ? 'Review pickup location in Settings →' : 'Set pickup location in Settings →'}
+      </Link>
+    </div>
+  );
+}
+
 // ─── WABA Info Panel ──────────────────────────────────────────────────────────
 function WABAPanel({ info }) {
   const row = (label, value) => (
@@ -845,6 +880,8 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
             </button>
           </div>
         </div>
+
+        <CloudKitchenLocationTip restaurant={wabaInfo} />
 
         {/* Custom date picker */}
         {showCal && (

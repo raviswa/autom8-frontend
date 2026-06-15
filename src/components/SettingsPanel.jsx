@@ -15,7 +15,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { useSubscription } from '../contexts/SubscriptionContext';
+import { useSubscription, FEATURES } from '../contexts/SubscriptionContext';
 
 // ─── Design tokens (matches ManagerPortal) ────────────────────────────────────
 const C = {
@@ -398,14 +398,30 @@ function TabTables({ apiClient, showToast }) {
 // TAB 2 — RESTAURANT
 // Display name, address, contact, cuisine, opening hours
 // ═════════════════════════════════════════════════════════════════════════════
+
+function parseGoogleMapsCoords(input) {
+  if (!input || typeof input !== 'string') return null;
+  const text = input.trim();
+  let m = text.match(/[?&]q=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+  if (m) return { lat: m[1], lng: m[2] };
+  m = text.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+  if (m) return { lat: m[1], lng: m[2] };
+  m = text.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/);
+  if (m) return { lat: m[1], lng: m[2] };
+  return null;
+}
+
 function TabRestaurant({ apiClient, showToast }) {
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saved,  setSaved]  = useState(false);
+  const [resolvingPickup, setResolvingPickup] = useState(false);
 
   useEffect(() => {
     apiClient.get('/api/dashboard/waba').then(r => {
       const d = r.data.restaurant ?? {};
+      const lat = d.pickup_latitude;
+      const lng = d.pickup_longitude;
       setForm({
         display_name:  d.display_name  ?? d.name ?? '',
         legal_name:    d.legal_name    ?? '',
@@ -421,16 +437,102 @@ function TabRestaurant({ apiClient, showToast }) {
         cuisine_type:  d.cuisine_type  ?? '',
         gstin:         d.gstin         ?? '',
         logo_url:      d.logo_url      ?? '',
+        restaurant_type:   d.restaurant_type ?? 'restaurant',
+        pickup_address:    d.pickup_address ?? '',
+        pickup_maps_link:  lat && lng ? `https://maps.google.com/?q=${lat},${lng}` : '',
+        pickup_latitude:   lat ?? '',
+        pickup_longitude:  lng ?? '',
+        pickup_coords_source: lat && lng ? 'saved' : '',
       });
     }).catch(() => showToast('Failed to load restaurant info', 'error'));
   }, [apiClient, showToast]);
 
   const set = (k, v) => { setSaved(false); setForm(p => ({ ...p, [k]: v })); };
 
+  const applyMapsLink = (link) => {
+    const coords = parseGoogleMapsCoords(link);
+    setSaved(false);
+    if (coords) {
+      setForm(p => ({
+        ...p,
+        pickup_maps_link: link,
+        pickup_latitude: coords.lat,
+        pickup_longitude: coords.lng,
+        pickup_coords_source: 'maps_url',
+      }));
+      return true;
+    }
+    setForm(p => ({
+      ...p,
+      pickup_maps_link: link,
+      ...(link.trim() ? { pickup_latitude: '', pickup_longitude: '', pickup_coords_source: '' } : {}),
+    }));
+    return false;
+  };
+
+  const resolvePickupCoords = async (silent = false) => {
+    if (!form?.pickup_address?.trim() && !form?.pickup_maps_link?.trim()) {
+      if (!silent) showToast('Enter a pickup address or paste a Google Maps link', 'error');
+      return null;
+    }
+    const fromLink = parseGoogleMapsCoords(form.pickup_maps_link);
+    if (fromLink) {
+      setForm(p => ({
+        ...p,
+        pickup_latitude: fromLink.lat,
+        pickup_longitude: fromLink.lng,
+        pickup_coords_source: 'maps_url',
+      }));
+      if (!silent) showToast('Location picked up from Google Maps link');
+      return { lat: parseFloat(fromLink.lat), lng: parseFloat(fromLink.lng), source: 'maps_url' };
+    }
+    setResolvingPickup(true);
+    try {
+      const r = await apiClient.post('/api/restaurants/resolve-pickup', {
+        maps_url: form.pickup_maps_link || null,
+        pickup_address: form.pickup_address,
+        city: form.city,
+        state: form.state,
+      });
+      const coords = { lat: r.data.lat, lng: r.data.lng, source: r.data.source || 'geocode' };
+      setForm(p => ({
+        ...p,
+        pickup_latitude: coords.lat,
+        pickup_longitude: coords.lng,
+        pickup_coords_source: coords.source,
+        pickup_maps_link: p.pickup_maps_link || `https://maps.google.com/?q=${coords.lat},${coords.lng}`,
+      }));
+      if (!silent) showToast('Pickup location resolved from address');
+      return coords;
+    } catch (e) {
+      if (!silent) showToast(e.response?.data?.error ?? 'Could not resolve location', 'error');
+      return null;
+    } finally {
+      setResolvingPickup(false);
+    }
+  };
+
   const save = async () => {
     setSaving(true);
     try {
-      await apiClient.put('/api/restaurants/me', form);
+      let lat = form.pickup_latitude;
+      let lng = form.pickup_longitude;
+      if (form.restaurant_type === 'cloud_kitchen' && (!lat || !lng)) {
+        const resolved = await resolvePickupCoords(true);
+        if (!resolved) {
+          showToast('Add a Google Maps link or pickup address we can geocode', 'error');
+          return;
+        }
+        lat = resolved.lat;
+        lng = resolved.lng;
+      }
+      const { pickup_maps_link, pickup_coords_source, ...toSave } = form;
+      await apiClient.put('/api/restaurants/me', {
+        ...toSave,
+        pickup_latitude: lat || null,
+        pickup_longitude: lng || null,
+        maps_url: pickup_maps_link || undefined,
+      });
       setSaved(true);
       showToast('Restaurant details saved');
     } catch (e) { showToast(e.response?.data?.error ?? 'Save failed', 'error'); }
@@ -478,6 +580,78 @@ function TabRestaurant({ apiClient, showToast }) {
       <div style={{ marginTop: 12 }}><Label>Logo URL</Label><Input value={form.logo_url} onChange={v => set('logo_url', v)} placeholder="https://…/logo.png" /></div>
       {form.logo_url && (
         <img src={form.logo_url} alt="Logo preview" style={{ marginTop: 8, height: 48, borderRadius: 6, border: `0.5px solid ${C.border}` }} onError={e => e.target.style.display = 'none'} />
+      )}
+
+      <SectionTitle>Outlet type</SectionTitle>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+        {[
+          { value: 'restaurant', label: 'Restaurant', desc: 'Dine-in venue — customers can find you on Google Maps.' },
+          { value: 'cloud_kitchen', label: 'Cloud kitchen', desc: 'Delivery / takeaway hub — show pickup address on order confirmations.' },
+        ].map(opt => (
+          <button key={opt.value}
+            onClick={() => set('restaurant_type', opt.value)}
+            style={{
+              padding: '14px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
+              background: form.restaurant_type === opt.value ? C.primaryLight : C.cardBg,
+              border: `0.5px solid ${form.restaurant_type === opt.value ? C.primary : C.border}`,
+            }}>
+            <div style={{ fontSize: 13, fontWeight: 500, color: form.restaurant_type === opt.value ? C.primaryDark : C.text, marginBottom: 4 }}>
+              {form.restaurant_type === opt.value ? '◉ ' : '○ '}{opt.label}
+            </div>
+            <div style={{ fontSize: 11, color: C.textMuted }}>{opt.desc}</div>
+          </button>
+        ))}
+      </div>
+
+      {form.restaurant_type === 'cloud_kitchen' && (
+        <>
+          <SectionTitle>Pickup location (takeaway &amp; delivery)</SectionTitle>
+          <div style={{ fontSize: 12, color: C.textSub, marginBottom: 12, lineHeight: 1.55 }}>
+            Open Google Maps → find your kitchen pin → <strong>Share</strong> → copy link and paste below.
+            We extract coordinates automatically for pickup directions and delivery distance.
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <Label>Google Maps link</Label>
+            <Input
+              value={form.pickup_maps_link}
+              onChange={v => applyMapsLink(v)}
+              placeholder="https://maps.google.com/... or https://maps.app.goo.gl/..."
+            />
+            <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+              Paste the share link from Google Maps. Coordinates are read from the URL when possible.
+            </div>
+          </div>
+          <div style={{
+            fontSize: 12, color: C.textSub, marginBottom: 12, lineHeight: 1.6,
+            padding: '10px 12px', background: C.primaryLight, borderRadius: 8,
+            border: `0.5px solid ${C.primaryBorder}`,
+          }}>
+            <strong>Tip:</strong> Prefer a full <code style={{ fontSize: 11 }}>maps.google.com</code> link — coordinates are picked up instantly.
+            Short links (<code style={{ fontSize: 11 }}>maps.app.goo.gl</code>) often won&apos;t parse; enter your pickup address above and tap <strong>Resolve location</strong>, or open the long URL from Share in Google Maps.
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <Label required>Pickup address (shown to customers)</Label>
+            <Input
+              value={form.pickup_address}
+              onChange={v => set('pickup_address', v)}
+              placeholder="12, 2nd Floor, Gopalan Mall Road, HSR Layout"
+            />
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+            <Btn variant="secondary" onClick={() => resolvePickupCoords(false)} loading={resolvingPickup}>
+              Resolve location
+            </Btn>
+            {form.pickup_latitude && form.pickup_longitude && (
+              <span style={{
+                fontSize: 11, color: C.successDark, background: C.successLight,
+                border: `0.5px solid ${C.successBorder}`, padding: '4px 10px', borderRadius: 20,
+              }}>
+                ✓ {Number(form.pickup_latitude).toFixed(5)}, {Number(form.pickup_longitude).toFixed(5)}
+                {form.pickup_coords_source === 'maps_url' ? ' · from Maps link' : form.pickup_coords_source === 'geocode' ? ' · from address' : ''}
+              </span>
+            )}
+          </div>
+        </>
       )}
 
       <SaveBar onSave={save} loading={saving} saved={saved} />
@@ -617,7 +791,19 @@ function TabServices({ apiClient, showToast, refreshSubscription }) {
 // TAB 4 — KITCHEN
 // Dining duration, payment mode, workflow, slot timings
 // ═════════════════════════════════════════════════════════════════════════════
-function TabKitchen({ apiClient, showToast }) {
+function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
+  const hasPaid = (f) => paidFeatures.includes(f);
+  const hasAnyPaid = (...fs) => fs.some(f => paidFeatures.includes(f));
+  const showDineIn = hasPaid(FEATURES.DINE_IN);
+  const showTakeaway = hasPaid(FEATURES.TAKEAWAY);
+  const showDelivery = hasPaid(FEATURES.DELIVERY);
+  const showOrderModes = hasAnyPaid(FEATURES.TAKEAWAY, FEATURES.DELIVERY);
+
+  const defaultTiers = [
+    { max_km: 3, charge: 20 },
+    { max_km: 6, charge: 30 },
+    { max_km: '', charge: 40 },
+  ];
   const [form,      setForm]      = useState(null);
   const [saving,    setSaving]    = useState(false);
   const [saved,     setSaved]     = useState(false);
@@ -641,6 +827,17 @@ function TabKitchen({ apiClient, showToast }) {
         parcel_charge_per_item:    d.parcel_charge_per_item ?? 0,
         takeaway_ready_range:      d.takeaway_ready_range ?? '',
         delivery_ready_range:      d.delivery_ready_range ?? '',
+        delivery_charge_default:   d.delivery_charge_default ?? 30,
+        delivery_charge_tiers:     Array.isArray(d.delivery_charge_tiers) && d.delivery_charge_tiers.length
+          ? d.delivery_charge_tiers.map(t => ({
+              max_km: t.max_km == null ? '' : t.max_km,
+              charge: t.charge ?? 0,
+            }))
+          : defaultTiers,
+        min_delivery_order_amount: d.min_delivery_order_amount ?? 0,
+        min_takeaway_order_amount: d.min_takeaway_order_amount ?? 0,
+        scheduled_delivery_enabled: !!d.scheduled_delivery_enabled,
+        max_delivery_radius_km:     d.max_delivery_radius_km ?? 0,
         has_breakfast: d.opening_hours?.breakfast !== false,
         breakfast_start: d.opening_hours?.breakfast_start ?? '06:00',
         breakfast_end:   d.opening_hours?.breakfast_end   ?? '11:00',
@@ -699,6 +896,15 @@ function TabKitchen({ apiClient, showToast }) {
         parcel_charge_per_item:     parseFloat(form.parcel_charge_per_item) || 0,
         takeaway_ready_range:       (form.takeaway_ready_range || '').trim() || null,
         delivery_ready_range:       (form.delivery_ready_range || '').trim() || null,
+        delivery_charge_default:    parseFloat(form.delivery_charge_default) || 30,
+        delivery_charge_tiers:      (form.delivery_charge_tiers || []).map(t => ({
+          max_km: t.max_km === '' || t.max_km == null ? null : parseFloat(t.max_km),
+          charge: parseFloat(t.charge) || 0,
+        })),
+        min_delivery_order_amount:  parseFloat(form.min_delivery_order_amount) || 0,
+        min_takeaway_order_amount:  parseFloat(form.min_takeaway_order_amount) || 0,
+        scheduled_delivery_enabled: !!form.scheduled_delivery_enabled,
+        max_delivery_radius_km:     parseFloat(form.max_delivery_radius_km) || 0,
         fulfillment_sections:       sections,
         opening_hours: {
           breakfast: form.has_breakfast, breakfast_start: form.breakfast_start, breakfast_end: form.breakfast_end,
@@ -735,23 +941,37 @@ function TabKitchen({ apiClient, showToast }) {
 
   return (
     <div>
-      <div style={grid2}>
-        <div>
-          <Label>Max dining time (minutes)</Label>
-          <Input value={form.dining_duration_minutes} onChange={v => set('dining_duration_minutes', v)} type="number" placeholder="90" />
-          <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>Tables are auto-released after this time.</div>
+      {showDineIn && (
+        <div style={grid2}>
+          <div>
+            <Label>Max dining time (minutes)</Label>
+            <Input value={form.dining_duration_minutes} onChange={v => set('dining_duration_minutes', v)} type="number" placeholder="90" />
+            <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>Tables are auto-released after this time.</div>
+          </div>
+          <div>
+            <Label>Payment mode</Label>
+            <Select value={form.payment_mode} onChange={v => set('payment_mode', v)} options={[
+              { value: 'prepay',   label: 'Pre-pay (order confirmation)' },
+              { value: 'postpay',  label: 'Post-pay (pay when leaving)'  },
+              { value: 'partial',  label: 'Partial deposit'              },
+            ]} />
+          </div>
         </div>
-        <div>
+      )}
+
+      {!showDineIn && (
+        <div style={{ marginBottom: 16 }}>
           <Label>Payment mode</Label>
           <Select value={form.payment_mode} onChange={v => set('payment_mode', v)} options={[
-            { value: 'prepay',   label: 'Pre-pay (order confirmation)' },
-            { value: 'postpay',  label: 'Post-pay (pay when leaving)'  },
-            { value: 'partial',  label: 'Partial deposit'              },
+            { value: 'prepay',   label: 'Pre-pay (Razorpay link on order)' },
+            { value: 'postpay',  label: 'Post-pay (pay on delivery / pickup)' },
           ]} />
         </div>
-      </div>
+      )}
 
-      {/* ── Takeaway Fulfillment Mode ─────────────────────────────────────── */}
+      {showOrderModes && (
+        <>
+      {/* ── Takeaway & delivery pricing ───────────────────────────────────── */}
       <SectionTitle>Takeaway &amp; delivery</SectionTitle>
       <div style={{ marginBottom: 16 }}>
         <Label>Parcel / packaging charge (₹ per item)</Label>
@@ -766,6 +986,7 @@ function TabKitchen({ apiClient, showToast }) {
         </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+        {showTakeaway && (
         <div>
           <Label>Takeaway ready time (mins range)</Label>
           <Input
@@ -774,9 +995,11 @@ function TabKitchen({ apiClient, showToast }) {
             placeholder="20-30"
           />
           <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
-            Optional. Shown as &quot;Usually ready in …&quot; on order confirmation — not a guarantee.
+            Shown as &quot;Usually ready in …&quot; on takeaway confirmation.
           </div>
         </div>
+        )}
+        {showDelivery && (
         <div>
           <Label>Delivery time (mins range)</Label>
           <Input
@@ -785,10 +1008,95 @@ function TabKitchen({ apiClient, showToast }) {
             placeholder="30-45"
           />
           <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
-            Optional. Shown on delivery confirmation. Manager can flag busy kitchen for a delay note.
+            Shown on delivery confirmation. Manager can flag busy kitchen for a delay note.
           </div>
         </div>
+        )}
       </div>
+
+      {showDelivery && (
+        <>
+          <SectionTitle>Delivery charges</SectionTitle>
+          <div style={{ fontSize: 12, color: C.textSub, marginBottom: 12, lineHeight: 1.55 }}>
+            For direct WhatsApp orders (no Swiggy/Zomato). Charge is based on distance from your pickup coordinates to the customer&apos;s shared location.
+            Road distance is used when <code>GOOGLE_MAPS_API_KEY</code> is set on the server; otherwise straight-line distance is used.
+          </div>
+          <div style={{
+            fontSize: 12, color: C.textSub, marginBottom: 12, lineHeight: 1.6,
+            padding: '10px 12px', background: C.warningLight, borderRadius: 8,
+            border: `0.5px solid ${C.warningBorder}`,
+          }}>
+            <strong>Tip:</strong> Ask customers to tap <strong>Share location</strong> on WhatsApp (not just type an address) so delivery charge and radius checks are accurate.
+            Set your kitchen pin under <strong>Restaurant → Cloud kitchen</strong> using a full Google Maps link.
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <Label>Default charge when distance unknown (₹)</Label>
+            <Input value={form.delivery_charge_default} onChange={v => set('delivery_charge_default', v)} type="number" placeholder="30" />
+          </div>
+          <div style={{ marginBottom: 8, fontSize: 11, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase' }}>Distance tiers</div>
+          {(form.delivery_charge_tiers || []).map((tier, i) => (
+            <div key={i} style={{ ...grid2, marginBottom: 8 }}>
+              <div>
+                <Label>{i < (form.delivery_charge_tiers.length - 1) ? `Up to (km)` : `Beyond previous (km — leave blank)`}</Label>
+                <Input
+                  value={tier.max_km}
+                  onChange={v => {
+                    const tiers = [...form.delivery_charge_tiers];
+                    tiers[i] = { ...tiers[i], max_km: v };
+                    set('delivery_charge_tiers', tiers);
+                  }}
+                  type="number"
+                  placeholder={i === form.delivery_charge_tiers.length - 1 ? 'blank = rest' : '3'}
+                />
+              </div>
+              <div>
+                <Label>Charge (₹)</Label>
+                <Input
+                  value={tier.charge}
+                  onChange={v => {
+                    const tiers = [...form.delivery_charge_tiers];
+                    tiers[i] = { ...tiers[i], charge: v };
+                    set('delivery_charge_tiers', tiers);
+                  }}
+                  type="number"
+                  placeholder="30"
+                />
+              </div>
+            </div>
+          ))}
+          <div style={{ ...grid2, marginBottom: 16 }}>
+            <div>
+              <Label>Minimum order — delivery (₹)</Label>
+              <Input value={form.min_delivery_order_amount} onChange={v => set('min_delivery_order_amount', v)} type="number" placeholder="150" />
+              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>Items subtotal before charges. e.g. ₹150 for cloud kitchens.</div>
+            </div>
+            {showTakeaway && (
+            <div>
+              <Label>Minimum order — takeaway (₹)</Label>
+              <Input value={form.min_takeaway_order_amount} onChange={v => set('min_takeaway_order_amount', v)} type="number" placeholder="0" />
+            </div>
+            )}
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <Label>Max delivery radius (km)</Label>
+            <Input value={form.max_delivery_radius_km} onChange={v => set('max_delivery_radius_km', v)} type="number" placeholder="8" />
+            <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+              Orders beyond this distance are declined when location is known. Set 0 for no limit. Uses road distance when Google Maps API is configured.
+            </div>
+          </div>
+          <ToggleRow
+            label="Allow scheduled delivery (corporate lunch orders)"
+            checked={form.scheduled_delivery_enabled}
+            onToggle={() => set('scheduled_delivery_enabled', !form.scheduled_delivery_enabled)}
+          />
+          <div style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 16px' }}>
+            Customers can reply with a time (e.g. 1:00 PM) after sharing their address — for order-now, deliver-later flows.
+          </div>
+        </>
+      )}
+
+      {showTakeaway && (
+        <>
       <SectionTitle>Takeaway fulfillment</SectionTitle>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
         {[
@@ -872,6 +1180,12 @@ function TabKitchen({ apiClient, showToast }) {
             </div>
           )}
         </div>
+      )}
+
+        </>
+      )}
+
+        </>
       )}
 
       <SectionTitle>Kitchen workflow</SectionTitle>
@@ -1627,10 +1941,11 @@ function TabBrand({ apiClient, showToast, user }) {
 
 export default function SettingsPanel() {
   const { apiClient, user } = useAuth();
-  const { refresh: refreshSubscription } = useSubscription();
+  const { refresh: refreshSubscription, paidFeatures } = useSubscription();
   const [searchParams] = useSearchParams();
   const isBrandOwner = user?.role === 'brand_owner';
   const isManagerOnly = user?.role === 'manager';
+  const hasAnyPaid = (...fs) => fs.some(f => paidFeatures.includes(f));
   const [activeTab, setActiveTab] = useState(isManagerOnly ? 'staff' : 'tables');
   const [toast, setToast] = useState({ msg: '', type: 'success' });
 
@@ -1639,6 +1954,19 @@ export default function SettingsPanel() {
     if (tab && TABS.some(t => t.id === tab)) setActiveTab(tab);
   }, [searchParams]);
 
+  const filteredTabs = TABS.filter(t => {
+    if (isManagerOnly) return t.id === 'staff';
+    if (t.brandOnly && !isBrandOwner) return false;
+    if (t.id === 'tables' && !hasAnyPaid(FEATURES.DINE_IN, FEATURES.RESERVE_TABLE)) return false;
+    return true;
+  });
+
+  useEffect(() => {
+    if (!isManagerOnly && !filteredTabs.some(t => t.id === activeTab)) {
+      setActiveTab(filteredTabs[0]?.id || 'restaurant');
+    }
+  }, [activeTab, filteredTabs, isManagerOnly]);
+
   const dashboardPath = isBrandOwner ? '/dashboard/brand' : '/dashboard/owner';
 
   const showToast = useCallback((msg, type = 'success') => {
@@ -1646,17 +1974,11 @@ export default function SettingsPanel() {
     setTimeout(() => setToast({ msg: '', type: 'success' }), 3500);
   }, []);
 
-  const filteredTabs = TABS.filter(t => {
-    if (isManagerOnly) return t.id === 'staff';
-    if (t.brandOnly && !isBrandOwner) return false;
-    return true;
-  });
-
   const tabContent = {
     tables:     <TabTables     apiClient={apiClient} showToast={showToast} />,
     restaurant: <TabRestaurant apiClient={apiClient} showToast={showToast} />,
     services:   <TabServices   apiClient={apiClient} showToast={showToast} refreshSubscription={refreshSubscription} />,
-    kitchen:    <TabKitchen    apiClient={apiClient} showToast={showToast} />,
+    kitchen:    <TabKitchen    apiClient={apiClient} showToast={showToast} paidFeatures={paidFeatures} />,
     whatsapp:   <TabWhatsApp   apiClient={apiClient} showToast={showToast} />,
     staff:      <TabStaff      apiClient={apiClient} showToast={showToast} />,
     brand:      <TabBrand      apiClient={apiClient} showToast={showToast} user={user} />,
