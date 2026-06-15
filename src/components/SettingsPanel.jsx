@@ -64,7 +64,7 @@ function Spinner({ size = 18 }) {
 
 function Toast({ msg, type = 'success' }) {
   if (!msg) return null;
-  const bg = type === 'error' ? '#7F1D1D' : '#1A1A18';
+  const bg = type === 'error' ? '#7F1D1D' : type === 'warning' ? '#92400E' : '#1A1A18';
   return (
     <div style={{
       position: 'fixed', bottom: 24, right: 24, zIndex: 100,
@@ -404,11 +404,28 @@ function parseGoogleMapsCoords(input) {
   const text = input.trim();
   let m = text.match(/[?&]q=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
   if (m) return { lat: m[1], lng: m[2] };
+  m = text.match(/[?&](?:ll|center)=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+  if (m) return { lat: m[1], lng: m[2] };
   m = text.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
   if (m) return { lat: m[1], lng: m[2] };
   m = text.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/);
   if (m) return { lat: m[1], lng: m[2] };
+  m = text.match(/place\/[^/]+\/(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+  if (m) return { lat: m[1], lng: m[2] };
   return null;
+}
+
+function isMapsUrl(text) {
+  return typeof text === 'string' && /google\.com\/maps|maps\.app\.goo\.gl|goo\.gl\/maps/i.test(text);
+}
+
+function notifySaveResult(showToast, response, successMsg) {
+  const warning = response?.data?.warning;
+  if (warning) {
+    showToast(warning, 'warning');
+    return;
+  }
+  showToast(successMsg);
 }
 
 function TabRestaurant({ apiClient, showToast }) {
@@ -439,7 +456,7 @@ function TabRestaurant({ apiClient, showToast }) {
         logo_url:      d.logo_url      ?? '',
         restaurant_type:   d.restaurant_type ?? 'restaurant',
         pickup_address:    d.pickup_address ?? '',
-        pickup_maps_link:  lat && lng ? `https://maps.google.com/?q=${lat},${lng}` : '',
+        pickup_maps_link:  d.google_maps_url || (lat && lng ? `https://maps.google.com/?q=${lat},${lng}` : ''),
         pickup_latitude:   lat ?? '',
         pickup_longitude:  lng ?? '',
         pickup_coords_source: lat && lng ? 'saved' : '',
@@ -471,26 +488,40 @@ function TabRestaurant({ apiClient, showToast }) {
   };
 
   const resolvePickupCoords = async (silent = false) => {
-    if (!form?.pickup_address?.trim() && !form?.pickup_maps_link?.trim()) {
+    const mapsLink = form?.pickup_maps_link?.trim() || '';
+    const address = form?.pickup_address?.trim() || '';
+    const addressIsMapsUrl = isMapsUrl(address);
+
+    if (!address && !mapsLink) {
       if (!silent) showToast('Enter a pickup address or paste a Google Maps link', 'error');
       return null;
     }
-    const fromLink = parseGoogleMapsCoords(form.pickup_maps_link);
-    if (fromLink) {
-      setForm(p => ({
-        ...p,
-        pickup_latitude: fromLink.lat,
-        pickup_longitude: fromLink.lng,
-        pickup_coords_source: 'maps_url',
-      }));
-      if (!silent) showToast('Location picked up from Google Maps link');
-      return { lat: parseFloat(fromLink.lat), lng: parseFloat(fromLink.lng), source: 'maps_url' };
+    if (addressIsMapsUrl && !mapsLink) {
+      if (!silent) {
+        showToast('Paste that Google Maps link in the Maps link field above, not the address field', 'warning');
+      }
     }
+
+    for (const candidate of [mapsLink, addressIsMapsUrl ? address : ''].filter(Boolean)) {
+      const fromLink = parseGoogleMapsCoords(candidate);
+      if (fromLink) {
+        setForm(p => ({
+          ...p,
+          pickup_maps_link: mapsLink || candidate,
+          pickup_latitude: fromLink.lat,
+          pickup_longitude: fromLink.lng,
+          pickup_coords_source: 'maps_url',
+        }));
+        if (!silent) showToast('Location picked up from Google Maps link');
+        return { lat: parseFloat(fromLink.lat), lng: parseFloat(fromLink.lng), source: 'maps_url' };
+      }
+    }
+
     setResolvingPickup(true);
     try {
       const r = await apiClient.post('/api/restaurants/resolve-pickup', {
-        maps_url: form.pickup_maps_link || null,
-        pickup_address: form.pickup_address,
+        maps_url: mapsLink || (addressIsMapsUrl ? address : null),
+        pickup_address: addressIsMapsUrl ? null : address,
         city: form.city,
         state: form.state,
       });
@@ -517,24 +548,29 @@ function TabRestaurant({ apiClient, showToast }) {
     try {
       let lat = form.pickup_latitude;
       let lng = form.pickup_longitude;
+      let coordsWarning = false;
       if (form.restaurant_type === 'cloud_kitchen' && (!lat || !lng)) {
         const resolved = await resolvePickupCoords(true);
-        if (!resolved) {
-          showToast('Add a Google Maps link or pickup address we can geocode', 'error');
-          return;
+        if (resolved) {
+          lat = resolved.lat;
+          lng = resolved.lng;
+        } else {
+          coordsWarning = true;
         }
-        lat = resolved.lat;
-        lng = resolved.lng;
       }
       const { pickup_maps_link, pickup_coords_source, ...toSave } = form;
-      await apiClient.put('/api/restaurants/me', {
+      const res = await apiClient.put('/api/restaurants/me', {
         ...toSave,
         pickup_latitude: lat || null,
         pickup_longitude: lng || null,
         maps_url: pickup_maps_link || undefined,
       });
       setSaved(true);
-      showToast('Restaurant details saved');
+      if (coordsWarning) {
+        showToast('Saved. Pickup coordinates are not set yet — use Resolve location or a pin link for accurate delivery distance.', 'warning');
+      } else {
+        notifySaveResult(showToast, res, 'Restaurant details saved');
+      }
     } catch (e) { showToast(e.response?.data?.error ?? 'Save failed', 'error'); }
     finally { setSaving(false); }
   };
@@ -636,6 +672,11 @@ function TabRestaurant({ apiClient, showToast }) {
               onChange={v => set('pickup_address', v)}
               placeholder="12, 2nd Floor, Gopalan Mall Road, HSR Layout"
             />
+            {isMapsUrl(form.pickup_address) && (
+              <div style={{ fontSize: 11, color: C.warningDark, marginTop: 4 }}>
+                This looks like a Maps link — paste it in the Google Maps link field above for best results.
+              </div>
+            )}
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
             <Btn variant="secondary" onClick={() => resolvePickupCoords(false)} loading={resolvingPickup}>
@@ -888,7 +929,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
   const save = async () => {
     setSaving(true);
     try {
-      await apiClient.put('/api/restaurants/me', {
+      const res = await apiClient.put('/api/restaurants/me', {
         dining_duration_minutes:    parseInt(form.dining_duration_minutes),
         payment_mode:               form.payment_mode,
         kitchen_workflow:           form.kitchen_workflow,
@@ -922,7 +963,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
         }
       }
       setSaved(true);
-      showToast('Kitchen settings saved');
+      notifySaveResult(showToast, res, 'Kitchen settings saved');
     } catch (e) { showToast(e.response?.data?.error ?? 'Save failed', 'error'); }
     finally { setSaving(false); }
   };
@@ -1948,6 +1989,7 @@ export default function SettingsPanel() {
   const hasAnyPaid = (...fs) => fs.some(f => paidFeatures.includes(f));
   const [activeTab, setActiveTab] = useState(isManagerOnly ? 'staff' : 'tables');
   const [toast, setToast] = useState({ msg: '', type: 'success' });
+  const toastTimer = useRef(null);
 
   useEffect(() => {
     const tab = searchParams.get('tab');
@@ -1970,8 +2012,12 @@ export default function SettingsPanel() {
   const dashboardPath = isBrandOwner ? '/dashboard/brand' : '/dashboard/owner';
 
   const showToast = useCallback((msg, type = 'success') => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
     setToast({ msg, type });
-    setTimeout(() => setToast({ msg: '', type: 'success' }), 3500);
+    toastTimer.current = setTimeout(() => {
+      setToast({ msg: '', type: 'success' });
+      toastTimer.current = null;
+    }, 3500);
   }, []);
 
   const tabContent = {
