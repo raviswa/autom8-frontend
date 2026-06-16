@@ -1131,7 +1131,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
             onToggle={() => set('scheduled_delivery_enabled', !form.scheduled_delivery_enabled)}
           />
           <div style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 16px' }}>
-            Customers can reply with a time (e.g. 1:00 PM) after sharing their address — for order-now, deliver-later flows.
+            Customers can schedule a delivery time (calendar or text). Manager must approve before payment is collected.
           </div>
         </>
       )}
