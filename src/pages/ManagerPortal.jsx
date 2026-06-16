@@ -814,7 +814,7 @@ export default function ManagerPortal() {
       await apiClient.put(`/api/menu-items/${item.id}/availability`, { is_available: newValue });
       setMenuItems(prev => prev.map(m => m.id === item.id ? { ...m, is_stocked: newValue, is_available: newValue } : m));
       showToast(newValue ? `${item.name} is back in stock` : `${item.name} marked out of stock`);
-    } catch(err) { showToast(`Failed to update ${item.name}`); }
+    } catch(err) { showToast(err.response?.data?.error || `Failed to update ${item.name}`); }
     finally { setTogglingId(null); }
   };
 
@@ -825,7 +825,7 @@ export default function ManagerPortal() {
       await apiClient.put(`/api/menu-items/${item.id}/special-today`, { is_special_today: newValue });
       setMenuItems(prev => prev.map(m => m.id === item.id ? { ...m, is_special_today: newValue } : m));
       showToast(newValue ? `${item.name} marked as today's special` : `${item.name} removed from today's specials`);
-    } catch (err) { showToast(`Failed to update ${item.name}`); }
+    } catch (err) { showToast(err.response?.data?.error || `Failed to update ${item.name}`); }
     finally { setTogglingSpecialId(null); }
   };
 
