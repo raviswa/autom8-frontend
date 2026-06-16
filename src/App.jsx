@@ -21,6 +21,8 @@ import KDSScreen          from './pages/KDSScreen';
 import NotFound           from './pages/NotFound';
 import MenuPage           from './pages/MenuPage';
 import WalkInForm         from './pages/WalkInForm';
+import SupplyOrderForm    from './pages/SupplyOrderForm';
+import SupplyDashboard    from './pages/SupplyDashboard';
 import FeatureWall        from './pages/FeatureWall';
 import SettingsPanel      from './components/SettingsPanel';
 
@@ -137,6 +139,19 @@ function AppRoutes() {
             <FeatureRoute feature={FEATURES.TOKEN_MANAGEMENT}>
               <WalkInForm />
             </FeatureRoute>
+          }
+        />
+
+        {/* Munafe Supply — B2B order form (signed URL, public) */}
+        <Route path="/supply/order" element={<SupplyOrderForm />} />
+
+        {/* Munafe Supply — supplier dashboard */}
+        <Route
+          path="/dashboard/supply"
+          element={
+            <ProtectedRoute allowedRoles={['owner', 'brand_owner', 'manager']}>
+              <SupplyDashboard />
+            </ProtectedRoute>
           }
         />
 
