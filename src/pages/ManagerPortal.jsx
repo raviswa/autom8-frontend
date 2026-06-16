@@ -1504,12 +1504,16 @@ export default function ManagerPortal() {
 
             {pendingApprTokens.length > 0 && (
               <div>
-                <SectionLabel>Pending approval — {pendingApprTokens.length} large {pendingApprTokens.length === 1 ? 'party' : 'parties'}</SectionLabel>
+                <SectionLabel>Pending approval — {pendingApprTokens.length}</SectionLabel>
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   {pendingApprTokens.map(token => {
                     const combo = token.meta?.combo ?? [];
                     const isProc = processingId === token.id;
+                    const isScheduled = token.type === 'scheduled_delivery';
                     const tableLines = combo.length > 0 ? combo.map(t => `Table ${t[0]} (${t[2]}/${t[1]} seats)`).join(' + ') : `${token.pax} seats across multiple tables`;
+                    const schedLabel = token.meta?.scheduled_at_label || token.meta?.scheduled_at || '—';
+                    const orderPreview = (token.meta?.order_text || '').slice(0, 100);
+                    const orderTotal = token.meta?.total != null ? `₹${Number(token.meta.total).toFixed(0)}` : null;
                     return (
                       <div key={token.id} style={{ ...CARD, display: "flex", alignItems: "flex-start", gap: 16 }}>
                         <div style={{ width: 44, height: 44, borderRadius: "50%", background: C.accentLight, color: C.accentDark, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 500, flexShrink: 0 }}>
@@ -1518,13 +1522,27 @@ export default function ManagerPortal() {
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
                             <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>{token.id}</span>
-                            <Pill label="Needs approval" variant="purple" />
+                            <Pill label={isScheduled ? 'Scheduled delivery' : 'Needs approval'} variant="purple" />
                           </div>
-                          <p style={{ fontSize: 12, color: C.textSub, margin: "0 0 2px" }}>{token.name} · <strong>{token.pax} people</strong> · Arrived {safeFormat(token.arrived_at, 'HH:mm')}</p>
+                          <p style={{ fontSize: 12, color: C.textSub, margin: "0 0 2px" }}>
+                            {token.name}
+                            {isScheduled
+                              ? ` · Deliver by ${schedLabel}${orderTotal ? ` · ${orderTotal}` : ''}`
+                              : ` · ${token.pax} people · Arrived ${safeFormat(token.arrived_at, 'HH:mm')}`}
+                          </p>
                           {token.phone && <p style={{ fontSize: 11, color: C.textMuted, margin: "0 0 8px" }}>+{token.phone}</p>}
-                          <div style={{ background: C.accentLight, border: `0.5px solid ${C.accentBorder}`, borderRadius: 7, padding: "6px 10px", fontSize: 11, color: C.accentDark, marginBottom: 10 }}>
-                            <strong>Proposed split: </strong>{tableLines}
-                          </div>
+                          {isScheduled ? (
+                            <div style={{ background: C.accentLight, border: `0.5px solid ${C.accentBorder}`, borderRadius: 7, padding: "6px 10px", fontSize: 11, color: C.accentDark, marginBottom: 10 }}>
+                              {orderPreview ? <><strong>Order: </strong>{orderPreview}</> : 'Scheduled delivery — approve before customer pays'}
+                              {token.meta?.delivery_address && (
+                                <div style={{ marginTop: 4, opacity: 0.9 }}>📍 {(token.meta.delivery_address || '').slice(0, 80)}</div>
+                              )}
+                            </div>
+                          ) : (
+                            <div style={{ background: C.accentLight, border: `0.5px solid ${C.accentBorder}`, borderRadius: 7, padding: "6px 10px", fontSize: 11, color: C.accentDark, marginBottom: 10 }}>
+                              <strong>Proposed split: </strong>{tableLines}
+                            </div>
+                          )}
                           <div style={{ display: "flex", gap: 8 }}>
                             <Btn variant="success" onClick={() => approveToken(token)} disabled={isProc}>
                               {isProc ? <Spinner size={14} /> : '✅ Approve'}
