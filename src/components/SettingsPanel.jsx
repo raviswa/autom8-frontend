@@ -142,9 +142,9 @@ function Btn({ children, onClick, variant = 'primary', disabled, style: s, loadi
   );
 }
 
-function SectionTitle({ children }) {
+function SectionTitle({ children, id }) {
   return (
-    <div style={{ fontSize: 11, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12, marginTop: 20, paddingTop: 16, borderTop: `0.5px solid ${C.border}` }}>
+    <div id={id} style={{ fontSize: 11, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12, marginTop: 20, paddingTop: 16, borderTop: `0.5px solid ${C.border}` }}>
       {children}
     </div>
   );
@@ -1057,6 +1057,40 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
         )}
       </div>
 
+      {(showTakeaway || showDelivery) && (
+        <>
+          <SectionTitle id="scheduled-ordering">Scheduled ordering</SectionTitle>
+          <div style={{ fontSize: 12, color: C.textSub, marginBottom: 12, lineHeight: 1.55 }}>
+            Let customers pick a date and time via the WhatsApp calendar before they order.
+            Delivery slots can require manager approval when enabled below.
+          </div>
+          {showDelivery && (
+            <>
+              <ToggleRow
+                label="Scheduled delivery"
+                checked={form.scheduled_delivery_enabled}
+                onToggle={() => set('scheduled_delivery_enabled', !form.scheduled_delivery_enabled)}
+              />
+              <div style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 12px' }}>
+                Calendar picker before address. Manager approval before payment when a future slot is chosen.
+              </div>
+            </>
+          )}
+          {showTakeaway && (
+            <>
+              <ToggleRow
+                label="Scheduled takeaway"
+                checked={form.scheduled_takeaway_enabled}
+                onToggle={() => set('scheduled_takeaway_enabled', !form.scheduled_takeaway_enabled)}
+              />
+              <div style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 16px' }}>
+                Pickup date and time via WhatsApp calendar before the menu. Works when the kitchen is closed too.
+              </div>
+            </>
+          )}
+        </>
+      )}
+
       {showDelivery && (
         <>
           <SectionTitle>Delivery charges</SectionTitle>
@@ -1127,28 +1161,12 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
               Orders beyond this distance are declined when location is known. Set 0 for no limit. Uses road distance when Google Maps API is configured.
             </div>
           </div>
-          <ToggleRow
-            label="Allow scheduled delivery (corporate lunch orders)"
-            checked={form.scheduled_delivery_enabled}
-            onToggle={() => set('scheduled_delivery_enabled', !form.scheduled_delivery_enabled)}
-          />
-          <div style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 16px' }}>
-            Customers can schedule a delivery time (calendar or text). Manager must approve before payment is collected.
-          </div>
         </>
       )}
 
       {showTakeaway && (
         <>
       <SectionTitle>Takeaway fulfillment</SectionTitle>
-      <ToggleRow
-        label="Allow scheduled takeaway (pick a pickup time)"
-        checked={form.scheduled_takeaway_enabled}
-        onToggle={() => set('scheduled_takeaway_enabled', !form.scheduled_takeaway_enabled)}
-      />
-      <div style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 16px' }}>
-        Customers choose a pickup date and time via the WhatsApp calendar before ordering. Works when the kitchen is closed too.
-      </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
         {[
           { value: 'single_counter', label: 'Everything from one window',
@@ -2005,6 +2023,16 @@ export default function SettingsPanel() {
     const tab = searchParams.get('tab');
     if (tab && TABS.some(t => t.id === tab)) setActiveTab(tab);
   }, [searchParams]);
+
+  useEffect(() => {
+    if (activeTab !== 'kitchen') return;
+    const hash = typeof window !== 'undefined' ? window.location.hash.replace('#', '') : '';
+    if (!hash) return;
+    const t = window.setTimeout(() => {
+      document.getElementById(hash)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 400);
+    return () => window.clearTimeout(t);
+  }, [activeTab]);
 
   const filteredTabs = TABS.filter(t => {
     if (isManagerOnly) return t.id === 'staff';
