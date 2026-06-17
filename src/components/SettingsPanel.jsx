@@ -878,6 +878,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
         min_delivery_order_amount: d.min_delivery_order_amount ?? 0,
         min_takeaway_order_amount: d.min_takeaway_order_amount ?? 0,
         scheduled_delivery_enabled: !!d.scheduled_delivery_enabled,
+        scheduled_takeaway_enabled: !!d.scheduled_takeaway_enabled,
         max_delivery_radius_km:     d.max_delivery_radius_km ?? 0,
         has_breakfast: d.opening_hours?.breakfast !== false,
         breakfast_start: d.opening_hours?.breakfast_start ?? '06:00',
@@ -945,6 +946,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
         min_delivery_order_amount:  parseFloat(form.min_delivery_order_amount) || 0,
         min_takeaway_order_amount:  parseFloat(form.min_takeaway_order_amount) || 0,
         scheduled_delivery_enabled: !!form.scheduled_delivery_enabled,
+        scheduled_takeaway_enabled: !!form.scheduled_takeaway_enabled,
         max_delivery_radius_km:     parseFloat(form.max_delivery_radius_km) || 0,
         fulfillment_sections:       sections,
         opening_hours: {
@@ -1139,6 +1141,14 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
       {showTakeaway && (
         <>
       <SectionTitle>Takeaway fulfillment</SectionTitle>
+      <ToggleRow
+        label="Allow scheduled takeaway (pick a pickup time)"
+        checked={form.scheduled_takeaway_enabled}
+        onToggle={() => set('scheduled_takeaway_enabled', !form.scheduled_takeaway_enabled)}
+      />
+      <div style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 16px' }}>
+        Customers choose a pickup date and time via the WhatsApp calendar before ordering. Works when the kitchen is closed too.
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
         {[
           { value: 'single_counter', label: 'Everything from one window',
