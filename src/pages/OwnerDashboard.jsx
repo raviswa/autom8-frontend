@@ -850,7 +850,7 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
             </button>
             <div style={{ width: 1, height: 18, background: "#E0E0DC" }} />
             <Link
-              to="/settings?tab=kitchen"
+              to="/settings?tab=kitchen#scheduled-ordering"
               style={{
                 fontSize: 12, padding: "4px 12px", borderRadius: 8,
                 border: "0.5px solid #B5D4F4", background: "#E6F1FB",
@@ -859,6 +859,17 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
               }}
             >
               Kitchen hours
+            </Link>
+            <Link
+              to="/settings?tab=kitchen#scheduled-ordering"
+              style={{
+                fontSize: 12, padding: "4px 12px", borderRadius: 8,
+                border: "0.5px solid #B5D4F4", background: "#E6F1FB",
+                color: "#185FA5", cursor: "pointer", textDecoration: "none",
+                display: "inline-flex", alignItems: "center", gap: 4,
+              }}
+            >
+              Scheduled ordering
             </Link>
             <div style={{ width: 1, height: 18, background: "#E0E0DC" }} />
             {/* ⚙️ Settings link — navigates to /settings */}

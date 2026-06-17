@@ -1416,7 +1416,7 @@ export default function ManagerPortal() {
                 </button>
               )}
               <Link
-                to="/settings?tab=kitchen"
+                to="/settings?tab=kitchen#scheduled-ordering"
                 style={{
                   fontSize: 11, fontWeight: 500, color: C.primaryDark, textDecoration: 'none',
                   padding: '6px 10px', borderRadius: 8, border: `0.5px solid ${C.primaryBorder}`,
