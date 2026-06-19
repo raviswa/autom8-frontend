@@ -842,8 +842,10 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
 
   const defaultTiers = [
     { max_km: 3, charge: 20 },
-    { max_km: 6, charge: 30 },
-    { max_km: '', charge: 40 },
+    { max_km: 5, charge: 30 },
+    { max_km: 8, charge: 40 },
+    { max_km: 12, charge: 50 },
+    { max_km: '', charge: 60 },
   ];
   const [form,      setForm]      = useState(null);
   const [saving,    setSaving]    = useState(false);
@@ -1048,10 +1050,10 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
           <Input
             value={form.delivery_ready_range}
             onChange={v => set('delivery_ready_range', v)}
-            placeholder="30-45"
+            placeholder="25-35"
           />
           <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
-            Shown on delivery confirmation. Manager can flag busy kitchen for a delay note.
+            Kitchen prep time only. Drive time from Google Maps (with traffic) is added automatically when the customer shares their location.
           </div>
         </div>
         )}
@@ -1112,7 +1114,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
           </div>
           <div style={{ marginBottom: 8, fontSize: 11, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase' }}>Distance tiers</div>
           {(form.delivery_charge_tiers || []).map((tier, i) => (
-            <div key={i} style={{ ...grid2, marginBottom: 8 }}>
+            <div key={i} style={{ ...grid2, marginBottom: 8, alignItems: 'end' }}>
               <div>
                 <Label>{i < (form.delivery_charge_tiers.length - 1) ? `Up to (km)` : `Beyond previous (km — leave blank)`}</Label>
                 <Input
@@ -1126,21 +1128,60 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
                   placeholder={i === form.delivery_charge_tiers.length - 1 ? 'blank = rest' : '3'}
                 />
               </div>
-              <div>
-                <Label>Charge (₹)</Label>
-                <Input
-                  value={tier.charge}
-                  onChange={v => {
-                    const tiers = [...form.delivery_charge_tiers];
-                    tiers[i] = { ...tiers[i], charge: v };
-                    set('delivery_charge_tiers', tiers);
-                  }}
-                  type="number"
-                  placeholder="30"
-                />
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                <div style={{ flex: 1 }}>
+                  <Label>Charge (₹)</Label>
+                  <Input
+                    value={tier.charge}
+                    onChange={v => {
+                      const tiers = [...form.delivery_charge_tiers];
+                      tiers[i] = { ...tiers[i], charge: v };
+                      set('delivery_charge_tiers', tiers);
+                    }}
+                    type="number"
+                    placeholder="30"
+                  />
+                </div>
+                {(form.delivery_charge_tiers || []).length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const tiers = [...form.delivery_charge_tiers];
+                      tiers.splice(i, 1);
+                      set('delivery_charge_tiers', tiers);
+                    }}
+                    style={{
+                      padding: '10px 12px', marginBottom: 2, borderRadius: 8, cursor: 'pointer',
+                      border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.textSub,
+                      fontSize: 12,
+                    }}
+                  >
+                    Remove
+                  </button>
+                )}
               </div>
             </div>
           ))}
+          <button
+            type="button"
+            onClick={() => {
+              const tiers = [...(form.delivery_charge_tiers || defaultTiers)];
+              if (tiers.length === 0) {
+                set('delivery_charge_tiers', [{ max_km: 3, charge: 30 }, { max_km: '', charge: 40 }]);
+                return;
+              }
+              const catchAll = tiers[tiers.length - 1];
+              tiers.splice(tiers.length - 1, 0, { max_km: '', charge: catchAll.charge || 40 });
+              set('delivery_charge_tiers', tiers);
+            }}
+            style={{
+              padding: '8px 14px', marginBottom: 16, borderRadius: 8, cursor: 'pointer',
+              border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.primary,
+              fontSize: 12, fontWeight: 600,
+            }}
+          >
+            + Add distance tier
+          </button>
           <div style={{ ...grid2, marginBottom: 16 }}>
             <div>
               <Label>Minimum order — delivery (₹)</Label>
