@@ -1465,8 +1465,10 @@ export default function ManagerPortal() {
               value: pendingApprTokens.length,
               colorStyle: { bg: C.accentLight,  border: C.accentBorder,  color: C.accentDark  },
               hint: pendingApprTokens.length === 0
-                ? 'Parties of 8+ need manager approval for table splits'
-                : 'Large parties waiting for your table split decision',
+                ? 'Scheduled deliveries and large parties (8+) appear here'
+                : pendingApprTokens.some(t => t.type === 'scheduled_delivery')
+                  ? 'Scheduled deliveries and table splits awaiting your decision'
+                  : 'Large parties waiting for your table split decision',
             },
             { label: "Waiting",         value: waitingTokens.length,       colorStyle: { bg: C.warningLight, border: C.warningBorder, color: C.warningDark } },
             { label: "Seated",          value: seatedTokens.length,        colorStyle: { bg: C.successLight, border: C.successBorder, color: C.successDark } },
