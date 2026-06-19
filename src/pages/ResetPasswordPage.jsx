@@ -21,6 +21,28 @@ export default function ResetPasswordPage() {
     let mounted = true;
 
     const establishRecoverySession = async () => {
+      const searchParams = new URLSearchParams(window.location.search);
+      const tokenHash = searchParams.get('token_hash');
+      const queryType = searchParams.get('type');
+
+      if (tokenHash && queryType === 'recovery') {
+        const { error: otpErr } = await supabaseClient.auth.verifyOtp({
+          token_hash: tokenHash,
+          type: 'recovery',
+        });
+        if (!otpErr) {
+          window.history.replaceState(null, '', window.location.pathname);
+          if (mounted) {
+            setReady(true);
+            setChecking(false);
+          }
+          return true;
+        }
+        if (mounted) {
+          setError(otpErr.message || 'Invalid or expired reset link.');
+        }
+      }
+
       const hash = window.location.hash?.startsWith('#')
         ? window.location.hash.slice(1)
         : '';
