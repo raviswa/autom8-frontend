@@ -274,7 +274,11 @@ const requestInterceptor = apiClient.interceptors.request.use(
   const requestPasswordReset = useCallback(async (email) => {
     setError(null);
     try {
-      const response = await apiClient.post('/api/auth/forgot-password', { email });
+      const redirectTo = `${window.location.origin}/reset-password`;
+      const response = await apiClient.post('/api/auth/forgot-password', {
+        email,
+        redirectTo,
+      });
       return response.data;
     } catch (err) {
       const message = err.response?.data?.error || 'Could not send reset email';

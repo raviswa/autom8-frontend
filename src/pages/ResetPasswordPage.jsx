@@ -20,10 +20,38 @@ export default function ResetPasswordPage() {
   useEffect(() => {
     let mounted = true;
 
-    const checkSession = async () => {
+    const establishRecoverySession = async () => {
+      const hash = window.location.hash?.startsWith('#')
+        ? window.location.hash.slice(1)
+        : '';
+      const hashParams = new URLSearchParams(hash);
+      const isRecovery = hashParams.get('type') === 'recovery'
+        || hashParams.has('access_token');
+
+      if (isRecovery && hashParams.has('access_token')) {
+        const access_token = hashParams.get('access_token');
+        const refresh_token = hashParams.get('refresh_token') || '';
+        const { error: sessionErr } = await supabaseClient.auth.setSession({
+          access_token,
+          refresh_token,
+        });
+        if (!sessionErr) {
+          window.history.replaceState(null, '', window.location.pathname);
+          if (mounted) {
+            setReady(true);
+            setChecking(false);
+          }
+          return true;
+        }
+      }
+
       const { data: { session } } = await supabaseClient.auth.getSession();
-      if (mounted && session) setReady(true);
-      if (mounted) setChecking(false);
+      if (mounted && session) {
+        setReady(true);
+        setChecking(false);
+        return true;
+      }
+      return false;
     };
 
     const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((event, session) => {
@@ -33,7 +61,9 @@ export default function ResetPasswordPage() {
       }
     });
 
-    checkSession();
+    establishRecoverySession().then((ok) => {
+      if (mounted && !ok) setChecking(false);
+    });
 
     return () => {
       mounted = false;
