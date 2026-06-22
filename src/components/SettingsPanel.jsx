@@ -863,7 +863,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
     ]).then(([wabaRes, menuRes]) => {
       const d = wabaRes.data.restaurant ?? {};
       setForm({
-        dining_duration_minutes: d.dining_duration_minutes ?? 90,
+        dining_duration_minutes: d.dining_duration_minutes ?? 45,
         payment_mode:            d.payment_mode ?? 'prepay',
         kitchen_workflow:        d.kitchen_workflow ?? 'KOT_only',
         takeaway_fulfillment_mode: d.takeaway_fulfillment_mode ?? 'single_counter',
@@ -990,8 +990,10 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
         <div style={grid2}>
           <div>
             <Label>Max dining time (minutes)</Label>
-            <Input value={form.dining_duration_minutes} onChange={v => set('dining_duration_minutes', v)} type="number" placeholder="90" />
-            <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>Tables are auto-released after this time.</div>
+            <Input value={form.dining_duration_minutes} onChange={v => set('dining_duration_minutes', v)} type="number" placeholder="45" />
+            <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+              Typical: 45 min (casual), 75 min (sit-down), 90 min (fine dining). Tables auto-release after this time.
+            </div>
           </div>
           <div>
             <Label>Payment mode</Label>

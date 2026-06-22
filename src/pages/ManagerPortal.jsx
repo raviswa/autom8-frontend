@@ -584,6 +584,9 @@ export default function ManagerPortal() {
     table_id: t.table_id || null,
     table_number: t.table_number || null,
     meta: t.meta || {},
+    estimate_display: t.estimate_display || null,
+    estimated_wait_minutes: t.estimated_wait_minutes ?? null,
+    waitlist_depth_at_issue: t.waitlist_depth_at_issue ?? null,
   });
 
   const normTokens         = tokens.map(normaliseToken);
@@ -1465,9 +1468,9 @@ export default function ManagerPortal() {
               value: pendingApprTokens.length,
               colorStyle: { bg: C.accentLight,  border: C.accentBorder,  color: C.accentDark  },
               hint: pendingApprTokens.length === 0
-                ? 'Scheduled deliveries and large parties (8+) appear here'
-                : pendingApprTokens.some(t => t.type === 'scheduled_delivery')
-                  ? 'Scheduled deliveries and table splits awaiting your decision'
+                ? 'Scheduled orders and large parties (8+) appear here'
+                : pendingApprTokens.some(t => t.type === 'scheduled_delivery' || t.type === 'scheduled_takeaway')
+                  ? 'Scheduled orders awaiting your decision'
                   : 'Large parties waiting for your table split decision',
             },
             { label: "Waiting",         value: waitingTokens.length,       colorStyle: { bg: C.warningLight, border: C.warningBorder, color: C.warningDark } },
@@ -1511,11 +1514,14 @@ export default function ManagerPortal() {
                   {pendingApprTokens.map(token => {
                     const combo = token.meta?.combo ?? [];
                     const isProc = processingId === token.id;
-                    const isScheduled = token.type === 'scheduled_delivery';
+                    const isScheduledDelivery = token.type === 'scheduled_delivery';
+                    const isScheduledTakeaway = token.type === 'scheduled_takeaway';
+                    const isLargeParty = !isScheduledDelivery && !isScheduledTakeaway;
                     const tableLines = combo.length > 0 ? combo.map(t => `Table ${t[0]} (${t[2]}/${t[1]} seats)`).join(' + ') : `${token.pax} seats across multiple tables`;
                     const schedLabel = token.meta?.scheduled_at_label || token.meta?.scheduled_at || '—';
-                    const orderPreview = (token.meta?.order_text || '').slice(0, 100);
-                    const orderTotal = token.meta?.total != null ? `₹${Number(token.meta.total).toFixed(0)}` : null;
+                    const kitchenLabel = token.meta?.kitchen_start_at_label || token.meta?.kitchen_start_at || '—';
+                    const orderPreview = (token.meta?.order_text || '').slice(0, 160);
+                    const totalLabel = token.meta?.total != null ? `₹${Number(token.meta.total).toFixed(0)}` : null;
                     return (
                       <div key={token.id} style={{ ...CARD, display: "flex", alignItems: "flex-start", gap: 16 }}>
                         <div style={{ width: 44, height: 44, borderRadius: "50%", background: C.accentLight, color: C.accentDark, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 500, flexShrink: 0 }}>
@@ -1524,23 +1530,39 @@ export default function ManagerPortal() {
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
                             <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>{token.id}</span>
-                            <Pill label={isScheduled ? 'Scheduled delivery' : 'Needs approval'} variant="purple" />
+                            <Pill
+                              label={
+                                isScheduledTakeaway ? 'Scheduled takeaway'
+                                  : isScheduledDelivery ? 'Scheduled delivery'
+                                  : 'Needs approval'
+                              }
+                              variant="purple"
+                            />
                           </div>
                           <p style={{ fontSize: 12, color: C.textSub, margin: "0 0 2px" }}>
                             {token.name}
-                            {isScheduled
-                              ? ` · Deliver by ${schedLabel}${orderTotal ? ` · ${orderTotal}` : ''}`
-                              : ` · ${token.pax} people · Arrived ${safeFormat(token.arrived_at, 'HH:mm')}`}
+                            {isLargeParty ? <> · <strong>{token.pax} people</strong></> : null}
+                            {' · Arrived '}{safeFormat(token.arrived_at, 'HH:mm')}
                           </p>
                           {token.phone && <p style={{ fontSize: 11, color: C.textMuted, margin: "0 0 8px" }}>+{token.phone}</p>}
-                          {isScheduled ? (
-                            <div style={{ background: C.accentLight, border: `0.5px solid ${C.accentBorder}`, borderRadius: 7, padding: "6px 10px", fontSize: 11, color: C.accentDark, marginBottom: 10 }}>
-                              {orderPreview ? <><strong>Order: </strong>{orderPreview}</> : 'Scheduled delivery — approve before customer pays'}
-                              {token.meta?.delivery_address && (
-                                <div style={{ marginTop: 4, opacity: 0.9 }}>📍 {(token.meta.delivery_address || '').slice(0, 80)}</div>
+                          {(isScheduledTakeaway || isScheduledDelivery) && (
+                            <div style={{ background: C.accentLight, border: `0.5px solid ${C.accentBorder}`, borderRadius: 7, padding: "8px 10px", fontSize: 11, color: C.accentDark, marginBottom: 10 }}>
+                              {isScheduledTakeaway ? (
+                                <>
+                                  <div><strong>Pickup:</strong> {schedLabel}</div>
+                                  <div><strong>Kitchen start:</strong> {kitchenLabel}</div>
+                                </>
+                              ) : (
+                                <>
+                                  <div><strong>Deliver by:</strong> {schedLabel}</div>
+                                  <div><strong>Address:</strong> {(token.meta?.delivery_address || '—').slice(0, 100)}</div>
+                                </>
                               )}
+                              {totalLabel && <div><strong>Total:</strong> {totalLabel}</div>}
+                              {orderPreview && <div style={{ marginTop: 6 }}><strong>Order:</strong> {orderPreview}</div>}
                             </div>
-                          ) : (
+                          )}
+                          {isLargeParty && (
                             <div style={{ background: C.accentLight, border: `0.5px solid ${C.accentBorder}`, borderRadius: 7, padding: "6px 10px", fontSize: 11, color: C.accentDark, marginBottom: 10 }}>
                               <strong>Proposed split: </strong>{tableLines}
                             </div>
@@ -1598,6 +1620,23 @@ export default function ManagerPortal() {
                             {token.name} · {token.pax} {token.pax === 1 ? 'person' : 'people'} · Arrived {safeFormat(token.arrived_at, 'HH:mm')}
                           </p>
                           {token.phone && <p style={{ fontSize: 11, color: C.textMuted, margin: "0 0 8px" }}>+{token.phone}</p>}
+                          {token.estimate_display && token.status === 'waiting' && (
+                            <div style={{ marginBottom: 8 }}>
+                              <span style={{
+                                display: 'inline-block',
+                                background: '#FFF4E0',
+                                color: '#BA7517',
+                                fontSize: 11,
+                                fontWeight: 500,
+                                padding: '4px 10px',
+                                borderRadius: 6,
+                                border: '0.5px solid #E8D4A8',
+                              }}>
+                                ~{token.estimate_display}
+                              </span>
+                              <p style={{ fontSize: 10, color: C.textMuted, margin: '4px 0 0' }}>est. at arrival</p>
+                            </div>
+                          )}
                           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                             <select value={assignTableSel[token.id] || ''} onChange={e => setAssignTableSel(prev => ({ ...prev, [token.id]: e.target.value }))}
                               disabled={avail.length === 0}

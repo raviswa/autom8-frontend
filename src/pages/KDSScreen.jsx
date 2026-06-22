@@ -57,6 +57,20 @@ function formatISTTime(iso) {
   });
 }
 
+function minutesUntil(iso) {
+  if (!iso) return null;
+  return Math.floor((new Date(toUTC(iso)).getTime() - Date.now()) / 60000);
+}
+
+function formatCountdown(mins) {
+  if (mins == null) return '—';
+  if (mins <= 0) return 'Starting now';
+  if (mins < 60) return `${mins}m`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
 // ─── KOT PRINT ENGINE ────────────────────────────────────────────────────────
 //
 // Builds a minimal 80mm-compatible HTML page and fires window.print().
@@ -487,6 +501,83 @@ function HistoryView({ items }) {
   );
 }
 
+function ScheduledOrderCard({ order }) {
+  const minsToKitchen = minutesUntil(order.kitchen_start_at);
+  const minsToSlot = minutesUntil(order.scheduled_slot_at);
+  const urgency =
+    minsToKitchen != null && minsToKitchen <= 15 ? 'urgent'
+      : minsToKitchen != null && minsToKitchen <= 60 ? 'soon'
+      : 'normal';
+
+  return (
+    <div className={`kds-sched-card kds-sched-${urgency}`}>
+      <div className="kds-sched-top">
+        <span className="kds-sched-token">{order.token_number || '—'}</span>
+        <span className="kds-sched-bucket">{order.bucket?.replace('_', ' ')}</span>
+      </div>
+      <p className="kds-sched-customer">{order.customer_name || 'Guest'}</p>
+      <p className="kds-sched-items">{order.order_text || '—'}</p>
+      <div className="kds-sched-times">
+        <span>👨‍🍳 Start {formatISTTime(order.kitchen_start_at)} ({formatCountdown(minsToKitchen)})</span>
+        <span>🥡 Pickup {formatISTTime(order.scheduled_slot_at)} ({formatCountdown(minsToSlot)})</span>
+      </div>
+      {order.total_cook_minutes != null && (
+        <p className="kds-sched-meta">Cook ~{order.total_cook_minutes} min</p>
+      )}
+    </div>
+  );
+}
+
+function FutureOrdersView({ orders, subView, onSubViewChange }) {
+  const future = orders.filter(o => o.bucket === 'future');
+  const todaysFuture = orders.filter(o => o.bucket === 'todays_future');
+  const visible = subView === 'todays_future' ? todaysFuture : future;
+
+  const byDay = visible.reduce((acc, o) => {
+    const day = (o.scheduled_slot_at || '').slice(0, 10) || 'unknown';
+    if (!acc[day]) acc[day] = [];
+    acc[day].push(o);
+    return acc;
+  }, {});
+
+  return (
+    <div className="kds-future-wrap">
+      <div className="kds-filter-bar">
+        <button
+          className={`kds-filter-pill ${subView === 'future' ? 'pill-active' : ''}`}
+          onClick={() => onSubViewChange('future')}
+        >
+          Future <span className="pill-count">{future.length}</span>
+        </button>
+        <button
+          className={`kds-filter-pill ${subView === 'todays_future' ? 'pill-active' : ''}`}
+          onClick={() => onSubViewChange('todays_future')}
+        >
+          Today&apos;s future <span className="pill-count">{todaysFuture.length}</span>
+        </button>
+      </div>
+
+      {visible.length === 0 ? (
+        <div className="kds-empty">
+          <p className="kds-empty-icon">📅</p>
+          <p>No scheduled orders in this view</p>
+        </div>
+      ) : (
+        Object.entries(byDay).map(([day, dayOrders]) => (
+          <div key={day} className="kds-future-day">
+            <h3 className="kds-future-day-label">{day}</h3>
+            <div className="kds-sched-grid">
+              {dayOrders.map(o => (
+                <ScheduledOrderCard key={o.booking_id} order={o} />
+              ))}
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function KDSScreen() {
@@ -494,12 +585,13 @@ export default function KDSScreen() {
   const { connected, updates } = useWebSocket();
 
   const [allItems, setAllItems]   = useState([]);
+  const [scheduledOrders, setScheduledOrders] = useState([]);
+  const [scheduledSubView, setScheduledSubView] = useState('future');
   const [loading,  setLoading]    = useState(true);
   const [filter,   setFilter]     = useState('all');
   const [view,     setView]       = useState('live');
   const [sound,    setSound]      = useState(true);
   const [printMsg, setPrintMsg]   = useState('');   // transient "Printing KOT…" toast
-  const [kitchenWorkflow, setKitchenWorkflow] = useState('KOT_only');
 
   // Track order numbers that have already been auto-printed this session
   // so a polling refresh doesn't re-print the same KOT
@@ -524,17 +616,31 @@ const fetchFeed = useCallback(async () => {
   }
 }, [apiClient]);
 
-  useEffect(() => {
-    apiClient.get('/api/dashboard/waba')
-      .then(res => setKitchenWorkflow(res.data?.restaurant?.kitchen_workflow || 'KOT_only'))
-      .catch(() => {});
+  const fetchScheduled = useCallback(async () => {
+    const token = localStorage.getItem('authToken');
+    if (!token) return [];
+    try {
+      const res = await apiClient.get('/api/kds/scheduled', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const orders = res.data.orders || [];
+      setScheduledOrders(orders);
+      return orders;
+    } catch (err) {
+      console.error('[KDS] fetchScheduled error:', err);
+      return [];
+    }
   }, [apiClient]);
 
   useEffect(() => {
     fetchFeed();
-    const interval = setInterval(fetchFeed, connected ? 3000 : 1000);
+    fetchScheduled();
+    const interval = setInterval(() => {
+      fetchFeed();
+      fetchScheduled();
+    }, connected ? 3000 : 1000);
     return () => clearInterval(interval);
-  }, [fetchFeed, connected]);
+  }, [fetchFeed, fetchScheduled, connected]);
 
   // ── WebSocket ORDER_NEW → auto-print KOT ────────────────────────────────────
   //
@@ -548,7 +654,13 @@ const fetchFeed = useCallback(async () => {
   useEffect(() => {
     if (!updates || updates.length === 0) return;
     const latest = updates[0];
-    if (latest?.type !== 'ORDER_NEW') return;
+    if (latest?.type !== 'ORDER_NEW') {
+      if (latest?.type === 'SCHEDULED_KDS_DISPATCH') {
+        fetchFeed();
+        fetchScheduled();
+      }
+      return;
+    }
 
     const orderNum = latest.order_number;
     if (!orderNum || printedOrders.current.has(orderNum)) return;
@@ -558,21 +670,15 @@ const fetchFeed = useCallback(async () => {
 
     if (sound) playBeep();
 
-    const workflow = latest.kitchen_workflow || kitchenWorkflow;
-    const shouldPrintKot = workflow === 'KOT_only' || workflow === 'Both_KOT_and_KDS';
-
+    // Fetch fresh items so the KOT has real item names, then print
     fetchFeed().then(freshItems => {
-      if (shouldPrintKot) {
-        const kotData = buildKOTFromWSPayload(latest, freshItems);
-        printKOT(kotData);
-        showPrintToast(`KOT printed for #${orderNum}`);
-      } else {
-        showPrintToast(`New order #${orderNum} on KDS`);
-      }
+      const kotData = buildKOTFromWSPayload(latest, freshItems);
+      printKOT(kotData);
+      showPrintToast(`KOT printed for #${orderNum}`);
     });
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [updates, kitchenWorkflow]);
+  }, [updates]);
 
   function showPrintToast(msg) {
     setPrintMsg(msg);
@@ -601,6 +707,8 @@ const fetchFeed = useCallback(async () => {
     isTodayIST(i.created_at) &&
     ['pending', 'in_progress', 'ready'].includes(i.status)
   );
+
+  const todaysFuture = scheduledOrders.filter(o => o.bucket === 'todays_future');
 
   const liveItems = todayActive.filter(i => {
     if (i.status !== 'ready') return true;
@@ -682,6 +790,10 @@ const fetchFeed = useCallback(async () => {
               onClick={() => setView('live')}
             >Live orders</button>
             <button
+              className={`kds-tab ${view === 'future' ? 'kds-tab-active' : ''}`}
+              onClick={() => setView('future')}
+            >Future{scheduledOrders.filter(o => o.bucket === 'future').length ? ` (${scheduledOrders.filter(o => o.bucket === 'future').length})` : ''}</button>
+            <button
               className={`kds-tab ${view === 'history' ? 'kds-tab-active' : ''}`}
               onClick={() => setView('history')}
             >History</button>
@@ -701,6 +813,22 @@ const fetchFeed = useCallback(async () => {
         {/* Live view */}
         {view === 'live' && (
           <>
+            {todaysFuture.length > 0 && (
+              <div className="kds-todays-future-strip">
+                <div className="kds-todays-future-head">
+                  <span>Today&apos;s scheduled — kitchen starting soon</span>
+                  <button type="button" className="kds-link-btn" onClick={() => { setView('future'); setScheduledSubView('todays_future'); }}>
+                    View all ({todaysFuture.length})
+                  </button>
+                </div>
+                <div className="kds-sched-grid compact">
+                  {todaysFuture.slice(0, 4).map(o => (
+                    <ScheduledOrderCard key={o.booking_id} order={o} />
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="kds-filter-bar">
               {[
                 { key: 'all',         label: 'All active' },
@@ -740,6 +868,14 @@ const fetchFeed = useCallback(async () => {
               )}
             </div>
           </>
+        )}
+
+        {view === 'future' && (
+          <FutureOrdersView
+            orders={scheduledOrders}
+            subView={scheduledSubView}
+            onSubViewChange={setScheduledSubView}
+          />
         )}
 
         {view === 'history' && <HistoryView items={allItems} />}
@@ -798,6 +934,40 @@ const KDS_CSS = `
     color: #666; font-weight: 400; transition: all .15s;
   }
   .kds-tab-active { background: #2a2a2a; color: #f0f0f0; font-weight: 500; }
+
+  .kds-todays-future-strip {
+    padding: 12px 16px 0;
+    border-bottom: 1px solid #222;
+  }
+  .kds-todays-future-head {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 12px; color: #fbbf24; margin-bottom: 10px;
+  }
+  .kds-link-btn {
+    background: none; border: none; color: #93c5fd; cursor: pointer; font-size: 12px;
+  }
+  .kds-future-wrap { flex: 1; overflow: auto; padding: 12px 16px 24px; }
+  .kds-future-day { margin-bottom: 20px; }
+  .kds-future-day-label {
+    font-size: 13px; color: #9ca3af; margin: 0 0 10px; text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .kds-sched-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px;
+  }
+  .kds-sched-grid.compact { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  .kds-sched-card {
+    background: #161616; border: 1px solid #2a2a2a; border-radius: 10px; padding: 12px;
+  }
+  .kds-sched-normal { border-left: 4px solid #3b82f6; }
+  .kds-sched-soon { border-left: 4px solid #f59e0b; }
+  .kds-sched-urgent { border-left: 4px solid #ef4444; box-shadow: 0 0 0 1px rgba(239,68,68,.25); }
+  .kds-sched-top { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+  .kds-sched-token { font-weight: 700; font-size: 15px; }
+  .kds-sched-bucket { font-size: 10px; text-transform: uppercase; color: #9ca3af; }
+  .kds-sched-customer { margin: 0 0 4px; font-size: 13px; color: #e5e7eb; }
+  .kds-sched-items { margin: 0 0 8px; font-size: 12px; color: #9ca3af; line-height: 1.4; }
+  .kds-sched-times { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: #d1d5db; }
+  .kds-sched-meta { margin: 8px 0 0; font-size: 11px; color: #6b7280; }
   .kds-header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
   .kds-sound-btn {
     padding: 5px 12px; border-radius: 6px; font-size: 12px;

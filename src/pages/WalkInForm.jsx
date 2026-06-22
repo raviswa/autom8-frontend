@@ -154,6 +154,12 @@ export default function WalkInForm() {
                 <span className="font-medium">{token.pax} {token.pax === 1 ? 'person' : 'people'}</span>
               </div>
             )}
+            {token.type === 'dinein' && token.estimate_display && (
+              <div className="flex justify-between">
+                <span className="text-gray-400">Est. wait</span>
+                <span className="font-medium text-amber-700">{token.estimate_display}</span>
+              </div>
+            )}
           </div>
 
           {token.type === 'dinein' ? (
