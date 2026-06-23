@@ -1083,7 +1083,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
           {showTakeaway && (
             <>
               <ToggleRow
-                label="Scheduled takeaway"
+                label="Scheduled take-away"
                 checked={form.scheduled_takeaway_enabled}
                 onToggle={() => set('scheduled_takeaway_enabled', !form.scheduled_takeaway_enabled)}
               />

@@ -1532,7 +1532,7 @@ export default function ManagerPortal() {
                             <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>{token.id}</span>
                             <Pill
                               label={
-                                isScheduledTakeaway ? 'Scheduled takeaway'
+                                isScheduledTakeaway ? 'Scheduled take-away'
                                   : isScheduledDelivery ? 'Scheduled delivery'
                                   : 'Needs approval'
                               }
