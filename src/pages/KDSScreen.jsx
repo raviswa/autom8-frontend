@@ -43,6 +43,18 @@ function todayISTStr() {
   return getISTDateStr(new Date().toISOString());
 }
 
+function formatISTDateLabel(dateStr) {
+  if (!dateStr) return '';
+  return new Date(`${dateStr}T12:00:00+05:30`).toLocaleDateString('en-IN', {
+    timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', year: 'numeric',
+  });
+}
+
+function isDateInRangeIST(iso, fromStr, toStr) {
+  const day = getISTDateStr(iso);
+  return day >= fromStr && day <= toStr;
+}
+
 function isTodayIST(iso) {
   return getISTDateStr(iso) === todayISTStr();
 }
@@ -440,31 +452,117 @@ function ItemCard({ item, allItems, onAdvance, onVoid }) {
 
 // ─── History table ────────────────────────────────────────────────────────────
 
-function HistoryView({ items }) {
+function HistoryView({ apiClient, active }) {
+  const [fromDate, setFromDate] = useState(todayISTStr);
+  const [toDate, setToDate]     = useState(todayISTStr);
+  const [items, setItems]       = useState([]);
+  const [loading, setLoading]   = useState(true);
+
+  const fetchHistory = useCallback(async (from, to) => {
+    const token = localStorage.getItem('authToken');
+    if (!token) return;
+    setLoading(true);
+    try {
+      const res = await apiClient.get('/api/kds/history', {
+        params: { from, to },
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setItems(res.data.items || []);
+    } catch (err) {
+      console.error('[KDS] fetchHistory error:', err);
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [apiClient]);
+
+  useEffect(() => {
+    if (!active) return undefined;
+    fetchHistory(fromDate, toDate);
+    const interval = setInterval(() => fetchHistory(fromDate, toDate), 30000);
+    return () => clearInterval(interval);
+  }, [active, fromDate, toDate, fetchHistory]);
+
   const nowMs = Date.now();
+  const today = todayISTStr();
+  const viewingTodayOnly = fromDate === today && toDate === today;
+
   const hist = items
     .filter(i => {
-      if (!isTodayIST(i.created_at)) return false;
-      if (i.status === 'cancelled')  return true;
+      if (!isDateInRangeIST(i.updated_at ?? i.created_at, fromDate, toDate)) return false;
+      if (i.status === 'cancelled') return true;
       if (i.status === 'ready') {
-        const readyAt   = i.updated_at ?? i.created_at;
+        if (!viewingTodayOnly) return true;
+        const readyAt = i.updated_at ?? i.created_at;
         const minsReady = (nowMs - new Date(toUTC(readyAt))) / 60000;
         return minsReady > READY_TIMEOUT_MINS;
       }
       return false;
     })
-    .sort((a, b) => new Date(toUTC(b.created_at)) - new Date(toUTC(a.created_at)));
+    .sort((a, b) => new Date(toUTC(b.updated_at ?? b.created_at)) - new Date(toUTC(a.updated_at ?? a.created_at)));
+
+  const rangeLabel = fromDate === toDate
+    ? formatISTDateLabel(fromDate)
+    : `${formatISTDateLabel(fromDate)} – ${formatISTDateLabel(toDate)}`;
+
+  const handleFromChange = (value) => {
+    setFromDate(value);
+    if (value > toDate) setToDate(value);
+  };
+
+  const handleToChange = (value) => {
+    setToDate(value);
+    if (value < fromDate) setFromDate(value);
+  };
+
+  const setToday = () => {
+    const t = todayISTStr();
+    setFromDate(t);
+    setToDate(t);
+  };
 
   return (
     <div className="kds-history">
       <div className="kds-history-bar">
-        <span>Today's completed &amp; cancelled items</span>
+        <span>Completed &amp; cancelled · {rangeLabel}</span>
         <span className="kds-history-count">{hist.length} items</span>
       </div>
-      {hist.length === 0 ? (
+
+      <div className="kds-history-filters">
+        <label className="kds-date-field">
+          <span>From</span>
+          <input
+            type="date"
+            className="kds-date-input"
+            value={fromDate}
+            max={toDate}
+            onChange={(e) => handleFromChange(e.target.value)}
+          />
+        </label>
+        <label className="kds-date-field">
+          <span>To</span>
+          <input
+            type="date"
+            className="kds-date-input"
+            value={toDate}
+            min={fromDate}
+            onChange={(e) => handleToChange(e.target.value)}
+          />
+        </label>
+        <button type="button" className="kds-date-today-btn" onClick={setToday}>
+          Today
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="kds-empty">
+          <div className="kds-spinner" />
+          <p>Loading history…</p>
+        </div>
+      ) : hist.length === 0 ? (
         <div className="kds-empty">
           <p className="kds-empty-icon">📋</p>
-          <p>No history yet today</p>
+          <p>No history for this period</p>
         </div>
       ) : (
         <div className="kds-history-scroll">
@@ -482,13 +580,14 @@ function HistoryView({ items }) {
                 const qty      = item.order_item?.quantity ?? 1;
                 const orderNum = item.order_item?.order?.order_number?.slice(-6)
                   ?? item.token_number ?? item.id;
+                const fulfilledAt = item.updated_at ?? item.created_at;
                 return (
                   <tr key={item.id}>
                     <td className="td-order">#{orderNum}</td>
                     <td>{itemServiceLabel(item)}</td>
                     <td><span className="hist-item">{name}</span></td>
                     <td>×{qty}</td>
-                    <td className="td-time">{formatISTTime(item.created_at)}</td>
+                    <td className="td-time">{formatISTTime(fulfilledAt)}</td>
                     <td><StatusBadge status={item.status} isServed={true} /></td>
                   </tr>
                 );
@@ -519,7 +618,7 @@ function ScheduledOrderCard({ order }) {
       <p className="kds-sched-items">{order.order_text || '—'}</p>
       <div className="kds-sched-times">
         <span>👨‍🍳 Start {formatISTTime(order.kitchen_start_at)} ({formatCountdown(minsToKitchen)})</span>
-        <span>🥡 Pickup {formatISTTime(order.scheduled_slot_at)} ({formatCountdown(minsToSlot)})</span>
+        <span>🥡 Slot {formatISTTime(order.scheduled_slot_at)} ({formatCountdown(minsToSlot)})</span>
       </div>
       {order.total_cook_minutes != null && (
         <p className="kds-sched-meta">Cook ~{order.total_cook_minutes} min</p>
@@ -878,7 +977,7 @@ const fetchFeed = useCallback(async () => {
           />
         )}
 
-        {view === 'history' && <HistoryView items={allItems} />}
+        {view === 'history' && <HistoryView apiClient={apiClient} active={view === 'history'} />}
       </div>
     </>
   );
@@ -968,6 +1067,7 @@ const KDS_CSS = `
   .kds-sched-items { margin: 0 0 8px; font-size: 12px; color: #9ca3af; line-height: 1.4; }
   .kds-sched-times { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: #d1d5db; }
   .kds-sched-meta { margin: 8px 0 0; font-size: 11px; color: #6b7280; }
+
   .kds-header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
   .kds-sound-btn {
     padding: 5px 12px; border-radius: 6px; font-size: 12px;
@@ -1111,9 +1211,29 @@ const KDS_CSS = `
   /* History */
   .kds-history { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   .kds-history-bar {
-    padding: 10px 20px; border-bottom: 1px solid #1a1a1a;
+    padding: 10px 20px 8px; border-bottom: 1px solid #1a1a1a;
     display: flex; align-items: center; font-size: 13px; color: #666;
   }
+  .kds-history-filters {
+    display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;
+    padding: 10px 20px 12px; border-bottom: 1px solid #1a1a1a; flex-shrink: 0;
+  }
+  .kds-date-field {
+    display: flex; flex-direction: column; gap: 4px;
+    font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .kds-date-input {
+    background: #161616; border: 1px solid #2a2a2a; border-radius: 6px;
+    color: #f0f0f0; font-size: 13px; padding: 6px 10px; min-width: 148px;
+    color-scheme: dark;
+  }
+  .kds-date-input:focus { outline: none; border-color: #444; }
+  .kds-date-today-btn {
+    padding: 7px 14px; border-radius: 6px; font-size: 12px;
+    border: 1px solid #2a2a2a; background: #1a1a1a; color: #aaa; cursor: pointer;
+    margin-bottom: 1px;
+  }
+  .kds-date-today-btn:hover { color: #f0f0f0; border-color: #444; }
   .kds-history-count { margin-left: auto; font-size: 12px; color: #444; }
   .kds-history-scroll { flex: 1; overflow-y: auto; padding: 0 20px 20px; }
   .kds-hist-table { width: 100%; border-collapse: collapse; font-size: 13px; }
