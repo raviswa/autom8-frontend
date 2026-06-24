@@ -614,6 +614,16 @@ function scheduledOrderServiceIcon(order) {
   return '📅';
 }
 
+function scheduledBucketLabel(bucket) {
+  const labels = {
+    todays_future: 'Scheduled',
+    future: 'Upcoming',
+    present: 'Starting now',
+    live: 'On live board',
+  };
+  return labels[bucket] || String(bucket || '').replace(/_/g, ' ');
+}
+
 function ScheduledOrderCard({ order, compact = false }) {
   const minsToKitchen = minutesUntil(order.kitchen_start_at);
   const minsToSlot = minutesUntil(order.scheduled_slot_at);
@@ -629,7 +639,7 @@ function ScheduledOrderCard({ order, compact = false }) {
       <div className="kds-sched-top">
         <span className="kds-sched-token">{order.token_number || '—'}</span>
         {!compact && (
-          <span className="kds-sched-bucket">{order.bucket?.replace('_', ' ')}</span>
+          <span className="kds-sched-bucket">{scheduledBucketLabel(order.bucket)}</span>
         )}
         {compact && (
           <span className={`kds-sched-type-badge kds-sched-service-${isDelivery ? 'delivery' : 'takeaway'}`}>
@@ -669,8 +679,8 @@ function FutureOrdersView({ orders }) {
   return (
     <div className="kds-future-wrap">
       <p className="kds-future-hint">
-        Orders for upcoming days. Today&apos;s scheduled orders appear on the Live tab under
-        &quot;Today&apos;s scheduled — kitchen starting soon&quot;.
+        Orders for upcoming days. Today&apos;s prep schedule appears on the Live tab under
+        &quot;Scheduled bookings&quot;.
       </p>
 
       {later.length === 0 ? (
@@ -934,7 +944,7 @@ const fetchFeed = useCallback(async () => {
             {todaysFuture.length > 0 && (
               <div className="kds-todays-future-strip">
                 <div className="kds-todays-future-head">
-                  <span>Today&apos;s scheduled — kitchen starting soon</span>
+                  <span>Scheduled bookings</span>
                   <span className="kds-todays-future-count">{todaysFuture.length} order{todaysFuture.length === 1 ? '' : 's'}</span>
                 </div>
                 <div className="kds-sched-grid compact">
