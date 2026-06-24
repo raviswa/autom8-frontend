@@ -79,7 +79,27 @@ const TOKEN_STATUS = {
   pending_approval: { bg: C.accentLight,   color: C.accentDark,   avatarBg: "#EEEDFE", avatarColor: C.accentDark   },
 };
 
-const ACTIVE_ORDER_STATUSES = ['pending', 'confirmed', 'in_progress'];
+const ACTIVE_ORDER_STATUSES = ['pending', 'confirmed', 'in_progress', 'ready'];
+
+const CATALOG_TEMPLATE_HEADERS = [
+  'id', 'title', 'description', 'price', 'category', 'custom_label_0', 'image_link', 'is_available',
+  'prep_time_fixed', 'batch_size', 'time_per_batch', 'kitchen_station', 'packing_time', 'holds_well', 'fulfillment_section',
+];
+const CATALOG_TEMPLATE_COL_WIDTHS = [
+  { wch: 8 }, { wch: 28 }, { wch: 40 }, { wch: 8 }, { wch: 16 }, { wch: 16 }, { wch: 48 }, { wch: 12 },
+  { wch: 14 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 16 },
+];
+const CATALOG_COLUMN_HELP = [
+  ['Column guide'],
+  [''],
+  ['custom_label_0 — menu slot: Morning Tiffin, Lunch, Evening Snacks, Dinner (blank = all day)'],
+  ['prep_time_fixed — fixed prep minutes before batch cooking (default 5)'],
+  ['batch_size / time_per_batch — batch cook timing for scheduled orders'],
+  ['kitchen_station — tawa, steamer, kadai, beverages, assembly, cold'],
+  ['packing_time — minutes per item for takeaway packing'],
+  ['holds_well — TRUE if item can wait without quality loss'],
+  ['fulfillment_section — counter id when multi-counter mode is on (default main)'],
+];
 
 const SLOT_LABEL_TO_DB = {
   'morning tiffin': 'morning_tiffin',
@@ -98,6 +118,7 @@ const SLOT_DB_TO_LABEL = {
 
 // Reservation duration options (minutes)
 const RESERVATION_DURATIONS = [30, 60, 90, 120];
+const TABLE_SECTIONS = ['Main Hall', 'Terrace', 'Private Room', 'Counter', 'Outdoor'];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function safeFormat(dateVal, fmt) {
@@ -305,10 +326,6 @@ function AlertBanner({ type = "warn", children }) {
 }
 
 // ─── Live catalog template download ───────────────────────────────────────────
-const CATALOG_TEMPLATE_HEADERS = ['id', 'title', 'description', 'price', 'category', 'image_link', 'is_available'];
-const CATALOG_TEMPLATE_COL_WIDTHS = [
-  { wch: 8 }, { wch: 28 }, { wch: 48 }, { wch: 8 }, { wch: 18 }, { wch: 52 }, { wch: 14 },
-];
 const IMAGE_SOURCE_EXAMPLES = [
   ['How to add dish images'],
   [''],
@@ -335,8 +352,23 @@ async function downloadCatalogTemplate(apiClient, showToast, currentMenuItems = 
   const fromApiItems = (items) =>
     items.map(item => [
       item.id, item.title, item.description, item.price,
-      exportCategoryForTemplate(item.category), item.image_link, item.is_available,
+      exportCategoryForTemplate(item.category),
+      item.custom_label_0 || '',
+      item.image_link, item.is_available,
+      item.prep_time_fixed ?? 5,
+      item.batch_size ?? 1,
+      item.time_per_batch ?? 10,
+      item.kitchen_station || 'assembly',
+      item.packing_time ?? 1,
+      item.holds_well ?? 'FALSE',
+      item.fulfillment_section || 'main',
     ]);
+
+  const slotLabel = (item) => {
+    const db = item.time_slot;
+    if (!db || db === 'all') return '';
+    return SLOT_DB_TO_LABEL[db] || String(db).replace(/_/g, ' ');
+  };
 
   const fromStateItems = (items) =>
     items.map(item => [
@@ -345,18 +377,26 @@ async function downloadCatalogTemplate(apiClient, showToast, currentMenuItems = 
       item.description || '',
       Number(item.price) || 0,
       exportCategoryForTemplate(item.category),
+      slotLabel(item),
       item.image_url || '',
       (item.is_stocked ?? item.is_available ?? true) ? 'TRUE' : 'FALSE',
+      item.prep_time_fixed ?? 5,
+      item.batch_size ?? 1,
+      item.time_per_batch ?? 10,
+      item.kitchen_station || 'assembly',
+      item.packing_time ?? 1,
+      item.holds_well ? 'TRUE' : 'FALSE',
+      item.fulfillment_section || 'main',
     ]);
 
   const writeAndDownload = (rows, count, source) => {
     const catalogSheet = XLSX.utils.aoa_to_sheet([CATALOG_TEMPLATE_HEADERS, ...rows]);
     catalogSheet['!cols'] = CATALOG_TEMPLATE_COL_WIDTHS;
-    const helpSheet = XLSX.utils.aoa_to_sheet(IMAGE_SOURCE_EXAMPLES);
+    const helpSheet = XLSX.utils.aoa_to_sheet([...IMAGE_SOURCE_EXAMPLES, [''], ...CATALOG_COLUMN_HELP]);
     helpSheet['!cols'] = [{ wch: 72 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, catalogSheet, 'WhatsApp Catalog');
-    XLSX.utils.book_append_sheet(wb, helpSheet, 'Image sources');
+    XLSX.utils.book_append_sheet(wb, helpSheet, 'Column guide');
     XLSX.writeFile(wb, 'catalog_template.xlsx');
     showToast(`Template downloaded — ${count} item${count !== 1 ? 's' : ''} (${source})`);
   };
@@ -379,8 +419,9 @@ async function downloadCatalogTemplate(apiClient, showToast, currentMenuItems = 
   }
 
   const stubRow = [
-    'M001', 'Idli', 'Soft steamed idlis with sambar and chutney', 50, 'Tiffin',
+    'M001', 'Idli', 'Soft steamed idlis with sambar and chutney', 50, 'Tiffin', 'Morning Tiffin',
     'https://images.unsplash.com/photo-1585937421612-70a008356fbe?w=800', 'TRUE',
+    5, 1, 10, 'steamer', 1, 'FALSE', 'main',
   ];
   writeAndDownload([stubRow], 0, 'blank template — fill in your items');
   showToast('No items in database yet — blank template downloaded');
@@ -400,8 +441,21 @@ function mapExcelRowToMenuItem(row) {
   const image_url   = String(row['image_link'] || row['image_url'] || row['Image Link'] || row['Image URL'] || '').trim();
   const availRaw    = row['is_available'] ?? row['Is Available'] ?? row['is_stocked'] ?? '';
   const is_available = availRaw === '' ? undefined : !['false', '0', 'no'].includes(String(availRaw).toLowerCase().trim());
+  const customSlot  = String(row['custom_label_0'] || row['Custom Label 0'] || '').trim();
+  let time_slot = 'all';
+  if (customSlot) {
+    time_slot = SLOT_LABEL_TO_DB[customSlot.toLowerCase()] || customSlot.toLowerCase().replace(/\s+/g, '_');
+  }
   return {
-    id, name, description, price, category, time_slot: 'all', image_url,
+    id, name, description, price, category, time_slot, image_url,
+    prep_time_fixed: row['prep_time_fixed'],
+    batch_size: row['batch_size'],
+    time_per_batch: row['time_per_batch'],
+    kitchen_station: row['kitchen_station'],
+    packing_time: row['packing_time'],
+    holds_well: row['holds_well'],
+    fulfillment_section: row['fulfillment_section'],
+    custom_label_0: customSlot,
     ...(is_available !== undefined ? { is_available } : {}),
   };
 }
@@ -415,6 +469,35 @@ function validateRow(row, index) {
     errors.push(`Row ${index + 1} (${row.name || row.id}): image_link must start with http:// or https://`);
   }
   return errors;
+}
+
+function todayDateStr() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+}
+
+function tokenFulfillmentKind(token) {
+  const type = String(token.type || '').toLowerCase();
+  const meta = token.meta || {};
+  const isScheduled = type.includes('scheduled') || Boolean(meta.scheduled_at || meta.kitchen_start_at);
+  const isDelivery = type.includes('delivery') || meta.service_type === 'delivery';
+  if (isDelivery) return isScheduled ? 'scheduled_delivery' : 'live_delivery';
+  return isScheduled ? 'scheduled_takeaway' : 'live_takeaway';
+}
+
+const FULFILLMENT_FILTERS = [
+  { key: 'all', label: 'All' },
+  { key: 'dine_in', label: 'Dine-in' },
+  { key: 'live_takeaway', label: 'Live takeaway' },
+  { key: 'scheduled_takeaway', label: 'Scheduled takeaway' },
+  { key: 'live_delivery', label: 'Live delivery' },
+  { key: 'scheduled_delivery', label: 'Scheduled delivery' },
+];
+
+function approvalTypeLabel(type) {
+  if (type === 'scheduled_delivery') return 'Scheduled delivery';
+  if (type === 'scheduled_takeaway') return 'Scheduled take-away';
+  if (type === 'large_party') return 'Large party';
+  return type || 'Approval';
 }
 
 // ============================================================================
@@ -483,6 +566,21 @@ export default function ManagerPortal() {
   const [kitchenStatus,  setKitchenStatus]  = useState(null);
   const [kitchenToggling,setKitchenToggling]= useState(false);
   const [kitchenBusyToggling, setKitchenBusyToggling] = useState(false);
+  const [kdsItems,       setKdsItems]       = useState([]);
+  const [scheduledBoard, setScheduledBoard] = useState([]);
+  const [ordersFilter,   setOrdersFilter]   = useState('all');
+  const [approvalHistory, setApprovalHistory] = useState([]);
+  const [approvalFrom,   setApprovalFrom]   = useState(todayDateStr());
+  const [approvalTo,     setApprovalTo]     = useState(todayDateStr());
+  const [approvalLoading,setApprovalLoading]= useState(false);
+  const [showApprovalHistory, setShowApprovalHistory] = useState(false);
+  const [tablesSubView, setTablesSubView] = useState('floor');
+  const [tableEditingId, setTableEditingId] = useState(null);
+  const [tableEditBuf, setTableEditBuf] = useState({});
+  const [tableAdding, setTableAdding] = useState(false);
+  const [tableNewRow, setTableNewRow] = useState({ table_number: '', capacity: 4, section: '' });
+  const [tableCrudSaving, setTableCrudSaving] = useState(null);
+  const [tableDeleting, setTableDeleting] = useState(null);
   const fileInputRef = useRef(null);
 
   const showToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 3500); };
@@ -502,6 +600,30 @@ export default function ManagerPortal() {
   }, [apiClient]);
   const fetchTables    = useCallback(async () => { try { const r = await apiClient.get('/api/tables');     setTables(r.data.tables || r.data || []); } catch(e) {} }, [apiClient]);
   const fetchOrders    = useCallback(async () => { try { const r = await apiClient.get('/api/orders');     setOrders(r.data.orders || r.data || []); } catch(e) {} }, [apiClient]);
+  const fetchKdsFeed   = useCallback(async () => {
+    try {
+      const r = await apiClient.get('/api/kds/feed', { params: { status: 'all' } });
+      setKdsItems(r.data.items || []);
+    } catch (e) { /* KDS may be unavailable for some roles */ }
+  }, [apiClient]);
+  const fetchScheduledBoard = useCallback(async () => {
+    try {
+      const r = await apiClient.get('/api/kds/scheduled');
+      setScheduledBoard(r.data.orders || []);
+    } catch (e) { /* non-fatal */ }
+  }, [apiClient]);
+  const fetchApprovalHistory = useCallback(async (from = approvalFrom, to = approvalTo) => {
+    setApprovalLoading(true);
+    try {
+      const r = await apiClient.get('/api/tokens/approvals/history', { params: { from, to } });
+      setApprovalHistory(r.data.history || []);
+    } catch (e) {
+      setApprovalHistory([]);
+      showToast(e.response?.data?.error || 'Could not load approval history');
+    } finally {
+      setApprovalLoading(false);
+    }
+  }, [apiClient, approvalFrom, approvalTo]);
   const fetchMenuItems = useCallback(async () => { try { const r = await apiClient.get('/api/menu-items?ignore_slot=true'); setMenuItems(r.data.items || r.data || []); } catch(e) {} }, [apiClient]);
   const fetchKitchenStatus = useCallback(async () => {
     try {
@@ -512,25 +634,37 @@ export default function ManagerPortal() {
     }
   }, [apiClient]);
   const fetchData      = useCallback(async () => {
-    await Promise.all([fetchTables(), fetchOrders(), fetchTokens(), fetchMenuItems(), fetchKitchenStatus()]);
+    await Promise.all([
+      fetchTables(), fetchOrders(), fetchTokens(), fetchMenuItems(), fetchKitchenStatus(),
+      fetchKdsFeed(), fetchScheduledBoard(),
+    ]);
     setLoading(false);
-  }, [fetchTables, fetchOrders, fetchTokens, fetchMenuItems, fetchKitchenStatus]);
+  }, [fetchTables, fetchOrders, fetchTokens, fetchMenuItems, fetchKitchenStatus, fetchKdsFeed, fetchScheduledBoard]);
 
   useEffect(() => {
     fetchData();
     const full  = setInterval(fetchData, 15000);
-    const quick = setInterval(async () => { await fetchTokens(); await fetchTables(); await fetchOrders(); }, 8000);
+    const quick = setInterval(async () => {
+      await fetchTokens();
+      await fetchTables();
+      await fetchOrders();
+      await fetchKdsFeed();
+      await fetchScheduledBoard();
+    }, 8000);
     return () => { clearInterval(full); clearInterval(quick); };
-  }, [fetchData, fetchTokens, fetchTables, fetchOrders]);
+  }, [fetchData, fetchTokens, fetchTables, fetchOrders, fetchKdsFeed, fetchScheduledBoard]);
 
   useEffect(() => {
     const latest = updates[0];
     if (!latest) return;
-    if (['TOKEN_NEW', 'TOKEN_ASSIGNED', 'TOKEN_APPROVED', 'TOKEN_COMPLETED', 'TOKEN_REJECTED'].includes(latest.type)) {
+    if (['TOKEN_NEW', 'TOKEN_ASSIGNED', 'TOKEN_APPROVED', 'TOKEN_COMPLETED', 'TOKEN_REJECTED', 'ORDER_NEW', 'SCHEDULED_KDS_DISPATCH'].includes(latest.type)) {
       fetchTokens();
       fetchTables();
+      fetchOrders();
+      fetchKdsFeed();
+      fetchScheduledBoard();
     }
-  }, [updates, fetchTokens, fetchTables]);
+  }, [updates, fetchTokens, fetchTables, fetchOrders, fetchKdsFeed, fetchScheduledBoard]);
 
   // ── Countdown ticker — updates every second for reservation timers ────────
   useEffect(() => {
@@ -594,6 +728,13 @@ export default function ManagerPortal() {
   const seatedTokens       = normTokens.filter(t => t.status === 'seated');
   const takeawayTokens     = normTokens.filter(t => t.status === 'takeaway');
   const pendingApprTokens  = normTokens.filter(t => t.status === 'pending_approval');
+  const liveTakeawayTokens = takeawayTokens.filter(t => tokenFulfillmentKind(t) === 'live_takeaway');
+  const liveDeliveryTokens = takeawayTokens.filter(t => tokenFulfillmentKind(t) === 'live_delivery');
+  const scheduledTakeawayTokens = takeawayTokens.filter(t => tokenFulfillmentKind(t) === 'scheduled_takeaway');
+  const scheduledDeliveryTokens = takeawayTokens.filter(t => tokenFulfillmentKind(t) === 'scheduled_delivery');
+  const activeDineInOrders = orders.filter(o => ACTIVE_ORDER_STATUSES.includes(o.status) && o.table_id);
+  const scheduledPrepOrders = scheduledBoard.filter(o => ['todays_future', 'present', 'future'].includes(o.bucket));
+  const activeKdsItems = kdsItems.filter(i => ['pending', 'in_progress', 'ready'].includes(i.status));
   const freeTablesCount    = tables.filter(t => getTableStatus(t).status === 'available').length;
 
   const showMenuSlotColumn = menuSlotsAreMeaningful(menuItems);
@@ -742,6 +883,84 @@ export default function ManagerPortal() {
     } catch(err) {
       showToast(`Failed: ${err.message}`);
     }
+  };
+
+  const startTableEdit = (t) => {
+    setTableEditingId(t.id);
+    setTableEditBuf({ table_number: t.table_number, capacity: t.capacity ?? 4, section: t.section ?? '' });
+    setTableAdding(false);
+  };
+
+  const cancelTableEdit = () => { setTableEditingId(null); setTableEditBuf({}); };
+
+  const saveTableEdit = async (id) => {
+    if (!tableEditBuf.table_number) { showToast('Table number is required'); return; }
+    setTableCrudSaving(id);
+    try {
+      await apiClient.put(`/api/tables/${id}`, {
+        table_number: parseInt(tableEditBuf.table_number, 10),
+        capacity: parseInt(tableEditBuf.capacity, 10) || 4,
+        section: tableEditBuf.section || null,
+      });
+      showToast(`Table ${tableEditBuf.table_number} updated`);
+      setTableEditingId(null);
+      await fetchTables();
+    } catch (e) {
+      showToast(e.response?.data?.error || 'Update failed');
+    } finally {
+      setTableCrudSaving(null);
+    }
+  };
+
+  const deleteTableCrud = async (t) => {
+    if (!window.confirm(`Delete Table ${t.table_number}? This cannot be undone.`)) return;
+    setTableDeleting(t.id);
+    try {
+      await apiClient.delete(`/api/tables/${t.id}`);
+      showToast(`Table ${t.table_number} deleted`);
+      await fetchTables();
+    } catch (e) {
+      showToast(e.response?.data?.error || 'Delete failed');
+    } finally {
+      setTableDeleting(null);
+    }
+  };
+
+  const addTableCrud = async () => {
+    if (!tableNewRow.table_number) { showToast('Table number is required'); return; }
+    setTableCrudSaving('new');
+    try {
+      await apiClient.post('/api/tables', {
+        table_number: parseInt(tableNewRow.table_number, 10),
+        capacity: parseInt(tableNewRow.capacity, 10) || 4,
+        section: tableNewRow.section || null,
+      });
+      showToast(`Table ${tableNewRow.table_number} added`);
+      setTableAdding(false);
+      setTableNewRow({ table_number: '', capacity: 4, section: '' });
+      await fetchTables();
+    } catch (e) {
+      showToast(e.response?.data?.error || 'Add failed');
+    } finally {
+      setTableCrudSaving(null);
+    }
+  };
+
+  const bulkAddTables = async () => {
+    const count = parseInt(window.prompt('How many tables to add? (numbered from the next available slot)'), 10);
+    if (!count || count < 1 || count > 50) return;
+    const maxNum = tables.reduce((m, t) => Math.max(m, t.table_number || 0), 0);
+    setTableCrudSaving('bulk');
+    let added = 0;
+    for (let i = 1; i <= count; i++) {
+      try {
+        await apiClient.post('/api/tables', { table_number: maxNum + i, capacity: 4 });
+        added += 1;
+      } catch { /* skip duplicate numbers */ }
+    }
+    showToast(`Added ${added} table${added === 1 ? '' : 's'}`);
+    setTableCrudSaving(null);
+    await fetchTables();
   };
 
   // ── Approve / Reject ──────────────────────────────────────────────────────
@@ -920,7 +1139,8 @@ export default function ManagerPortal() {
     try {
       const res = await apiClient.post('/api/menu/upload', { items: uploadRows });
       setUploadResult(res.data); setUploadStatus('done'); await fetchMenuItems();
-      showToast(`Menu updated — ${res.data.upserted} items saved`);
+      const purged = res.data.purged ? ` · ${res.data.purged} old items removed` : '';
+      showToast(`Catalog replaced — ${res.data.upserted} items saved${purged}`);
     } catch(err) { setUploadErrors([`Upload failed: ${err.response?.data?.error || err.message}`]); setUploadStatus('preview'); }
   };
   const handleResetUpload = () => {
@@ -1459,7 +1679,11 @@ export default function ManagerPortal() {
                 : { bg: C.dangerLight,  border: C.dangerBorder,  color: C.dangerDark  },
               hint: kitchenStatus
                 ? (kitchenStatus.is_open
-                    ? (kitchenStatus.current_slot_label ? `${kitchenStatus.current_slot_label} menu live` : 'Manual override active')
+                    ? [
+                        kitchenStatus.current_slot_label ? `${kitchenStatus.current_slot_label} menu live` : 'Manual override active',
+                        kitchenStatus.takeaway_ready_range ? `Takeaway ${kitchenStatus.takeaway_ready_range}` : null,
+                        kitchenStatus.delivery_ready_range ? `Delivery ${kitchenStatus.delivery_ready_range}` : null,
+                      ].filter(Boolean).join(' · ')
                     : `WhatsApp ordering paused${kitchenStatus.schedule_open ? '' : ` · opens ${kitchenStatus.next_open_label}`}`)
                 : null,
             },
@@ -1485,7 +1709,7 @@ export default function ManagerPortal() {
           {[
             { key: 'queue',  label: `Queue${(waitingTokens.length + pendingApprTokens.length) ? ` (${waitingTokens.length + pendingApprTokens.length})` : ''}` },
             { key: 'tables', label: 'Tables' },
-            { key: 'orders', label: 'Active orders' },
+            { key: 'orders', label: `Active orders${(activeDineInOrders.length + takeawayTokens.length + scheduledPrepOrders.length) ? ` (${activeDineInOrders.length + takeawayTokens.length + scheduledPrepOrders.length})` : ''}` },
             { key: 'menu',   label: 'Menu'   },
           ].map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)} style={{
@@ -1692,31 +1916,124 @@ export default function ManagerPortal() {
 
             {takeawayTokens.length > 0 && (
               <div>
-                <SectionLabel>Takeaway — {takeawayTokens.length}</SectionLabel>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 10 }}>
-                  {takeawayTokens.map(token => {
-                    const waitMins = tokenWaitMinutes(token.arrived_at);
-                    return (
-                    <div key={token.id} style={{ ...CARD, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, border: waitMins >= 45 ? `0.5px solid ${waitMins >= 90 ? C.dangerBorder : '#F0A500'}` : undefined }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                        <div style={{ width: 38, height: 38, borderRadius: "50%", background: C.primaryLight, color: C.primaryDark, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 500, fontSize: 12, flexShrink: 0 }}>
-                          {String(token.id).replace('T-', '')}
-                        </div>
-                        <div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                            <span style={{ fontSize: 13, fontWeight: 500, color: C.text }}>{token.id}</span>
-                            <Pill label="Takeaway" variant="blue" />
-                            {waitMins >= 20 && <Pill label={`${waitMins}m`} variant={waitMins >= 90 ? 'red' : 'amber'} />}
+                <SectionLabel>Takeaway &amp; delivery — {takeawayTokens.length}</SectionLabel>
+                {liveTakeawayTokens.length > 0 && (
+                  <>
+                    <p style={{ fontSize: 11, color: C.textMuted, margin: '0 0 8px' }}>Live takeaway</p>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 10, marginBottom: 14 }}>
+                      {liveTakeawayTokens.map(token => (
+                        <div key={token.id} style={{ ...CARD, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                            <div style={{ width: 38, height: 38, borderRadius: "50%", background: C.primaryLight, color: C.primaryDark, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 500, fontSize: 12 }}>{String(token.id).replace('T-', '')}</div>
+                            <div>
+                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <span style={{ fontSize: 13, fontWeight: 500 }}>{token.id}</span>
+                                <Pill label="Live takeaway" variant="blue" />
+                              </div>
+                              <p style={{ fontSize: 11, color: C.textMuted, margin: "1px 0 0" }}>{token.name} · {safeFormat(token.arrived_at, 'HH:mm')}</p>
+                            </div>
                           </div>
-                          <p style={{ fontSize: 11, color: C.textMuted, margin: "1px 0 0" }}>{token.name} · {safeFormat(token.arrived_at, 'HH:mm')}</p>
+                          <Btn variant="ghost" onClick={() => dismissToken(token.id)} style={{ fontSize: 11, padding: "5px 10px" }}>Done</Btn>
                         </div>
-                      </div>
-                      <Btn variant="ghost" onClick={() => dismissToken(token.id)} style={{ fontSize: 11, padding: "5px 10px" }}>Done</Btn>
+                      ))}
                     </div>
-                  );})}
-                </div>
+                  </>
+                )}
+                {liveDeliveryTokens.length > 0 && (
+                  <>
+                    <p style={{ fontSize: 11, color: C.textMuted, margin: '0 0 8px' }}>Live delivery</p>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 10, marginBottom: 14 }}>
+                      {liveDeliveryTokens.map(token => (
+                        <div key={token.id} style={{ ...CARD, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                          <div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={{ fontSize: 13, fontWeight: 500 }}>{token.id}</span>
+                              <Pill label="Live delivery" variant="amber" />
+                            </div>
+                            <p style={{ fontSize: 11, color: C.textMuted, margin: "4px 0 0" }}>{token.name} · {(token.meta?.delivery_address || '—').slice(0, 80)}</p>
+                          </div>
+                          <Btn variant="ghost" onClick={() => dismissToken(token.id)} style={{ fontSize: 11, padding: "5px 10px" }}>Done</Btn>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+                {(scheduledTakeawayTokens.length + scheduledDeliveryTokens.length) > 0 && (
+                  <>
+                    <p style={{ fontSize: 11, color: C.textMuted, margin: '0 0 8px' }}>Scheduled (approved, awaiting kitchen slot)</p>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 10 }}>
+                      {[...scheduledTakeawayTokens, ...scheduledDeliveryTokens].map(token => {
+                        const isDelivery = tokenFulfillmentKind(token) === 'scheduled_delivery';
+                        return (
+                          <div key={token.id} style={{ ...CARD, border: `0.5px solid ${C.accentBorder}` }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                              <span style={{ fontSize: 13, fontWeight: 500 }}>{token.id}</span>
+                              <Pill label={isDelivery ? 'Scheduled delivery' : 'Scheduled take-away'} variant="purple" />
+                            </div>
+                            <p style={{ fontSize: 11, color: C.textSub, margin: 0 }}>{token.name}</p>
+                            <p style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 0' }}>
+                              {isDelivery ? 'Deliver' : 'Pickup'}: {token.meta?.scheduled_at_label || '—'}
+                            </p>
+                            {token.meta?.kitchen_start_at_label && (
+                              <p style={{ fontSize: 11, color: C.textMuted, margin: '2px 0 0' }}>Kitchen: {token.meta.kitchen_start_at_label}</p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
               </div>
             )}
+
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                <SectionLabel>Approval history</SectionLabel>
+                <Btn variant="ghost" onClick={() => { setShowApprovalHistory(v => !v); if (!showApprovalHistory) fetchApprovalHistory(); }} style={{ fontSize: 11 }}>
+                  {showApprovalHistory ? 'Hide history' : 'Show history'}
+                </Btn>
+              </div>
+              {showApprovalHistory && (
+                <div style={{ ...CARD, marginBottom: 0 }}>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 12 }}>
+                    <label style={{ fontSize: 11, color: C.textMuted }}>
+                      From
+                      <input type="date" value={approvalFrom} max={approvalTo} onChange={(e) => setApprovalFrom(e.target.value)} style={{ display: 'block', marginTop: 4, padding: '6px 8px', borderRadius: 6, border: `0.5px solid ${C.border}` }} />
+                    </label>
+                    <label style={{ fontSize: 11, color: C.textMuted }}>
+                      To
+                      <input type="date" value={approvalTo} min={approvalFrom} onChange={(e) => setApprovalTo(e.target.value)} style={{ display: 'block', marginTop: 4, padding: '6px 8px', borderRadius: 6, border: `0.5px solid ${C.border}` }} />
+                    </label>
+                    <Btn onClick={() => fetchApprovalHistory()} disabled={approvalLoading} style={{ fontSize: 11 }}>
+                      {approvalLoading ? 'Loading…' : 'Load'}
+                    </Btn>
+                    <Btn variant="ghost" onClick={() => { const t = todayDateStr(); setApprovalFrom(t); setApprovalTo(t); fetchApprovalHistory(t, t); }} style={{ fontSize: 11 }}>Today</Btn>
+                  </div>
+                  {approvalLoading ? (
+                    <p style={{ fontSize: 12, color: C.textMuted }}>Loading…</p>
+                  ) : approvalHistory.length === 0 ? (
+                    <p style={{ fontSize: 12, color: C.textMuted }}>No approval decisions in this period.</p>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 320, overflowY: 'auto' }}>
+                      {approvalHistory.map(row => (
+                        <div key={`${row.token_id}-${row.decided_at}`} style={{ borderTop: `0.5px solid ${C.border}`, paddingTop: 8 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: 13, fontWeight: 500 }}>{row.token_id}</span>
+                            <Pill label={approvalTypeLabel(row.type)} variant="purple" />
+                            <Pill label={row.decision} variant={row.decision === 'approved' ? 'teal' : 'red'} />
+                            <span style={{ fontSize: 11, color: C.textMuted, marginLeft: 'auto' }}>{safeFormat(row.decided_at, 'HH:mm')} · {row.decided_at?.slice(0, 10)}</span>
+                          </div>
+                          <p style={{ fontSize: 11, color: C.textSub, margin: '4px 0 0' }}>{row.name}{row.pax ? ` · ${row.pax} pax` : ''}</p>
+                          {row.scheduled_at_label && <p style={{ fontSize: 11, color: C.textMuted, margin: '2px 0 0' }}>Slot: {row.scheduled_at_label}</p>}
+                          {row.order_preview && <p style={{ fontSize: 11, color: C.textMuted, margin: '2px 0 0' }}>{row.order_preview}</p>}
+                          {row.rejection_reason && <p style={{ fontSize: 11, color: C.dangerDark, margin: '2px 0 0' }}>Reason: {row.rejection_reason}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -1727,12 +2044,28 @@ export default function ManagerPortal() {
         ════════════════════════════════════════════════════════════════ */}
         {activeTab === 'tables' && (
           <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <h2 style={{ fontSize: 16, fontWeight: 500, color: C.text, margin: 0 }}>Table allocation</h2>
-              <span style={{ fontSize: 11, color: C.textMuted }}>
-                Available tables can be reserved or marked for cleaning. Reserved tables auto-release after the set duration.
-              </span>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+              <h2 style={{ fontSize: 16, fontWeight: 500, color: C.text, margin: 0 }}>Tables</h2>
+              <div style={{ display: 'flex', gap: 3, background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 8, padding: 3 }}>
+                {[
+                  { key: 'floor', label: 'Live floor' },
+                  { key: 'configure', label: 'Configure tables' },
+                ].map(({ key, label }) => (
+                  <button key={key} onClick={() => setTablesSubView(key)} style={{
+                    padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', border: 'none',
+                    background: tablesSubView === key ? C.primaryLight : 'transparent',
+                    color: tablesSubView === key ? C.primaryDark : C.textMuted,
+                    fontWeight: tablesSubView === key ? 500 : 400,
+                  }}>{label}</button>
+                ))}
+              </div>
             </div>
+
+            {tablesSubView === 'floor' && (
+              <>
+            <p style={{ fontSize: 11, color: C.textMuted, margin: '0 0 16px' }}>
+              Reserve, clean, assign, and free tables. Switch to <strong>Configure tables</strong> to add, edit, or remove tables.
+            </p>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 10 }}>
               {tables.map(table => {
@@ -1841,6 +2174,131 @@ export default function ManagerPortal() {
                 Reserved tables show a countdown and auto-release when time expires.
               </span>
             </div>
+              </>
+            )}
+
+            {tablesSubView === 'configure' && (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+                  <div>
+                    <p style={{ fontSize: 13, fontWeight: 500, color: C.text, margin: 0 }}>
+                      {tables.length} table{tables.length !== 1 ? 's' : ''} configured
+                    </p>
+                    <p style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 0' }}>
+                      Add or edit table numbers, seat capacity, and section. Occupied tables cannot be deleted.
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Btn variant="secondary" onClick={bulkAddTables} disabled={tableCrudSaving === 'bulk'}>
+                      {tableCrudSaving === 'bulk' ? 'Adding…' : '+ Bulk add'}
+                    </Btn>
+                    <Btn onClick={() => { setTableAdding(true); setTableEditingId(null); }}>+ Add table</Btn>
+                  </div>
+                </div>
+
+                {tableAdding && (
+                  <div style={{ ...CARD, marginBottom: 12, background: C.primaryLight, border: `0.5px solid ${C.primaryBorder}` }}>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: C.primaryDark, marginBottom: 12 }}>New table</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(140px,1fr))', gap: 12, marginBottom: 12 }}>
+                      <label style={{ fontSize: 11, color: C.textMuted }}>
+                        Table number *
+                        <input type="number" min="1" value={tableNewRow.table_number} onChange={(e) => setTableNewRow(p => ({ ...p, table_number: e.target.value }))}
+                          style={{ display: 'block', width: '100%', marginTop: 4, padding: '7px 10px', borderRadius: 8, border: `0.5px solid ${C.border}`, fontSize: 12 }} />
+                      </label>
+                      <label style={{ fontSize: 11, color: C.textMuted }}>
+                        Capacity (seats)
+                        <input type="number" min="1" value={tableNewRow.capacity} onChange={(e) => setTableNewRow(p => ({ ...p, capacity: e.target.value }))}
+                          style={{ display: 'block', width: '100%', marginTop: 4, padding: '7px 10px', borderRadius: 8, border: `0.5px solid ${C.border}`, fontSize: 12 }} />
+                      </label>
+                      <label style={{ fontSize: 11, color: C.textMuted }}>
+                        Section
+                        <select value={tableNewRow.section} onChange={(e) => setTableNewRow(p => ({ ...p, section: e.target.value }))}
+                          style={{ display: 'block', width: '100%', marginTop: 4, padding: '7px 10px', borderRadius: 8, border: `0.5px solid ${C.border}`, fontSize: 12 }}>
+                          <option value="">— none —</option>
+                          {TABLE_SECTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      </label>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <Btn onClick={addTableCrud} disabled={tableCrudSaving === 'new'}>{tableCrudSaving === 'new' ? 'Saving…' : 'Save table'}</Btn>
+                      <Btn variant="ghost" onClick={() => setTableAdding(false)}>Cancel</Btn>
+                    </div>
+                  </div>
+                )}
+
+                {tables.length === 0 && !tableAdding ? (
+                  <div style={{ ...CARD, textAlign: 'center', padding: '40px 24px', color: C.textMuted }}>
+                    <div style={{ fontSize: 32, marginBottom: 8 }}>🪑</div>
+                    <p style={{ fontSize: 13, fontWeight: 500, color: C.text }}>No tables configured yet</p>
+                    <p style={{ fontSize: 12, marginTop: 4 }}>Add tables one by one or use Bulk add.</p>
+                  </div>
+                ) : (
+                  <div style={{ border: `0.5px solid ${C.border}`, borderRadius: 10, overflow: 'hidden', background: C.cardBg }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ background: C.surfaceBg }}>
+                          {['Table', 'Capacity', 'Section', 'Live status', ''].map(h => (
+                            <th key={h} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 10, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...tables].sort((a, b) => (a.table_number || 0) - (b.table_number || 0)).map((t, i) => {
+                          const isEditing = tableEditingId === t.id;
+                          const liveStatus = getTableStatus(t).status;
+                          const isOccupied = liveStatus === 'occupied' || t.status === 'occupied';
+                          return (
+                            <tr key={t.id} style={{ borderTop: i > 0 ? `0.5px solid ${C.border}` : 'none', background: isEditing ? C.primaryLight : 'transparent' }}>
+                              <td style={{ padding: '10px 12px' }}>
+                                {isEditing ? (
+                                  <input type="number" value={tableEditBuf.table_number} onChange={(e) => setTableEditBuf(p => ({ ...p, table_number: e.target.value }))}
+                                    style={{ width: 72, padding: '6px 8px', borderRadius: 6, border: `0.5px solid ${C.border}`, fontSize: 12 }} />
+                                ) : (
+                                  <span style={{ fontWeight: 500 }}>Table {t.table_number}</span>
+                                )}
+                              </td>
+                              <td style={{ padding: '10px 12px', color: C.textSub }}>
+                                {isEditing ? (
+                                  <input type="number" value={tableEditBuf.capacity} onChange={(e) => setTableEditBuf(p => ({ ...p, capacity: e.target.value }))}
+                                    style={{ width: 72, padding: '6px 8px', borderRadius: 6, border: `0.5px solid ${C.border}`, fontSize: 12 }} />
+                                ) : `${t.capacity ?? 4} seats`}
+                              </td>
+                              <td style={{ padding: '10px 12px', color: C.textSub }}>
+                                {isEditing ? (
+                                  <select value={tableEditBuf.section} onChange={(e) => setTableEditBuf(p => ({ ...p, section: e.target.value }))}
+                                    style={{ padding: '6px 8px', borderRadius: 6, border: `0.5px solid ${C.border}`, fontSize: 12 }}>
+                                    <option value="">— none —</option>
+                                    {TABLE_SECTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                                  </select>
+                                ) : (t.section || '—')}
+                              </td>
+                              <td style={{ padding: '10px 12px' }}>
+                                <Pill label={TABLE_STATUS[liveStatus]?.label || liveStatus} variant={liveStatus === 'available' ? 'teal' : liveStatus === 'occupied' ? 'blue' : 'amber'} />
+                              </td>
+                              <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                                {isEditing ? (
+                                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                                    <Btn onClick={() => saveTableEdit(t.id)} disabled={tableCrudSaving === t.id}>{tableCrudSaving === t.id ? 'Saving…' : 'Save'}</Btn>
+                                    <Btn variant="ghost" onClick={cancelTableEdit}>Cancel</Btn>
+                                  </div>
+                                ) : (
+                                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                                    <Btn variant="ghost" onClick={() => startTableEdit(t)} style={{ fontSize: 11 }}>Edit</Btn>
+                                    <Btn variant="danger" onClick={() => deleteTableCrud(t)} disabled={isOccupied || tableDeleting === t.id} style={{ fontSize: 11 }}>
+                                      {tableDeleting === t.id ? '…' : isOccupied ? 'In use' : 'Delete'}
+                                    </Btn>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -1849,34 +2307,48 @@ export default function ManagerPortal() {
         ════════════════════════════════════════════════════════════════ */}
         {activeTab === 'orders' && (
           <div>
-            <h2 style={{ fontSize: 16, fontWeight: 500, color: C.text, margin: "0 0 16px" }}>Active orders</h2>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {orders.filter(o => ACTIVE_ORDER_STATUSES.includes(o.status)).map(order => {
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+              <h2 style={{ fontSize: 16, fontWeight: 500, color: C.text, margin: 0 }}>Active orders</h2>
+              <Link to="/dashboard/kitchen" style={{ fontSize: 12, color: C.primaryDark, textDecoration: 'none' }}>Open kitchen display →</Link>
+            </div>
+            <AlertBanner type="info">
+              Dine-in table orders, live takeaway/delivery tokens, scheduled prep, and in-kitchen items appear here. Use filters to focus on one channel.
+            </AlertBanner>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
+              {FULFILLMENT_FILTERS.map(f => (
+                <button key={f.key} onClick={() => setOrdersFilter(f.key)} style={{
+                  padding: '5px 12px', borderRadius: 20, fontSize: 11, cursor: 'pointer',
+                  border: `0.5px solid ${ordersFilter === f.key ? C.primary : C.border}`,
+                  background: ordersFilter === f.key ? C.primaryLight : C.cardBg,
+                  color: ordersFilter === f.key ? C.primaryDark : C.textMuted,
+                }}>{f.label}</button>
+              ))}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              {(ordersFilter === 'all' || ordersFilter === 'dine_in') && activeDineInOrders.map(order => {
                 const table = tables.find(t => t.id === order.table_id);
                 return (
                   <div key={order.id} style={{ ...CARD }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                      <Pill label="Dine-in" variant="teal" />
+                      <span style={{ fontSize: 14, fontWeight: 500 }}>Order #{order.order_number?.slice(-4)}</span>
+                    </div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 16, alignItems: "start" }}>
                       <div>
-                        <div style={{ fontSize: 14, fontWeight: 500, color: C.text, marginBottom: 2 }}>Order #{order.order_number?.slice(-4)}</div>
                         <div style={{ fontSize: 12, color: C.textSub }}>Table {table?.table_number || 'N/A'}{table?.section ? ` · ${table.section}` : ''}</div>
-                        {order.customer_name && <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>👤 {order.customer_name}</div>}
+                        {order.customer_name && <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>{order.customer_name}</div>}
                         <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>{safeFormat(order.created_at, 'HH:mm:ss')}</div>
                       </div>
                       <div>
-                        <div style={{ fontSize: 11, fontWeight: 500, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Items</div>
-                        {order.order_items?.map((item, idx) => {
-                          const sm = { pending: "amber", in_progress: "amber", ready: "green" };
-                          return (
-                            <div key={idx} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3, fontSize: 12, color: C.textSub }}>
-                              {item.quantity}× {item.menu_item?.name}
-                              <Pill label={item.status} variant={sm[item.status] ?? "gray"} />
-                            </div>
-                          );
-                        })}
+                        {order.order_items?.map((item, idx) => (
+                          <div key={idx} style={{ fontSize: 12, color: C.textSub, marginBottom: 3 }}>
+                            {item.quantity}× {item.menu_item?.name}
+                          </div>
+                        ))}
                       </div>
                       <div>
                         <div style={{ fontSize: 22, fontWeight: 500, color: C.primary }}>₹{order.total_amount?.toFixed(2)}</div>
-                        <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2, textTransform: "capitalize" }}>Status: {order.status}</div>
+                        <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2, textTransform: "capitalize" }}>{order.status}</div>
                       </div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                         <Btn variant="ghost" onClick={() => setSelectedOrder(order)} style={{ fontSize: 11 }}>View details</Btn>
@@ -1887,8 +2359,83 @@ export default function ManagerPortal() {
                   </div>
                 );
               })}
-              {orders.filter(o => ACTIVE_ORDER_STATUSES.includes(o.status)).length === 0 && (
-                <div style={{ ...CARD, textAlign: "center", padding: "40px 20px", color: C.textMuted, fontSize: 13 }}>No active orders.</div>
+
+              {(ordersFilter === 'all' || ordersFilter === 'live_takeaway') && liveTakeawayTokens.map(token => (
+                <div key={`lt-${token.id}`} style={{ ...CARD, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <Pill label="Live takeaway" variant="blue" /><span style={{ fontWeight: 500 }}>{token.id}</span>
+                    </div>
+                    <p style={{ fontSize: 12, color: C.textSub, margin: '4px 0 0' }}>{token.name} · {safeFormat(token.arrived_at, 'HH:mm')}</p>
+                    {token.meta?.order_text && <p style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 0' }}>{token.meta.order_text.slice(0, 120)}</p>}
+                  </div>
+                  <Btn variant="ghost" onClick={() => dismissToken(token.id)} style={{ fontSize: 11 }}>Done</Btn>
+                </div>
+              ))}
+
+              {(ordersFilter === 'all' || ordersFilter === 'live_delivery') && liveDeliveryTokens.map(token => (
+                <div key={`ld-${token.id}`} style={{ ...CARD }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <Pill label="Live delivery" variant="amber" /><span style={{ fontWeight: 500 }}>{token.id}</span>
+                  </div>
+                  <p style={{ fontSize: 12, color: C.textSub, margin: '4px 0 0' }}>{token.name}</p>
+                  <p style={{ fontSize: 11, color: C.textMuted, margin: '2px 0 0' }}>{(token.meta?.delivery_address || '—').slice(0, 120)}</p>
+                  {token.meta?.order_text && <p style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 0' }}>{token.meta.order_text.slice(0, 120)}</p>}
+                  <div style={{ marginTop: 8 }}><Btn variant="ghost" onClick={() => dismissToken(token.id)} style={{ fontSize: 11 }}>Done</Btn></div>
+                </div>
+              ))}
+
+              {(ordersFilter === 'all' || ordersFilter === 'scheduled_takeaway') && scheduledPrepOrders.filter(o => (o.service_type || '').includes('takeaway')).map(order => (
+                <div key={`st-${order.booking_id}`} style={{ ...CARD, border: `0.5px solid ${C.accentBorder}` }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <Pill label="Scheduled take-away" variant="purple" /><span style={{ fontWeight: 500 }}>{order.token_number}</span>
+                  </div>
+                  <p style={{ fontSize: 12, color: C.textSub, margin: '4px 0 0' }}>{order.customer_name}</p>
+                  <p style={{ fontSize: 11, color: C.textMuted, margin: '2px 0 0' }}>Pickup {safeFormat(order.scheduled_slot_at, 'HH:mm')} · Kitchen {safeFormat(order.kitchen_start_at, 'HH:mm')}</p>
+                  <p style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 0' }}>{order.order_text?.slice(0, 140)}</p>
+                </div>
+              ))}
+
+              {(ordersFilter === 'all' || ordersFilter === 'scheduled_delivery') && scheduledPrepOrders.filter(o => (o.service_type || '').includes('delivery')).map(order => (
+                <div key={`sd-${order.booking_id}`} style={{ ...CARD, border: `0.5px solid ${C.accentBorder}` }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <Pill label="Scheduled delivery" variant="purple" /><span style={{ fontWeight: 500 }}>{order.token_number}</span>
+                  </div>
+                  <p style={{ fontSize: 12, color: C.textSub, margin: '4px 0 0' }}>{order.customer_name}</p>
+                  <p style={{ fontSize: 11, color: C.textMuted, margin: '2px 0 0' }}>Deliver {safeFormat(order.scheduled_slot_at, 'HH:mm')} · Kitchen {safeFormat(order.kitchen_start_at, 'HH:mm')}</p>
+                  <p style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 0' }}>{order.order_text?.slice(0, 140)}</p>
+                </div>
+              ))}
+
+              {ordersFilter === 'all' && activeKdsItems.length > 0 && (
+                <div>
+                  <SectionLabel>In kitchen now — {activeKdsItems.length} item{activeKdsItems.length !== 1 ? 's' : ''}</SectionLabel>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))', gap: 10 }}>
+                    {activeKdsItems.slice(0, 12).map(item => (
+                      <div key={item.id} style={{ ...CARD, padding: '12px 14px' }}>
+                        <div style={{ fontSize: 12, fontWeight: 500 }}>{item.order_item?.menu_item?.name || item.item_name || 'Item'}</div>
+                        <p style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 0' }}>
+                          ×{item.order_item?.quantity || 1} · {item.token_number || item.service_type || 'KDS'} · {item.status}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {((ordersFilter === 'all' && activeDineInOrders.length + takeawayTokens.length + scheduledPrepOrders.length === 0 && activeKdsItems.length === 0)
+                || (ordersFilter === 'dine_in' && activeDineInOrders.length === 0)
+                || (ordersFilter === 'live_takeaway' && liveTakeawayTokens.length === 0)
+                || (ordersFilter === 'live_delivery' && liveDeliveryTokens.length === 0)
+                || (ordersFilter === 'scheduled_takeaway' && scheduledPrepOrders.filter(o => (o.service_type || '').includes('takeaway')).length === 0)
+                || (ordersFilter === 'scheduled_delivery' && scheduledPrepOrders.filter(o => (o.service_type || '').includes('delivery')).length === 0)
+              ) && (
+                <div style={{ ...CARD, textAlign: "center", padding: "40px 20px", color: C.textMuted, fontSize: 13 }}>
+                  No active orders for this filter.
+                  {takeawayTokens.length > 0 && ordersFilter === 'dine_in' && (
+                    <p style={{ fontSize: 12, marginTop: 8 }}>You have {takeawayTokens.length} takeaway/delivery token{takeawayTokens.length !== 1 ? 's' : ''} — switch filter to All or Takeaway.</p>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -1902,7 +2449,7 @@ export default function ManagerPortal() {
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
               <div>
                 <h2 style={{ fontSize: 16, fontWeight: 500, color: C.text, margin: 0 }}>Menu management</h2>
-                <p style={{ fontSize: 12, color: C.textMuted, margin: "4px 0 0" }}>Toggle items in/out of stock instantly, or upload the catalog Excel to update prices, names, categories and images. See the <strong>Image sources</strong> sheet in the template for photo URLs.</p>
+                <p style={{ fontSize: 12, color: C.textMuted, margin: "4px 0 0" }}>Toggle items in/out of stock instantly, or upload the catalog Excel to fully replace the menu (old items are removed). See the <strong>Column guide</strong> sheet for scheduling columns.</p>
               </div>
               <button
                 onClick={async () => { setDownloadingTpl(true); await downloadCatalogTemplate(apiClient, showToast, menuItems); setDownloadingTpl(false); }}
@@ -2001,7 +2548,7 @@ export default function ManagerPortal() {
             {uploadStatus === 'done' && uploadResult && (
               <div style={{ background: C.successLight, border: `0.5px solid ${C.successBorder}`, borderRadius: 12, padding: "28px 24px", textAlign: "center" }}>
                 <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
-                <div style={{ fontSize: 15, fontWeight: 500, color: C.successDark, marginBottom: 4 }}>Menu updated successfully</div>
+                <div style={{ fontSize: 15, fontWeight: 500, color: C.successDark, marginBottom: 4 }}>Catalog replaced successfully</div>
                 <div style={{ fontSize: 12, color: C.success, marginBottom: 16 }}>
                   {uploadResult.upserted} item{uploadResult.upserted !== 1 ? 's' : ''} saved
                   {uploadResult.skipped > 0 ? ` · ${uploadResult.skipped} skipped` : ''}
