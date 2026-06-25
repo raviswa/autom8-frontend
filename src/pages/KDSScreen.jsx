@@ -500,6 +500,8 @@ function OrderItemRow({ item, onAdvance, onVoid }) {
 function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll }) {
   const { anchor, items, orderNumber, serviceType, aggregateStatus, createdAt } = order;
   const handleReprint = () => printKOT(buildKOTFromFeedItem(anchor, allItems));
+  const tokenLabel = anchor.token_number ? formatTokenDisplay(anchor.token_number) : null;
+  const dateLabel = formatISTDateLabel(getISTDateStr(createdAt));
 
   const pendingCount = items.filter((i) => i.status === 'pending').length;
   const cookingCount = items.filter((i) => i.status === 'in_progress').length;
@@ -519,9 +521,15 @@ function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll }) {
       <div className={`kds-ticket-head type-${serviceType}`}>
         <div className="kds-ticket-head-left">
           <p className="kds-ticket-table">{orderHeaderTitle(anchor)}</p>
-          <p className="kds-ticket-type">{orderHeaderSubtitle(anchor)}</p>
+          <p className="kds-ticket-type">
+            {orderHeaderSubtitle(anchor)}
+            {tokenLabel && !orderHeaderTitle(anchor).includes(tokenLabel) && (
+              <span className="kds-ticket-token-badge"> · {tokenLabel}</span>
+            )}
+          </p>
         </div>
         <div className="kds-ticket-head-right">
+          <p className="kds-ticket-date">{dateLabel}</p>
           <p className="kds-ticket-time">{formatISTTime(createdAt)}</p>
           <p className="kds-ticket-order-no">Order no. {orderNumber}</p>
         </div>
@@ -669,7 +677,7 @@ function HistoryView({ apiClient, active }) {
           <table className="kds-hist-table">
             <thead>
               <tr>
-                <th>Order</th><th>Table / type</th><th>Item</th>
+                <th>Order</th><th>Token</th><th>Table / type</th><th>Item</th>
                 <th>Qty</th><th>Time</th><th>Status</th>
               </tr>
             </thead>
@@ -679,11 +687,13 @@ function HistoryView({ apiClient, active }) {
                   ?? item.item_name ?? 'Item';
                 const qty      = item.order_item?.quantity ?? 1;
                 const orderNum = item.order_item?.order?.order_number?.slice(-6)
-                  ?? item.token_number ?? item.id;
+                  ?? item.id?.slice?.(0, 6) ?? '—';
+                const tokenLabel = formatTokenDisplay(item.token_number);
                 const fulfilledAt = item.updated_at ?? item.created_at;
                 return (
                   <tr key={item.id}>
                     <td className="td-order">#{orderNum}</td>
+                    <td className="td-token">{tokenLabel}</td>
                     <td>{itemServiceLabel(item)}</td>
                     <td><span className="hist-item">{name}</span></td>
                     <td>×{qty}</td>
@@ -1273,11 +1283,14 @@ const KDS_CSS = `
     flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
     padding: 16px 20px 24px;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(272px, 1fr));
-    gap: 16px; align-content: start; align-items: start;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 18px; align-content: start; align-items: start;
   }
 
-  @media (min-width: 1400px) {
+  @media (min-width: 1200px) {
+    .kds-board { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  }
+  @media (min-width: 1600px) {
     .kds-board { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   }
 
@@ -1291,9 +1304,10 @@ const KDS_CSS = `
 
   /* Order ticket — grouped by table / order (reference KDS layout) */
   .kds-ticket {
-    background: #111; border-radius: 10px; overflow: hidden;
-    border: 2px solid #2a2a2a; display: flex; flex-direction: column;
-    min-height: 220px; flex-shrink: 0;
+    background: #111; border-radius: 12px; overflow: hidden;
+    border: 3px solid #2a2a2a; display: flex; flex-direction: column;
+    min-height: 260px; flex-shrink: 0;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.45);
   }
   .kds-ticket.status-pending     { border-color: #ef4444; }
   .kds-ticket.status-in_progress { border-color: #f97316; }
@@ -1301,7 +1315,7 @@ const KDS_CSS = `
 
   .kds-ticket-head {
     display: flex; justify-content: space-between; gap: 10px;
-    padding: 10px 12px; color: #fff;
+    padding: 12px 14px; color: #fff; min-height: 72px;
   }
   .kds-ticket-head.type-dine_in  { background: linear-gradient(135deg, #ea580c, #c2410c); }
   .kds-ticket-head.type-takeaway { background: linear-gradient(135deg, #16a34a, #15803d); }
@@ -1309,13 +1323,19 @@ const KDS_CSS = `
   .kds-ticket-head.type-other    { background: linear-gradient(135deg, #4b5563, #374151); }
 
   .kds-ticket-table {
-    margin: 0; font-size: 14px; font-weight: 800; letter-spacing: 0.03em; line-height: 1.2;
+    margin: 0; font-size: 15px; font-weight: 800; letter-spacing: 0.04em; line-height: 1.25;
+    text-transform: uppercase;
   }
   .kds-ticket-type {
-    margin: 3px 0 0; font-size: 11px; font-weight: 600; opacity: 0.92; letter-spacing: 0.06em;
+    margin: 4px 0 0; font-size: 11px; font-weight: 700; opacity: 0.92; letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .kds-ticket-token-badge {
+    color: #fef08a; font-weight: 800;
   }
   .kds-ticket-head-right { text-align: right; flex-shrink: 0; }
-  .kds-ticket-time { margin: 0; font-size: 11px; font-weight: 600; opacity: 0.95; }
+  .kds-ticket-date { margin: 0; font-size: 10px; font-weight: 600; opacity: 0.9; }
+  .kds-ticket-time { margin: 2px 0 0; font-size: 13px; font-weight: 700; opacity: 0.98; }
   .kds-ticket-order-no { margin: 3px 0 0; font-size: 10px; opacity: 0.85; }
 
   .kds-ticket-items {
@@ -1462,7 +1482,12 @@ const KDS_CSS = `
     color: #888; vertical-align: top;
   }
   .kds-hist-table tr:hover td { background: #111; }
-  .td-order { color: #d0d0d0; font-weight: 500; }
-  .td-time  { color: #555; }
+  .td-order { font-family: ui-monospace, monospace; color: #888; font-size: 12px; }
+  .td-token {
+    font-family: ui-monospace, monospace; font-weight: 700; font-size: 13px;
+    color: #fbbf24; white-space: nowrap;
+  }
+  .td-time { color: #666; white-space: nowrap; font-size: 12px; }
+  .hist-item { color: #ccc; }
   .hist-item { font-size: 12px; color: #666; }
 `;
