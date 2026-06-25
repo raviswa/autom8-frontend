@@ -24,6 +24,7 @@ import { useWebSocket } from '../contexts/WebSocketContext';
 import { useKOTPrint } from '../components/KOTPrint';
 import { kotRef } from '../App';
 import { format } from 'date-fns';
+import DateRangeApply, { formatDateDMY } from '../components/DateRangeApply';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -580,8 +581,10 @@ export default function ManagerPortal() {
   const [scheduledBoard, setScheduledBoard] = useState([]);
   const [ordersFilter,   setOrdersFilter]   = useState('all');
   const [approvalHistory, setApprovalHistory] = useState([]);
-  const [approvalFrom,   setApprovalFrom]   = useState(todayDateStr());
-  const [approvalTo,     setApprovalTo]     = useState(todayDateStr());
+  const [approvalDraftFrom, setApprovalDraftFrom] = useState(todayDateStr());
+  const [approvalDraftTo, setApprovalDraftTo] = useState(todayDateStr());
+  const [approvalAppliedFrom, setApprovalAppliedFrom] = useState(null);
+  const [approvalAppliedTo, setApprovalAppliedTo] = useState(null);
   const [approvalLoading,setApprovalLoading]= useState(false);
   const [showApprovalHistory, setShowApprovalHistory] = useState(false);
   const [tablesSubView, setTablesSubView] = useState('floor');
@@ -594,8 +597,10 @@ export default function ManagerPortal() {
   const [metaLastSync, setMetaLastSync] = useState(null);
   const [metaSyncing, setMetaSyncing] = useState(false);
   const [salesReport, setSalesReport] = useState(null);
-  const [salesFrom, setSalesFrom] = useState(todayDateStr());
-  const [salesTo, setSalesTo] = useState(todayDateStr());
+  const [salesDraftFrom, setSalesDraftFrom] = useState(todayDateStr());
+  const [salesDraftTo, setSalesDraftTo] = useState(todayDateStr());
+  const [salesAppliedFrom, setSalesAppliedFrom] = useState(null);
+  const [salesAppliedTo, setSalesAppliedTo] = useState(null);
   const [salesLoading, setSalesLoading] = useState(false);
   const fileInputRef = useRef(null);
 
@@ -628,7 +633,7 @@ export default function ManagerPortal() {
       setScheduledBoard(r.data.orders || []);
     } catch (e) { /* non-fatal */ }
   }, [apiClient]);
-  const fetchApprovalHistory = useCallback(async (from = approvalFrom, to = approvalTo) => {
+  const fetchApprovalHistory = useCallback(async (from, to) => {
     setApprovalLoading(true);
     try {
       const r = await apiClient.get('/api/tokens/approvals/history', { params: { from, to } });
@@ -639,7 +644,7 @@ export default function ManagerPortal() {
     } finally {
       setApprovalLoading(false);
     }
-  }, [apiClient, approvalFrom, approvalTo]);
+  }, [apiClient]);
   const fetchMenuItems = useCallback(async () => { try { const r = await apiClient.get('/api/menu-items?ignore_slot=true'); setMenuItems(r.data.items || r.data || []); } catch(e) {} }, [apiClient]);
   const fetchKitchenStatus = useCallback(async () => {
     try {
@@ -655,7 +660,7 @@ export default function ManagerPortal() {
       setMetaLastSync(r.data.lastSync || r.data.lastMetaSync || null);
     } catch (e) { /* non-fatal */ }
   }, [apiClient]);
-  const fetchSalesReport = useCallback(async (from = salesFrom, to = salesTo) => {
+  const fetchSalesReport = useCallback(async (from, to) => {
     setSalesLoading(true);
     try {
       const r = await apiClient.get('/api/reports/sales', { params: { from, to } });
@@ -666,7 +671,7 @@ export default function ManagerPortal() {
     } finally {
       setSalesLoading(false);
     }
-  }, [apiClient, salesFrom, salesTo]);
+  }, [apiClient]);
   const fetchData      = useCallback(async () => {
     await Promise.all([
       fetchTables(), fetchOrders(), fetchTokens(), fetchMenuItems(), fetchKitchenStatus(),
@@ -700,9 +705,35 @@ export default function ManagerPortal() {
     }
   }, [updates, fetchTokens, fetchTables, fetchOrders, fetchKdsFeed, fetchScheduledBoard]);
 
-  useEffect(() => {
-    if (activeTab === 'reports' && !salesReport && !salesLoading) fetchSalesReport();
-  }, [activeTab, salesReport, salesLoading, fetchSalesReport]);
+  const applyApprovalHistory = () => {
+    setApprovalAppliedFrom(approvalDraftFrom);
+    setApprovalAppliedTo(approvalDraftTo);
+    fetchApprovalHistory(approvalDraftFrom, approvalDraftTo);
+  };
+
+  const applySalesReport = () => {
+    setSalesAppliedFrom(salesDraftFrom);
+    setSalesAppliedTo(salesDraftTo);
+    fetchSalesReport(salesDraftFrom, salesDraftTo);
+  };
+
+  const setApprovalToday = () => {
+    const t = todayDateStr();
+    setApprovalDraftFrom(t);
+    setApprovalDraftTo(t);
+    setApprovalAppliedFrom(t);
+    setApprovalAppliedTo(t);
+    fetchApprovalHistory(t, t);
+  };
+
+  const setSalesToday = () => {
+    const t = todayDateStr();
+    setSalesDraftFrom(t);
+    setSalesDraftTo(t);
+    setSalesAppliedFrom(t);
+    setSalesAppliedTo(t);
+    fetchSalesReport(t, t);
+  };
 
   // ── Countdown ticker — updates every second for reservation timers ────────
   useEffect(() => {
@@ -2028,27 +2059,25 @@ export default function ManagerPortal() {
             <div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
                 <SectionLabel>Approval history</SectionLabel>
-                <Btn variant="ghost" onClick={() => { setShowApprovalHistory(v => !v); if (!showApprovalHistory) fetchApprovalHistory(); }} style={{ fontSize: 11 }}>
+                <Btn variant="ghost" onClick={() => setShowApprovalHistory(v => !v)} style={{ fontSize: 11 }}>
                   {showApprovalHistory ? 'Hide history' : 'Show history'}
                 </Btn>
               </div>
               {showApprovalHistory && (
                 <div style={{ ...CARD, marginBottom: 0 }}>
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 12 }}>
-                    <label style={{ fontSize: 11, color: C.textMuted }}>
-                      From
-                      <input type="date" value={approvalFrom} max={approvalTo} onChange={(e) => setApprovalFrom(e.target.value)} style={{ display: 'block', marginTop: 4, padding: '6px 8px', borderRadius: 6, border: `0.5px solid ${C.border}` }} />
-                    </label>
-                    <label style={{ fontSize: 11, color: C.textMuted }}>
-                      To
-                      <input type="date" value={approvalTo} min={approvalFrom} onChange={(e) => setApprovalTo(e.target.value)} style={{ display: 'block', marginTop: 4, padding: '6px 8px', borderRadius: 6, border: `0.5px solid ${C.border}` }} />
-                    </label>
-                    <Btn onClick={() => fetchApprovalHistory()} disabled={approvalLoading} style={{ fontSize: 11 }}>
-                      {approvalLoading ? 'Loading…' : 'Load'}
-                    </Btn>
-                    <Btn variant="ghost" onClick={() => { const t = todayDateStr(); setApprovalFrom(t); setApprovalTo(t); fetchApprovalHistory(t, t); }} style={{ fontSize: 11 }}>Today</Btn>
-                  </div>
-                  {approvalLoading ? (
+                  <DateRangeApply
+                    draftFrom={approvalDraftFrom}
+                    draftTo={approvalDraftTo}
+                    onDraftFromChange={setApprovalDraftFrom}
+                    onDraftToChange={setApprovalDraftTo}
+                    onApply={applyApprovalHistory}
+                    onToday={setApprovalToday}
+                    loading={approvalLoading}
+                  />
+                  <div style={{ marginBottom: 12 }} />
+                  {approvalAppliedFrom == null ? (
+                    <p style={{ fontSize: 12, color: C.textMuted }}>Choose a date range and click Apply.</p>
+                  ) : approvalLoading ? (
                     <p style={{ fontSize: 12, color: C.textMuted }}>Loading…</p>
                   ) : approvalHistory.length === 0 ? (
                     <p style={{ fontSize: 12, color: C.textMuted }}>No approval decisions in this period.</p>
@@ -2621,24 +2650,22 @@ export default function ManagerPortal() {
               </p>
             </div>
             <div style={{ ...CARD }}>
-              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 16 }}>
-                <label style={{ fontSize: 11, color: C.textMuted }}>
-                  From
-                  <input type="date" value={salesFrom} max={salesTo} onChange={(e) => setSalesFrom(e.target.value)} style={{ display: 'block', marginTop: 4, padding: '6px 8px', borderRadius: 6, border: `0.5px solid ${C.border}` }} />
-                </label>
-                <label style={{ fontSize: 11, color: C.textMuted }}>
-                  To
-                  <input type="date" value={salesTo} min={salesFrom} onChange={(e) => setSalesTo(e.target.value)} style={{ display: 'block', marginTop: 4, padding: '6px 8px', borderRadius: 6, border: `0.5px solid ${C.border}` }} />
-                </label>
-                <Btn onClick={() => fetchSalesReport()} disabled={salesLoading} style={{ fontSize: 11 }}>
-                  {salesLoading ? 'Loading…' : 'Load report'}
-                </Btn>
-                <Btn variant="ghost" onClick={() => { const t = todayDateStr(); setSalesFrom(t); setSalesTo(t); fetchSalesReport(t, t); }} style={{ fontSize: 11 }}>Today</Btn>
-              </div>
-              {salesLoading ? (
+              <DateRangeApply
+                draftFrom={salesDraftFrom}
+                draftTo={salesDraftTo}
+                onDraftFromChange={setSalesDraftFrom}
+                onDraftToChange={setSalesDraftTo}
+                onApply={applySalesReport}
+                onToday={setSalesToday}
+                loading={salesLoading}
+              />
+              <div style={{ marginBottom: 16 }} />
+              {salesAppliedFrom == null ? (
+                <p style={{ fontSize: 12, color: C.textMuted }}>Choose a date range and click Apply.</p>
+              ) : salesLoading ? (
                 <p style={{ fontSize: 12, color: C.textMuted }}>Loading sales data…</p>
               ) : !salesReport ? (
-                <p style={{ fontSize: 12, color: C.textMuted }}>Select a date range and load a report.</p>
+                <p style={{ fontSize: 12, color: C.textMuted }}>No sales data for {formatDateDMY(salesAppliedFrom)}{salesAppliedFrom !== salesAppliedTo ? ` – ${formatDateDMY(salesAppliedTo)}` : ''}.</p>
               ) : (
                 <>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(160px,1fr))', gap: 12, marginBottom: 20 }}>

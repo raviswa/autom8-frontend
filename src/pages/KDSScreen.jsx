@@ -23,6 +23,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useWebSocket } from '../contexts/WebSocketContext';
+import DateRangeApply from '../components/DateRangeApply';
 
 // ─── Timezone helpers ────────────────────────────────────────────────────────
 
@@ -453,10 +454,13 @@ function ItemCard({ item, allItems, onAdvance, onVoid }) {
 // ─── History table ────────────────────────────────────────────────────────────
 
 function HistoryView({ apiClient, active }) {
-  const [fromDate, setFromDate] = useState(todayISTStr);
-  const [toDate, setToDate]     = useState(todayISTStr);
-  const [items, setItems]       = useState([]);
-  const [loading, setLoading]   = useState(true);
+  const today = todayISTStr();
+  const [draftFrom, setDraftFrom] = useState(today);
+  const [draftTo, setDraftTo] = useState(today);
+  const [appliedFrom, setAppliedFrom] = useState(null);
+  const [appliedTo, setAppliedTo] = useState(null);
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   const fetchHistory = useCallback(async (from, to) => {
     const token = localStorage.getItem('authToken');
@@ -477,19 +481,18 @@ function HistoryView({ apiClient, active }) {
   }, [apiClient]);
 
   useEffect(() => {
-    if (!active) return undefined;
-    fetchHistory(fromDate, toDate);
-    const interval = setInterval(() => fetchHistory(fromDate, toDate), 30000);
+    if (!active || appliedFrom == null || appliedTo == null) return undefined;
+    fetchHistory(appliedFrom, appliedTo);
+    const interval = setInterval(() => fetchHistory(appliedFrom, appliedTo), 30000);
     return () => clearInterval(interval);
-  }, [active, fromDate, toDate, fetchHistory]);
+  }, [active, appliedFrom, appliedTo, fetchHistory]);
 
   const nowMs = Date.now();
-  const today = todayISTStr();
-  const viewingTodayOnly = fromDate === today && toDate === today;
+  const viewingTodayOnly = appliedFrom && appliedTo && appliedFrom === today && appliedTo === today;
 
-  const hist = items
+  const hist = appliedFrom && appliedTo ? items
     .filter(i => {
-      if (!isDateInRangeIST(i.updated_at ?? i.created_at, fromDate, toDate)) return false;
+      if (!isDateInRangeIST(i.updated_at ?? i.created_at, appliedFrom, appliedTo)) return false;
       if (i.status === 'cancelled') return true;
       if (i.status === 'ready') {
         if (!viewingTodayOnly) return true;
@@ -499,26 +502,25 @@ function HistoryView({ apiClient, active }) {
       }
       return false;
     })
-    .sort((a, b) => new Date(toUTC(b.updated_at ?? b.created_at)) - new Date(toUTC(a.updated_at ?? a.created_at)));
+    .sort((a, b) => new Date(toUTC(b.updated_at ?? b.created_at)) - new Date(toUTC(a.updated_at ?? a.created_at))) : [];
 
-  const rangeLabel = fromDate === toDate
-    ? formatISTDateLabel(fromDate)
-    : `${formatISTDateLabel(fromDate)} – ${formatISTDateLabel(toDate)}`;
+  const rangeLabel = !appliedFrom || !appliedTo
+    ? 'Select dates and Apply'
+    : appliedFrom === appliedTo
+      ? formatISTDateLabel(appliedFrom)
+      : `${formatISTDateLabel(appliedFrom)} – ${formatISTDateLabel(appliedTo)}`;
 
-  const handleFromChange = (value) => {
-    setFromDate(value);
-    if (value > toDate) setToDate(value);
+  const handleApply = () => {
+    setAppliedFrom(draftFrom);
+    setAppliedTo(draftTo);
   };
 
-  const handleToChange = (value) => {
-    setToDate(value);
-    if (value < fromDate) setFromDate(value);
-  };
-
-  const setToday = () => {
+  const handleToday = () => {
     const t = todayISTStr();
-    setFromDate(t);
-    setToDate(t);
+    setDraftFrom(t);
+    setDraftTo(t);
+    setAppliedFrom(t);
+    setAppliedTo(t);
   };
 
   return (
@@ -528,33 +530,23 @@ function HistoryView({ apiClient, active }) {
         <span className="kds-history-count">{hist.length} items</span>
       </div>
 
-      <div className="kds-history-filters">
-        <label className="kds-date-field">
-          <span>From</span>
-          <input
-            type="date"
-            className="kds-date-input"
-            value={fromDate}
-            max={toDate}
-            onChange={(e) => handleFromChange(e.target.value)}
-          />
-        </label>
-        <label className="kds-date-field">
-          <span>To</span>
-          <input
-            type="date"
-            className="kds-date-input"
-            value={toDate}
-            min={fromDate}
-            onChange={(e) => handleToChange(e.target.value)}
-          />
-        </label>
-        <button type="button" className="kds-date-today-btn" onClick={setToday}>
-          Today
-        </button>
-      </div>
+      <DateRangeApply
+        variant="kds"
+        draftFrom={draftFrom}
+        draftTo={draftTo}
+        onDraftFromChange={setDraftFrom}
+        onDraftToChange={setDraftTo}
+        onApply={handleApply}
+        onToday={handleToday}
+        loading={loading}
+      />
 
-      {loading ? (
+      {appliedFrom == null || appliedTo == null ? (
+        <div className="kds-empty">
+          <p className="kds-empty-icon">📅</p>
+          <p>Choose a date range and click Apply</p>
+        </div>
+      ) : loading ? (
         <div className="kds-empty">
           <div className="kds-spinner" />
           <p>Loading history…</p>
@@ -829,10 +821,12 @@ const fetchFeed = useCallback(async () => {
   // ── Live item filtering ─────────────────────────────────────────────────────
   const nowMs = Date.now();
 
-  const todayActive = allItems.filter(i =>
-    isTodayIST(i.created_at) &&
-    ['pending', 'in_progress', 'ready'].includes(i.status)
-  );
+  const todayActive = allItems.filter((i) => {
+    if (!['pending', 'in_progress', 'ready'].includes(i.status)) return false;
+    // Pending/cooking ribbons stay visible until done — even if kitchen_start was yesterday.
+    if (i.status === 'pending' || i.status === 'in_progress') return true;
+    return isTodayIST(i.created_at);
+  });
 
   const laterScheduled = scheduledOrders.filter(o => o.bucket === 'future');
   const todaysFuture = scheduledOrders.filter(o => o.bucket === 'todays_future');
@@ -1290,6 +1284,13 @@ const KDS_CSS = `
     margin-bottom: 1px;
   }
   .kds-date-today-btn:hover { color: #f0f0f0; border-color: #444; }
+  .kds-date-apply-btn {
+    padding: 7px 16px; border-radius: 6px; font-size: 12px; font-weight: 500;
+    border: 1px solid #378ADD; background: #378ADD; color: #fff; cursor: pointer;
+    margin-bottom: 1px;
+  }
+  .kds-date-apply-btn:hover:not(:disabled) { background: #185FA5; border-color: #185FA5; }
+  .kds-date-apply-btn:disabled { opacity: 0.6; cursor: wait; }
   .kds-history-count { margin-left: auto; font-size: 12px; color: #444; }
   .kds-history-scroll { flex: 1; overflow-y: auto; padding: 0 20px 20px; }
   .kds-hist-table { width: 100%; border-collapse: collapse; font-size: 13px; }
