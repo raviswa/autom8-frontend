@@ -174,6 +174,25 @@ function tableCapacity(capacity) {
   return Number.isFinite(seats) && seats > 0 ? seats : 4;
 }
 
+const LARGE_PARTY_THRESHOLD = 8;
+
+/** Greedy multi-table combo — mirrors backend dineInAutoAssign.pickTableCombo */
+function pickTableCombo(availableTables, pax) {
+  const party = Math.max(1, parseInt(pax, 10) || 1);
+  const sorted = [...availableTables].sort((a, b) => tableCapacity(b.capacity) - tableCapacity(a.capacity));
+  const combo = [];
+  let remaining = party;
+  for (const t of sorted) {
+    if (remaining <= 0) break;
+    const cap = tableCapacity(t.capacity);
+    const seatsUsed = Math.min(cap, remaining);
+    combo.push([t.table_number, cap, seatsUsed]);
+    remaining -= seatsUsed;
+  }
+  if (remaining > 0) return null;
+  return combo;
+}
+
 function formatSeatLabel(capacity) {
   return `${tableCapacity(capacity)}-seater`;
 }
@@ -775,6 +794,10 @@ export default function ManagerPortal() {
     const { status } = getTableStatus(t);
     return status === 'available' && tableCapacity(t.capacity) >= pax;
   });
+  const availableTablesForCombo = () => tables.filter(t => {
+    const { status } = getTableStatus(t);
+    return status === 'available' && tableCapacity(t.capacity) > 0;
+  });
 
   const normaliseToken = (t) => ({
     ...t,
@@ -1076,16 +1099,21 @@ export default function ManagerPortal() {
     if (!walkInName.trim()) { showToast('Customer name is required'); return; }
     const digits = walkInPhone.replace(/\D/g, '');
     if (!digits || digits.length < 10) { showToast('Enter a valid 10-digit phone'); return; }
+    const partySize = Math.max(1, parseInt(walkInPax, 10) || 1);
     setWalkInSubmitting(true);
     try {
       await apiClient.post('/api/tokens', {
         name: walkInName.trim(),
         phone: digits,
         type: 'dinein',
-        pax: Math.max(1, parseInt(walkInPax, 10) || 1),
+        pax: partySize,
         restaurant_id: user?.restaurant_id,
       });
-      showToast(`${walkInName.trim()} added to queue`);
+      showToast(
+        partySize > LARGE_PARTY_THRESHOLD
+          ? `${walkInName.trim()} added — large party pending approval`
+          : `${walkInName.trim()} added to queue`,
+      );
       setShowWalkInModal(false);
       setWalkInName('');
       setWalkInPhone('');
@@ -1095,6 +1123,19 @@ export default function ManagerPortal() {
       showToast(err.response?.data?.error || 'Failed to add walk-in');
     } finally {
       setWalkInSubmitting(false);
+    }
+  };
+
+  const promoteLargeParty = async (token) => {
+    setProcessingId(token.id);
+    try {
+      await apiClient.put(`/api/tokens/${token.id}/promote-large-party`);
+      showToast(`${token.id} moved to large party approval`);
+      await fetchTokens();
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to promote large party');
+    } finally {
+      setProcessingId(null);
     }
   };
 
@@ -1285,7 +1326,12 @@ export default function ManagerPortal() {
               </div>
               <div>
                 <label style={{ fontSize: 11, fontWeight: 500, color: C.textSub, marginBottom: 5, display: "block" }}>Party size</label>
-                <input type="number" min={1} max={20} value={walkInPax} onChange={e => setWalkInPax(e.target.value)} style={inputStyle} />
+                <input type="number" min={1} max={50} value={walkInPax} onChange={e => setWalkInPax(e.target.value)} style={inputStyle} />
+                {Math.max(1, parseInt(walkInPax, 10) || 1) > LARGE_PARTY_THRESHOLD && (
+                  <p style={{ fontSize: 11, color: C.accentDark, margin: '6px 0 0' }}>
+                    Large party ({LARGE_PARTY_THRESHOLD + 1}+) — tables will be proposed for approval.
+                  </p>
+                )}
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <Btn variant="secondary" onClick={() => setShowWalkInModal(false)} style={{ flex: 1 }}>Cancel</Btn>
@@ -1915,8 +1961,14 @@ export default function ManagerPortal() {
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   {waitingTokens.map(token => {
-                    const avail    = availableTablesFor(token.pax);
+                    const isLargeParty = token.pax > LARGE_PARTY_THRESHOLD;
+                    const avail    = isLargeParty ? [] : availableTablesFor(token.pax);
+                    const combo    = isLargeParty ? pickTableCombo(availableTablesForCombo(), token.pax) : null;
+                    const tableLines = combo?.length
+                      ? combo.map(t => `Table ${t[0]} (${t[2]}/${t[1]} seats)`).join(' + ')
+                      : null;
                     const isAssign = assigningToken === token.id;
+                    const isPromote = processingId === token.id;
                     const age      = tokenAgeStyle(token.arrived_at);
                     const waitMins = tokenWaitMinutes(token.arrived_at);
                     return (
@@ -1939,7 +1991,7 @@ export default function ManagerPortal() {
                             {token.name} · {token.pax} {token.pax === 1 ? 'person' : 'people'} · Arrived {safeFormat(token.arrived_at, 'HH:mm')}
                           </p>
                           {token.phone && <p style={{ fontSize: 11, color: C.textMuted, margin: "0 0 8px" }}>+{token.phone}</p>}
-                          {token.estimate_display && token.status === 'waiting' && (
+                          {token.estimate_display && token.status === 'waiting' && !isLargeParty && (
                             <div style={{ marginBottom: 8 }}>
                               <span style={{
                                 display: 'inline-block',
@@ -1956,7 +2008,23 @@ export default function ManagerPortal() {
                               <p style={{ fontSize: 10, color: C.textMuted, margin: '4px 0 0' }}>est. at arrival</p>
                             </div>
                           )}
+                          {isLargeParty && (
+                            <div style={{ background: C.accentLight, border: `0.5px solid ${C.accentBorder}`, borderRadius: 7, padding: "6px 10px", fontSize: 11, color: C.accentDark, marginBottom: 10 }}>
+                              <strong>Large party — </strong>
+                              {tableLines ? <>proposed split: {tableLines}</> : 'not enough free tables for this party size'}
+                            </div>
+                          )}
                           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            {isLargeParty ? (
+                              <Btn
+                                variant="success"
+                                onClick={() => promoteLargeParty(token)}
+                                disabled={isPromote || !combo}
+                              >
+                                {isPromote ? <><Spinner size={12} /> Moving…</> : '→ Send for large party approval'}
+                              </Btn>
+                            ) : (
+                              <>
                             <select value={assignTableSel[token.id] || ''} onChange={e => setAssignTableSel(prev => ({ ...prev, [token.id]: e.target.value }))}
                               disabled={avail.length === 0}
                               style={{ fontSize: 12, border: `0.5px solid ${C.border}`, borderRadius: 8, padding: "6px 10px", background: C.cardBg, color: C.text, outline: "none" }}>
@@ -1966,6 +2034,8 @@ export default function ManagerPortal() {
                             <Btn onClick={() => assignTable(token)} disabled={!assignTableSel[token.id] || isAssign} variant="success">
                               {isAssign ? <><Spinner size={12} /> Assigning…</> : '✓ Assign + notify'}
                             </Btn>
+                              </>
+                            )}
                             <button onClick={() => dismissToken(token.id)} style={{ fontSize: 14, color: C.textMuted, background: "none", border: "none", cursor: "pointer", padding: "4px 6px" }} title="Dismiss">✕</button>
                           </div>
                         </div>
