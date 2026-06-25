@@ -163,13 +163,15 @@ export default function CaptainPortal() {
   const [result,    setResult]    = useState(null);
   const [history,   setHistory]   = useState([]); // last 10 scans
   const inputRef = useRef(null);
+  const scanLock = useRef(false);
 
   const restaurantId = user?.restaurant_id;
 
   const processToken = useCallback(async (raw) => {
     const token = raw.trim();
-    if (!token) return;
+    if (!token || scanLock.current) return;
 
+    scanLock.current = true;
     setScanning(true);
     setResult(null);
     setInputVal('');
@@ -199,6 +201,7 @@ export default function CaptainPortal() {
         message: err.response?.data?.error ?? err.message,
       });
     } finally {
+      scanLock.current = false;
       setScanning(false);
       setTimeout(() => inputRef.current?.focus(), 100);
     }
