@@ -475,6 +475,18 @@ function todayDateStr() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 }
 
+function formatINR(amount) {
+  const n = Number(amount) || 0;
+  return `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+}
+
+const SERVICE_LABELS = {
+  dine_in: 'Dine-in',
+  takeaway: 'Takeaway',
+  delivery: 'Delivery',
+  other: 'Other',
+};
+
 function tokenFulfillmentKind(token) {
   const type = String(token.type || '').toLowerCase();
   const meta = token.meta || {};
@@ -488,9 +500,7 @@ const FULFILLMENT_FILTERS = [
   { key: 'all', label: 'All' },
   { key: 'dine_in', label: 'Dine-in' },
   { key: 'live_takeaway', label: 'Live takeaway' },
-  { key: 'scheduled_takeaway', label: 'Scheduled takeaway' },
   { key: 'live_delivery', label: 'Live delivery' },
-  { key: 'scheduled_delivery', label: 'Scheduled delivery' },
 ];
 
 function approvalTypeLabel(type) {
@@ -581,6 +591,12 @@ export default function ManagerPortal() {
   const [tableNewRow, setTableNewRow] = useState({ table_number: '', capacity: 4, section: '' });
   const [tableCrudSaving, setTableCrudSaving] = useState(null);
   const [tableDeleting, setTableDeleting] = useState(null);
+  const [metaLastSync, setMetaLastSync] = useState(null);
+  const [metaSyncing, setMetaSyncing] = useState(false);
+  const [salesReport, setSalesReport] = useState(null);
+  const [salesFrom, setSalesFrom] = useState(todayDateStr());
+  const [salesTo, setSalesTo] = useState(todayDateStr());
+  const [salesLoading, setSalesLoading] = useState(false);
   const fileInputRef = useRef(null);
 
   const showToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 3500); };
@@ -633,13 +649,31 @@ export default function ManagerPortal() {
       console.error('[ManagerPortal] fetchKitchenStatus failed:', e.response?.data || e.message);
     }
   }, [apiClient]);
+  const fetchCatalogStatus = useCallback(async () => {
+    try {
+      const r = await apiClient.get('/api/catalog/status');
+      setMetaLastSync(r.data.lastSync || r.data.lastMetaSync || null);
+    } catch (e) { /* non-fatal */ }
+  }, [apiClient]);
+  const fetchSalesReport = useCallback(async (from = salesFrom, to = salesTo) => {
+    setSalesLoading(true);
+    try {
+      const r = await apiClient.get('/api/reports/sales', { params: { from, to } });
+      setSalesReport(r.data.report || null);
+    } catch (e) {
+      setSalesReport(null);
+      showToast(e.response?.data?.error || 'Could not load sales report');
+    } finally {
+      setSalesLoading(false);
+    }
+  }, [apiClient, salesFrom, salesTo]);
   const fetchData      = useCallback(async () => {
     await Promise.all([
       fetchTables(), fetchOrders(), fetchTokens(), fetchMenuItems(), fetchKitchenStatus(),
-      fetchKdsFeed(), fetchScheduledBoard(),
+      fetchKdsFeed(), fetchScheduledBoard(), fetchCatalogStatus(),
     ]);
     setLoading(false);
-  }, [fetchTables, fetchOrders, fetchTokens, fetchMenuItems, fetchKitchenStatus, fetchKdsFeed, fetchScheduledBoard]);
+  }, [fetchTables, fetchOrders, fetchTokens, fetchMenuItems, fetchKitchenStatus, fetchKdsFeed, fetchScheduledBoard, fetchCatalogStatus]);
 
   useEffect(() => {
     fetchData();
@@ -665,6 +699,10 @@ export default function ManagerPortal() {
       fetchScheduledBoard();
     }
   }, [updates, fetchTokens, fetchTables, fetchOrders, fetchKdsFeed, fetchScheduledBoard]);
+
+  useEffect(() => {
+    if (activeTab === 'reports' && !salesReport && !salesLoading) fetchSalesReport();
+  }, [activeTab, salesReport, salesLoading, fetchSalesReport]);
 
   // ── Countdown ticker — updates every second for reservation timers ────────
   useEffect(() => {
@@ -728,12 +766,21 @@ export default function ManagerPortal() {
   const seatedTokens       = normTokens.filter(t => t.status === 'seated');
   const takeawayTokens     = normTokens.filter(t => t.status === 'takeaway');
   const pendingApprTokens  = normTokens.filter(t => t.status === 'pending_approval');
+  const pendingScheduledApprTokens = pendingApprTokens.filter(t =>
+    t.type === 'scheduled_delivery' || t.type === 'scheduled_takeaway'
+      || tokenFulfillmentKind(t).startsWith('scheduled_'),
+  );
+  const pendingLargePartyTokens = pendingApprTokens.filter(t => !pendingScheduledApprTokens.includes(t));
   const liveTakeawayTokens = takeawayTokens.filter(t => tokenFulfillmentKind(t) === 'live_takeaway');
   const liveDeliveryTokens = takeawayTokens.filter(t => tokenFulfillmentKind(t) === 'live_delivery');
   const scheduledTakeawayTokens = takeawayTokens.filter(t => tokenFulfillmentKind(t) === 'scheduled_takeaway');
   const scheduledDeliveryTokens = takeawayTokens.filter(t => tokenFulfillmentKind(t) === 'scheduled_delivery');
   const activeDineInOrders = orders.filter(o => ACTIVE_ORDER_STATUSES.includes(o.status) && o.table_id);
   const scheduledPrepOrders = scheduledBoard.filter(o => ['todays_future', 'present', 'future'].includes(o.bucket));
+  const scheduledTodayPrep = scheduledPrepOrders.filter(o => ['todays_future', 'present'].includes(o.bucket));
+  const scheduledFutureBookings = scheduledPrepOrders.filter(o => o.bucket === 'future');
+  const scheduledTabCount = pendingScheduledApprTokens.length + scheduledTakeawayTokens.length
+    + scheduledDeliveryTokens.length + scheduledPrepOrders.length;
   const activeKdsItems = kdsItems.filter(i => ['pending', 'in_progress', 'ready'].includes(i.status));
   const freeTablesCount    = tables.filter(t => getTableStatus(t).status === 'available').length;
 
@@ -763,6 +810,21 @@ export default function ManagerPortal() {
     return acc;
   }, {});
   const groupedMenuCategories = Object.keys(groupedMenuItems).sort();
+
+  const syncMetaCatalog = async () => {
+    if (metaSyncing) return;
+    setMetaSyncing(true);
+    try {
+      const r = await apiClient.post('/api/catalog/sync');
+      const synced = r.data.synced ?? r.data.total ?? 0;
+      showToast(`Meta catalog synced — ${synced} item${synced !== 1 ? 's' : ''} updated`);
+      await Promise.all([fetchMenuItems(), fetchCatalogStatus()]);
+    } catch (e) {
+      showToast(e.response?.data?.error || 'Meta catalog sync failed');
+    } finally {
+      setMetaSyncing(false);
+    }
+  };
 
   const toggleKitchen = async () => {
     if (!kitchenStatus || kitchenToggling) return;
@@ -1692,9 +1754,9 @@ export default function ManagerPortal() {
               value: pendingApprTokens.length,
               colorStyle: { bg: C.accentLight,  border: C.accentBorder,  color: C.accentDark  },
               hint: pendingApprTokens.length === 0
-                ? 'Scheduled orders and large parties (8+) appear here'
-                : pendingApprTokens.some(t => t.type === 'scheduled_delivery' || t.type === 'scheduled_takeaway')
-                  ? 'Scheduled orders awaiting your decision'
+                ? 'Scheduled orders and large parties (8+) appear under Scheduled / Queue'
+                : pendingScheduledApprTokens.length > 0
+                  ? `${pendingScheduledApprTokens.length} scheduled · see Scheduled tab`
                   : 'Large parties waiting for your table split decision',
             },
             { label: "Waiting",         value: waitingTokens.length,       colorStyle: { bg: C.warningLight, border: C.warningBorder, color: C.warningDark } },
@@ -1707,9 +1769,11 @@ export default function ManagerPortal() {
         {/* ── Tab bar ───────────────────────────────────────────────────── */}
         <div style={{ display: "flex", gap: 3, marginBottom: 20, background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 10, padding: 4, width: "fit-content" }}>
           {[
-            { key: 'queue',  label: `Queue${(waitingTokens.length + pendingApprTokens.length) ? ` (${waitingTokens.length + pendingApprTokens.length})` : ''}` },
+            { key: 'queue',  label: `Queue${(waitingTokens.length + pendingLargePartyTokens.length) ? ` (${waitingTokens.length + pendingLargePartyTokens.length})` : ''}` },
+            { key: 'scheduled', label: `Scheduled${scheduledTabCount ? ` (${scheduledTabCount})` : ''}` },
             { key: 'tables', label: 'Tables' },
-            { key: 'orders', label: `Active orders${(activeDineInOrders.length + takeawayTokens.length + scheduledPrepOrders.length) ? ` (${activeDineInOrders.length + takeawayTokens.length + scheduledPrepOrders.length})` : ''}` },
+            { key: 'orders', label: `Active orders${(activeDineInOrders.length + liveTakeawayTokens.length + liveDeliveryTokens.length) ? ` (${activeDineInOrders.length + liveTakeawayTokens.length + liveDeliveryTokens.length})` : ''}` },
+            { key: 'reports', label: 'Reports' },
             { key: 'menu',   label: 'Menu'   },
           ].map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)} style={{
@@ -1731,11 +1795,11 @@ export default function ManagerPortal() {
         {activeTab === 'queue' && (
           <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
 
-            {pendingApprTokens.length > 0 && (
+            {pendingLargePartyTokens.length > 0 && (
               <div>
-                <SectionLabel>Pending approval — {pendingApprTokens.length}</SectionLabel>
+                <SectionLabel>Pending approval — large party — {pendingLargePartyTokens.length}</SectionLabel>
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {pendingApprTokens.map(token => {
+                  {pendingLargePartyTokens.map(token => {
                     const combo = token.meta?.combo ?? [];
                     const isProc = processingId === token.id;
                     const isScheduledDelivery = token.type === 'scheduled_delivery';
@@ -1958,31 +2022,6 @@ export default function ManagerPortal() {
                     </div>
                   </>
                 )}
-                {(scheduledTakeawayTokens.length + scheduledDeliveryTokens.length) > 0 && (
-                  <>
-                    <p style={{ fontSize: 11, color: C.textMuted, margin: '0 0 8px' }}>Scheduled (approved, awaiting kitchen slot)</p>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 10 }}>
-                      {[...scheduledTakeawayTokens, ...scheduledDeliveryTokens].map(token => {
-                        const isDelivery = tokenFulfillmentKind(token) === 'scheduled_delivery';
-                        return (
-                          <div key={token.id} style={{ ...CARD, border: `0.5px solid ${C.accentBorder}` }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                              <span style={{ fontSize: 13, fontWeight: 500 }}>{token.id}</span>
-                              <Pill label={isDelivery ? 'Scheduled delivery' : 'Scheduled take-away'} variant="purple" />
-                            </div>
-                            <p style={{ fontSize: 11, color: C.textSub, margin: 0 }}>{token.name}</p>
-                            <p style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 0' }}>
-                              {isDelivery ? 'Deliver' : 'Pickup'}: {token.meta?.scheduled_at_label || '—'}
-                            </p>
-                            {token.meta?.kitchen_start_at_label && (
-                              <p style={{ fontSize: 11, color: C.textMuted, margin: '2px 0 0' }}>Kitchen: {token.meta.kitchen_start_at_label}</p>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </>
-                )}
               </div>
             )}
 
@@ -2034,6 +2073,159 @@ export default function ManagerPortal() {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* ════════════════════════════════════════════════════════════════
+            TAB: SCHEDULED
+        ════════════════════════════════════════════════════════════════ */}
+        {activeTab === 'scheduled' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+              <div>
+                <h2 style={{ fontSize: 16, fontWeight: 500, color: C.text, margin: 0 }}>Scheduled orders</h2>
+                <p style={{ fontSize: 12, color: C.textMuted, margin: '4px 0 0' }}>Pre-booked takeaway and delivery — approvals, prep slots, and future dates.</p>
+              </div>
+              <Link to="/dashboard/kitchen" style={{ fontSize: 12, color: C.primaryDark, textDecoration: 'none' }}>Open kitchen display →</Link>
+            </div>
+
+            {pendingScheduledApprTokens.length > 0 && (
+              <div>
+                <SectionLabel>Pending approval — {pendingScheduledApprTokens.length}</SectionLabel>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {pendingScheduledApprTokens.map(token => {
+                    const combo = token.meta?.combo ?? [];
+                    const isProc = processingId === token.id;
+                    const isScheduledDelivery = token.type === 'scheduled_delivery';
+                    const isScheduledTakeaway = token.type === 'scheduled_takeaway';
+                    const schedLabel = token.meta?.scheduled_at_label || token.meta?.scheduled_at || '—';
+                    const kitchenLabel = token.meta?.kitchen_start_at_label || token.meta?.kitchen_start_at || '—';
+                    const orderPreview = (token.meta?.order_text || '').slice(0, 160);
+                    const totalLabel = token.meta?.total != null ? `₹${Number(token.meta.total).toFixed(0)}` : null;
+                    return (
+                      <div key={token.id} style={{ ...CARD, display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+                        <div style={{ width: 44, height: 44, borderRadius: '50%', background: C.accentLight, color: C.accentDark, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 500, flexShrink: 0 }}>
+                          {String(token.id).replace('T-', '')}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3, flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>{token.id}</span>
+                            <Pill label={isScheduledTakeaway ? 'Scheduled take-away' : isScheduledDelivery ? 'Scheduled delivery' : 'Scheduled'} variant="purple" />
+                          </div>
+                          <p style={{ fontSize: 12, color: C.textSub, margin: '0 0 2px' }}>
+                            {token.name} · Arrived {safeFormat(token.arrived_at, 'HH:mm')}
+                          </p>
+                          {token.phone && <p style={{ fontSize: 11, color: C.textMuted, margin: '0 0 8px' }}>+{token.phone}</p>}
+                          <div style={{ background: C.accentLight, border: `0.5px solid ${C.accentBorder}`, borderRadius: 7, padding: '8px 10px', fontSize: 11, color: C.accentDark, marginBottom: 10 }}>
+                            {isScheduledTakeaway ? (
+                              <>
+                                <div><strong>Pickup:</strong> {schedLabel}</div>
+                                <div><strong>Kitchen start:</strong> {kitchenLabel}</div>
+                              </>
+                            ) : (
+                              <>
+                                <div><strong>Deliver by:</strong> {schedLabel}</div>
+                                <div><strong>Address:</strong> {(token.meta?.delivery_address || '—').slice(0, 100)}</div>
+                              </>
+                            )}
+                            {totalLabel && <div><strong>Total:</strong> {totalLabel}</div>}
+                            {orderPreview && <div style={{ marginTop: 6 }}><strong>Order:</strong> {orderPreview}</div>}
+                          </div>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <Btn variant="success" onClick={() => approveToken(token)} disabled={isProc}>
+                              {isProc ? <Spinner size={14} /> : '✅ Approve'}
+                            </Btn>
+                            <Btn variant="danger" onClick={() => openRejectModal(token)} disabled={isProc}>❌ Reject</Btn>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {(scheduledTakeawayTokens.length + scheduledDeliveryTokens.length) > 0 && (
+              <div>
+                <SectionLabel>Approved — awaiting kitchen slot — {scheduledTakeawayTokens.length + scheduledDeliveryTokens.length}</SectionLabel>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))', gap: 10 }}>
+                  {[...scheduledTakeawayTokens, ...scheduledDeliveryTokens].map(token => {
+                    const isDelivery = tokenFulfillmentKind(token) === 'scheduled_delivery';
+                    return (
+                      <div key={token.id} style={{ ...CARD, border: `0.5px solid ${C.accentBorder}` }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                          <span style={{ fontSize: 13, fontWeight: 500 }}>{token.id}</span>
+                          <Pill label={isDelivery ? 'Scheduled delivery' : 'Scheduled take-away'} variant="purple" />
+                        </div>
+                        <p style={{ fontSize: 11, color: C.textSub, margin: 0 }}>{token.name}</p>
+                        <p style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 0' }}>
+                          {isDelivery ? 'Deliver' : 'Pickup'}: {token.meta?.scheduled_at_label || '—'}
+                        </p>
+                        {token.meta?.kitchen_start_at_label && (
+                          <p style={{ fontSize: 11, color: C.textMuted, margin: '2px 0 0' }}>Kitchen: {token.meta.kitchen_start_at_label}</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {scheduledTodayPrep.length > 0 && (
+              <div>
+                <SectionLabel>Today&apos;s prep — {scheduledTodayPrep.length}</SectionLabel>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {scheduledTodayPrep.map(order => {
+                    const isDelivery = (order.service_type || '').includes('delivery');
+                    return (
+                      <div key={`today-${order.booking_id}`} style={{ ...CARD, border: `0.5px solid ${C.accentBorder}` }}>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <Pill label={isDelivery ? 'Scheduled delivery' : 'Scheduled take-away'} variant="purple" />
+                          <span style={{ fontWeight: 500 }}>{order.token_number}</span>
+                          {order.bucket === 'present' && <Pill label="In kitchen window" variant="amber" />}
+                          {order.bucket === 'todays_future' && <Pill label="Scheduled bookings" variant="blue" />}
+                        </div>
+                        <p style={{ fontSize: 12, color: C.textSub, margin: '4px 0 0' }}>{order.customer_name}</p>
+                        <p style={{ fontSize: 11, color: C.textMuted, margin: '2px 0 0' }}>
+                          {isDelivery ? 'Deliver' : 'Pickup'} {safeFormat(order.scheduled_slot_at, 'HH:mm')} · Kitchen {safeFormat(order.kitchen_start_at, 'HH:mm')}
+                        </p>
+                        {order.order_text && <p style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 0' }}>{order.order_text.slice(0, 140)}</p>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {scheduledFutureBookings.length > 0 && (
+              <div>
+                <SectionLabel>Later dates — {scheduledFutureBookings.length}</SectionLabel>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {scheduledFutureBookings.map(order => {
+                    const isDelivery = (order.service_type || '').includes('delivery');
+                    return (
+                      <div key={`future-${order.booking_id}`} style={{ ...CARD }}>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <Pill label={isDelivery ? 'Scheduled delivery' : 'Scheduled take-away'} variant="purple" />
+                          <span style={{ fontWeight: 500 }}>{order.token_number}</span>
+                        </div>
+                        <p style={{ fontSize: 12, color: C.textSub, margin: '4px 0 0' }}>{order.customer_name}</p>
+                        <p style={{ fontSize: 11, color: C.textMuted, margin: '2px 0 0' }}>
+                          {order.scheduled_slot_at ? safeFormat(order.scheduled_slot_at, 'EEE d MMM · HH:mm') : '—'}
+                        </p>
+                        {order.order_text && <p style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 0' }}>{order.order_text.slice(0, 120)}</p>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {scheduledTabCount === 0 && (
+              <div style={{ ...CARD, textAlign: 'center', padding: '40px 20px', color: C.textMuted, fontSize: 13 }}>
+                No scheduled orders right now.
+              </div>
+            )}
           </div>
         )}
 
@@ -2312,7 +2504,7 @@ export default function ManagerPortal() {
               <Link to="/dashboard/kitchen" style={{ fontSize: 12, color: C.primaryDark, textDecoration: 'none' }}>Open kitchen display →</Link>
             </div>
             <AlertBanner type="info">
-              Dine-in table orders, live takeaway/delivery tokens, scheduled prep, and in-kitchen items appear here. Use filters to focus on one channel.
+              Dine-in table orders and live takeaway/delivery tokens appear here. Scheduled pre-bookings are on the <strong>Scheduled</strong> tab.
             </AlertBanner>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
               {FULFILLMENT_FILTERS.map(f => (
@@ -2385,28 +2577,6 @@ export default function ManagerPortal() {
                 </div>
               ))}
 
-              {(ordersFilter === 'all' || ordersFilter === 'scheduled_takeaway') && scheduledPrepOrders.filter(o => (o.service_type || '').includes('takeaway')).map(order => (
-                <div key={`st-${order.booking_id}`} style={{ ...CARD, border: `0.5px solid ${C.accentBorder}` }}>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <Pill label="Scheduled take-away" variant="purple" /><span style={{ fontWeight: 500 }}>{order.token_number}</span>
-                  </div>
-                  <p style={{ fontSize: 12, color: C.textSub, margin: '4px 0 0' }}>{order.customer_name}</p>
-                  <p style={{ fontSize: 11, color: C.textMuted, margin: '2px 0 0' }}>Pickup {safeFormat(order.scheduled_slot_at, 'HH:mm')} · Kitchen {safeFormat(order.kitchen_start_at, 'HH:mm')}</p>
-                  <p style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 0' }}>{order.order_text?.slice(0, 140)}</p>
-                </div>
-              ))}
-
-              {(ordersFilter === 'all' || ordersFilter === 'scheduled_delivery') && scheduledPrepOrders.filter(o => (o.service_type || '').includes('delivery')).map(order => (
-                <div key={`sd-${order.booking_id}`} style={{ ...CARD, border: `0.5px solid ${C.accentBorder}` }}>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <Pill label="Scheduled delivery" variant="purple" /><span style={{ fontWeight: 500 }}>{order.token_number}</span>
-                  </div>
-                  <p style={{ fontSize: 12, color: C.textSub, margin: '4px 0 0' }}>{order.customer_name}</p>
-                  <p style={{ fontSize: 11, color: C.textMuted, margin: '2px 0 0' }}>Deliver {safeFormat(order.scheduled_slot_at, 'HH:mm')} · Kitchen {safeFormat(order.kitchen_start_at, 'HH:mm')}</p>
-                  <p style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 0' }}>{order.order_text?.slice(0, 140)}</p>
-                </div>
-              ))}
-
               {ordersFilter === 'all' && activeKdsItems.length > 0 && (
                 <div>
                   <SectionLabel>In kitchen now — {activeKdsItems.length} item{activeKdsItems.length !== 1 ? 's' : ''}</SectionLabel>
@@ -2423,12 +2593,10 @@ export default function ManagerPortal() {
                 </div>
               )}
 
-              {((ordersFilter === 'all' && activeDineInOrders.length + takeawayTokens.length + scheduledPrepOrders.length === 0 && activeKdsItems.length === 0)
+              {((ordersFilter === 'all' && activeDineInOrders.length + liveTakeawayTokens.length + liveDeliveryTokens.length === 0 && activeKdsItems.length === 0)
                 || (ordersFilter === 'dine_in' && activeDineInOrders.length === 0)
                 || (ordersFilter === 'live_takeaway' && liveTakeawayTokens.length === 0)
                 || (ordersFilter === 'live_delivery' && liveDeliveryTokens.length === 0)
-                || (ordersFilter === 'scheduled_takeaway' && scheduledPrepOrders.filter(o => (o.service_type || '').includes('takeaway')).length === 0)
-                || (ordersFilter === 'scheduled_delivery' && scheduledPrepOrders.filter(o => (o.service_type || '').includes('delivery')).length === 0)
               ) && (
                 <div style={{ ...CARD, textAlign: "center", padding: "40px 20px", color: C.textMuted, fontSize: 13 }}>
                   No active orders for this filter.
@@ -2442,6 +2610,100 @@ export default function ManagerPortal() {
         )}
 
         {/* ════════════════════════════════════════════════════════════════
+            TAB: REPORTS
+        ════════════════════════════════════════════════════════════════ */}
+        {activeTab === 'reports' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <div>
+              <h2 style={{ fontSize: 16, fontWeight: 500, color: C.text, margin: 0 }}>Sales reports</h2>
+              <p style={{ fontSize: 12, color: C.textMuted, margin: '4px 0 0' }}>
+                Completed dine-in POS orders plus paid WhatsApp prepay bookings for the selected date range (IST).
+              </p>
+            </div>
+            <div style={{ ...CARD }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 16 }}>
+                <label style={{ fontSize: 11, color: C.textMuted }}>
+                  From
+                  <input type="date" value={salesFrom} max={salesTo} onChange={(e) => setSalesFrom(e.target.value)} style={{ display: 'block', marginTop: 4, padding: '6px 8px', borderRadius: 6, border: `0.5px solid ${C.border}` }} />
+                </label>
+                <label style={{ fontSize: 11, color: C.textMuted }}>
+                  To
+                  <input type="date" value={salesTo} min={salesFrom} onChange={(e) => setSalesTo(e.target.value)} style={{ display: 'block', marginTop: 4, padding: '6px 8px', borderRadius: 6, border: `0.5px solid ${C.border}` }} />
+                </label>
+                <Btn onClick={() => fetchSalesReport()} disabled={salesLoading} style={{ fontSize: 11 }}>
+                  {salesLoading ? 'Loading…' : 'Load report'}
+                </Btn>
+                <Btn variant="ghost" onClick={() => { const t = todayDateStr(); setSalesFrom(t); setSalesTo(t); fetchSalesReport(t, t); }} style={{ fontSize: 11 }}>Today</Btn>
+              </div>
+              {salesLoading ? (
+                <p style={{ fontSize: 12, color: C.textMuted }}>Loading sales data…</p>
+              ) : !salesReport ? (
+                <p style={{ fontSize: 12, color: C.textMuted }}>Select a date range and load a report.</p>
+              ) : (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(160px,1fr))', gap: 12, marginBottom: 20 }}>
+                    {[
+                      { label: 'Total revenue', value: formatINR(salesReport.totalRevenue) },
+                      { label: 'Orders', value: salesReport.totalOrders },
+                      { label: 'Avg order value', value: formatINR(salesReport.avgOrderValue) },
+                      { label: 'Dine-in (POS)', value: formatINR(salesReport.dineInRevenue) },
+                      { label: 'WhatsApp prepay', value: formatINR(salesReport.prepayRevenue) },
+                    ].map(s => (
+                      <div key={s.label} style={{ background: C.surfaceBg, borderRadius: 8, padding: '12px 14px', border: `0.5px solid ${C.border}` }}>
+                        <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 4 }}>{s.label}</div>
+                        <div style={{ fontSize: 18, fontWeight: 500, color: C.text }}>{s.value}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {salesReport.serviceBreakdown && (
+                    <div style={{ marginBottom: 20 }}>
+                      <SectionLabel>By channel</SectionLabel>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(200px,1fr))', gap: 10 }}>
+                        {Object.entries(salesReport.serviceBreakdown).filter(([, v]) => v.orders > 0).map(([key, v]) => (
+                          <div key={key} style={{ ...CARD, padding: '12px 14px' }}>
+                            <div style={{ fontSize: 12, fontWeight: 500 }}>{SERVICE_LABELS[key] || key}</div>
+                            <p style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 0' }}>{v.orders} order{v.orders !== 1 ? 's' : ''} · {formatINR(v.revenue)}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {(salesReport.daily || []).length > 1 && (
+                    <div style={{ marginBottom: 20 }}>
+                      <SectionLabel>Daily breakdown</SectionLabel>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                          <thead>
+                            <tr style={{ borderBottom: `0.5px solid ${C.border}` }}>
+                              <th style={{ textAlign: 'left', padding: '8px 10px', color: C.textMuted, fontWeight: 500 }}>Date</th>
+                              <th style={{ textAlign: 'right', padding: '8px 10px', color: C.textMuted, fontWeight: 500 }}>Orders</th>
+                              <th style={{ textAlign: 'right', padding: '8px 10px', color: C.textMuted, fontWeight: 500 }}>Revenue</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {salesReport.daily.map(row => (
+                              <tr key={row.date} style={{ borderBottom: `0.5px solid ${C.border}` }}>
+                                <td style={{ padding: '8px 10px' }}>{row.date}</td>
+                                <td style={{ padding: '8px 10px', textAlign: 'right' }}>{row.orders}</td>
+                                <td style={{ padding: '8px 10px', textAlign: 'right' }}>{formatINR(row.revenue)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                  <p style={{ fontSize: 11, color: C.textMuted, margin: 0 }}>
+                    {salesReport.completedTableOrders ?? 0} completed POS orders · {salesReport.paidPrepayBookings ?? 0} paid prepay bookings
+                    {salesReport.from === salesReport.to ? ` · ${salesReport.from}` : ` · ${salesReport.from} to ${salesReport.to}`}
+                  </p>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ════════════════════════════════════════════════════════════════
             TAB: MENU
         ════════════════════════════════════════════════════════════════ */}
         {activeTab === 'menu' && (
@@ -2449,14 +2711,32 @@ export default function ManagerPortal() {
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
               <div>
                 <h2 style={{ fontSize: 16, fontWeight: 500, color: C.text, margin: 0 }}>Menu management</h2>
-                <p style={{ fontSize: 12, color: C.textMuted, margin: "4px 0 0" }}>Toggle items in/out of stock instantly, or upload the catalog Excel to fully replace the menu (old items are removed). See the <strong>Column guide</strong> sheet for scheduling columns.</p>
+                <p style={{ fontSize: 12, color: C.textMuted, margin: "4px 0 0" }}>
+                  Pull from Meta to upsert WhatsApp catalog items, toggle stock, or upload Excel to <strong>fully replace</strong> the menu. See the <strong>Column guide</strong> sheet for scheduling columns.
+                </p>
               </div>
-              <button
-                onClick={async () => { setDownloadingTpl(true); await downloadCatalogTemplate(apiClient, showToast, menuItems); setDownloadingTpl(false); }}
-                disabled={downloadingTpl}
-                style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 500, padding: "7px 14px", borderRadius: 8, border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.textSub, cursor: "pointer" }}>
-                {downloadingTpl ? <Spinner size={14} /> : '↓'} Download template
-              </button>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <button
+                  onClick={syncMetaCatalog}
+                  disabled={metaSyncing}
+                  style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 500, padding: "7px 14px", borderRadius: 8, border: `0.5px solid ${C.primaryBorder}`, background: C.primaryLight, color: C.primaryDark, cursor: metaSyncing ? 'wait' : 'pointer' }}>
+                  {metaSyncing ? <Spinner size={14} /> : '↻'} Pull from Meta
+                </button>
+                <button
+                  onClick={async () => { setDownloadingTpl(true); await downloadCatalogTemplate(apiClient, showToast, menuItems); setDownloadingTpl(false); }}
+                  disabled={downloadingTpl}
+                  style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 500, padding: "7px 14px", borderRadius: 8, border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.textSub, cursor: "pointer" }}>
+                  {downloadingTpl ? <Spinner size={14} /> : '↓'} Download template
+                </button>
+              </div>
+            </div>
+
+            <div style={{ ...CARD, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, padding: '12px 16px' }}>
+              <div style={{ fontSize: 12, color: C.textSub }}>
+                <strong>Meta catalog:</strong>{' '}
+                {metaLastSync ? `Last sync ${new Date(metaLastSync).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}` : 'Not synced yet'}
+              </div>
+              <span style={{ fontSize: 11, color: C.textMuted }}>Excel upload replaces all items · Meta pull updates by product ID</span>
             </div>
 
             {uploadStatus === 'idle' && (

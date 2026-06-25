@@ -1430,7 +1430,7 @@ function TabWhatsApp({ apiClient, showToast }) {
         <div>
           <Label>Manager phone</Label>
           <Input value={form.manager_phone} onChange={v => set('manager_phone', v)} placeholder="919876543210" />
-          {hint('Walk-in and order alerts are sent here.')}
+          {hint('Primary on-call number. All active managers/owners in Team with WhatsApp also receive ops alerts.')}
         </div>
         <div>
           <Label>WABA ID</Label>
@@ -1478,7 +1478,15 @@ function TabWhatsApp({ apiClient, showToast }) {
 // Onboard employees, edit details, set roles, collect WA numbers, terminate
 // ═════════════════════════════════════════════════════════════════════════════
 
-const STAFF_NOTIFY_ROLES = ['manager', 'kitchen_staff', 'captain', 'waiter', 'owner'];
+const STAFF_NOTIFY_ROLES = ['manager', 'captain', 'owner'];
+
+function phoneDigitsMatch(a, b) {
+  const da = String(a || '').replace(/\D/g, '');
+  const db = String(b || '').replace(/\D/g, '');
+  if (!da || !db) return false;
+  if (da === db) return true;
+  return da.slice(-10) === db.slice(-10);
+}
 
 function validateStaffWhatsApp(raw, role) {
   const digits = String(raw || '').replace(/\D/g, '');
@@ -1502,6 +1510,7 @@ function validateStaffWhatsApp(raw, role) {
 function TabStaff({ apiClient, showToast }) {
   const [employees, setEmployees] = useState([]);
   const [roles,     setRoles]     = useState([]);
+  const [managerPhone, setManagerPhone] = useState('');
   const [loading,   setLoading]   = useState(true);
   const [showForm,  setShowForm]  = useState(false);
   const [saving,    setSaving]    = useState(false);
@@ -1519,12 +1528,14 @@ function TabStaff({ apiClient, showToast }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [empRes, roleRes] = await Promise.all([
+      const [empRes, roleRes, wabaRes] = await Promise.all([
         apiClient.get('/api/staff'),
         apiClient.get('/api/staff/roles'),
+        apiClient.get('/api/dashboard/waba').catch(() => ({ data: {} })),
       ]);
       setEmployees(empRes.data.employees ?? []);
       setRoles(roleRes.data.roles ?? []);
+      setManagerPhone(wabaRes.data.restaurant?.manager_phone ?? '');
     } catch { showToast('Failed to load staff', 'error'); }
     finally { setLoading(false); }
   }, [apiClient, showToast]);
@@ -1599,11 +1610,24 @@ function TabStaff({ apiClient, showToast }) {
   };
 
   const removeEmployee = async (emp) => {
+    const isAlertNumber = managerPhone && emp.whatsapp_number && phoneDigitsMatch(emp.whatsapp_number, managerPhone);
+    if (isAlertNumber) {
+      const proceed = window.confirm(
+        `${emp.full_name}'s WhatsApp is the outlet Manager phone (Settings → WhatsApp).\n\n` +
+        `Removing them will clear that number and stop ops alerts until you set a new Manager phone.\n\nContinue?`,
+      );
+      if (!proceed) return;
+    }
     const note = window.prompt(`Reason for removing ${emp.full_name}?`, 'Left the team');
-    if (note === null) return; // cancelled
+    if (note === null) return;
     try {
-      await apiClient.put(`/api/staff/${emp.id}/terminate`, { termination_note: note || 'Left the team' });
-      showToast(`${emp.full_name} has been deactivated`);
+      const res = await apiClient.put(`/api/staff/${emp.id}/terminate`, { termination_note: note || 'Left the team' });
+      if (res.data?.manager_phone_cleared) {
+        setManagerPhone('');
+        showToast(`${emp.full_name} removed. Manager phone cleared — set a new one under Settings → WhatsApp.`, 'error');
+      } else {
+        showToast(`${emp.full_name} has been deactivated`);
+      }
       await load();
     } catch (e) { showToast(e.response?.data?.error ?? 'Failed to remove employee', 'error'); }
   };
@@ -1646,7 +1670,7 @@ function TabStaff({ apiClient, showToast }) {
             {active.length} active · {terminated.length} removed
           </div>
           <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>
-            WhatsApp numbers are used to send operational notifications per role.
+            Captains get takeaway WhatsApp alerts. Managers/owners get ops alerts via Settings → Manager phone plus their Team WhatsApp. Kitchen and wait staff use the kitchen display only.
           </div>
         </div>
         <Btn onClick={() => setShowForm(s => !s)}>+ Add employee</Btn>
@@ -1687,14 +1711,15 @@ function TabStaff({ apiClient, showToast }) {
             <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
               12 digits including country code (India: 91 + 10-digit mobile). No + or spaces needed.
             </div>
-            {NOTIFY_ROLES.includes(form.role) && (
+            {form.role && (
               <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
                 {{
-                  manager:       'Receives: new tokens, large party requests, order ready, feedback alerts',
-                  kitchen_staff: 'Receives: new order notifications (backup to KDS)',
-                  captain:       'Receives: takeaway orders ready to collect',
-                  waiter:        'Receives: food ready to serve at table notifications',
-                  owner:         'Receives: all manager notifications + billing alerts',
+                  manager:       'Receives ops alerts (with Settings → Manager phone and other active managers)',
+                  kitchen_staff: 'Uses kitchen display only — no operational WhatsApp alerts',
+                  captain:       'Receives: new takeaway assignment + ready-for-pickup alerts',
+                  waiter:        'Uses kitchen display only — no operational WhatsApp alerts',
+                  marketing:     'Campaigns only — not live operational alerts',
+                  owner:         'Receives all manager ops alerts + billing alerts',
                 }[form.role] ?? ''}
               </div>
             )}
@@ -1823,14 +1848,15 @@ function TabStaff({ apiClient, showToast }) {
                         <div style={{ fontSize: 11, color: C.textMuted, marginTop: 3 }}>
                           12 digits with country code (e.g. 917305362067).
                         </div>
-                        {NOTIFY_ROLES.includes(editForm.role) && (
+                        {editForm.role && (
                           <div style={{ fontSize: 11, color: C.textMuted, marginTop: 3 }}>
                             {{
-                              manager:       'Receives: new tokens, large party, order ready, feedback alerts',
-                              kitchen_staff: 'Receives: new order notifications (backup to KDS)',
-                              captain:       'Receives: takeaway orders ready to collect',
-                              waiter:        'Receives: food ready to serve at table',
-                              owner:         'Receives: all manager notifications + billing alerts',
+                              manager:       'Receives ops alerts (Settings → Manager phone + active managers)',
+                              kitchen_staff: 'Kitchen display only — no ops WhatsApp',
+                              captain:       'Receives: takeaway assignment + ready-for-pickup',
+                              waiter:        'Kitchen display only — no ops WhatsApp',
+                              marketing:     'Campaigns only',
+                              owner:         'All manager ops alerts + billing',
                             }[editForm.role] ?? ''}
                           </div>
                         )}
