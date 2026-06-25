@@ -28,6 +28,7 @@ import DateRangeApply from '../components/DateRangeApply';
 // ─── Timezone helpers ────────────────────────────────────────────────────────
 
 const IST_OFFSET_MS      = 5.5 * 60 * 60 * 1000;
+const IST                = 'Asia/Kolkata';
 const READY_TIMEOUT_MINS = 20;
 
 function toUTC(iso) {
