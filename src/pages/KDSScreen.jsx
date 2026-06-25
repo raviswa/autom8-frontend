@@ -358,15 +358,15 @@ function itemServiceIcon(item) {
   return '🍽️';
 }
 
-// ─── Item card ────────────────────────────────────────────────────────────────
+// ─── Item ribbon (one cart line = one actionable strip) ───────────────────────
 
 function ItemCard({ item, allItems, onAdvance, onVoid }) {
   const status = item.status;
 
   const actionMap = {
-    pending:     { label: 'START COOKING', cls: 'btn-action-start',  icon: '▶' },
-    in_progress: { label: 'MARK READY',    cls: 'btn-action-ready',  icon: '✓' },
-    ready:       { label: 'SERVED ✓',      cls: 'btn-action-served', icon: ''  },
+    pending:     { label: 'Start', full: 'START COOKING', cls: 'btn-action-start',  icon: '▶' },
+    in_progress: { label: 'Ready', full: 'MARK READY',    cls: 'btn-action-ready',  icon: '✓' },
+    ready:       { label: 'Served', full: 'SERVED ✓',     cls: 'btn-action-served', icon: ''  },
   };
   const action = actionMap[status] ?? actionMap.pending;
 
@@ -376,76 +376,55 @@ function ItemCard({ item, allItems, onAdvance, onVoid }) {
     ?? item.token_number
     ?? item.id;
 
-  const rowCls = {
-    pending:     'item-row-pending',
-    in_progress: 'item-row-cooking',
-    ready:       'item-row-ready',
-    cancelled:   'item-row-cancelled',
-  }[status] ?? 'item-row-pending';
-
   const handleReprint = () => printKOT(buildKOTFromFeedItem(item, allItems));
 
   return (
-    <div className={`kds-card status-${status}`}>
-      {/* Header */}
-      <div className="kds-card-head">
-        <div className="kds-card-head-left">
-          <span className="kds-service-icon">{itemServiceIcon(item)}</span>
-          <div>
-            <p className="kds-service-label">{itemServiceLabel(item)}</p>
-            <p className="kds-order-id">#{orderNum}</p>
+    <div className={`kds-ribbon status-${status}`}>
+      <div className="kds-ribbon-body">
+        <div className="kds-ribbon-main">
+          <span className="kds-ribbon-icon" aria-hidden>{itemServiceIcon(item)}</span>
+          <div className="kds-ribbon-copy">
+            <div className="kds-ribbon-title">
+              <span className="kds-ribbon-name">{name}</span>
+              <span className="kds-ribbon-qty">×{qty}</span>
+              <StatusBadge status={status} isServed={false} />
+            </div>
+            <div className="kds-ribbon-meta">
+              <span>{itemServiceLabel(item)} · #{orderNum}</span>
+              <TimerLabel
+                createdAt={item.created_at}
+                status={status}
+                readyAt={item.updated_at}
+              />
+            </div>
+            {item.special_instructions && (
+              <div className="kds-ribbon-notes">⚠ {item.special_instructions}</div>
+            )}
           </div>
         </div>
-        <div className="kds-card-head-right">
-          <StatusBadge status={status} isServed={false} />
-          <TimerLabel
-            createdAt={item.created_at}
-            status={status}
-            readyAt={item.updated_at}
-          />
-        </div>
-      </div>
 
-      {/* Item row */}
-      <div className="kds-items">
-        <div className={`kds-item-row ${rowCls}`}>
-          <span className={`item-check ${status === 'ready' ? 'item-check-done' : ''}`}>
-            {status === 'ready' ? '✓' : status === 'in_progress' ? '▶' : '○'}
-          </span>
-          <span className={`kds-item-name ${status === 'ready' ? 'item-name-done' : ''}`}>
-            {name}
-          </span>
-          <span className="kds-item-qty">×{qty}</span>
-        </div>
-      </div>
-
-      {/* Special notes */}
-      {item.special_instructions && (
-        <div className="kds-notes">⚠ {item.special_instructions}</div>
-      )}
-
-      {/* Primary action */}
-      <div className="kds-card-actions">
-        <button
-          className={`kds-btn-action ${action.cls} ${status === 'ready' ? 'btn-action-disabled' : ''}`}
-          onClick={() => status !== 'ready' && onAdvance(item.id, status)}
-          disabled={status === 'ready'}
-        >
-          {action.icon && <span className="btn-action-icon">{action.icon}</span>}
-          {action.label}
-        </button>
-      </div>
-
-      {/* Footer actions: Void + Reprint */}
-      <div className="kds-card-footer">
-        {status !== 'ready' && (
-          <button className="kds-btn-void" onClick={() => onVoid(item.id)}>
-            Void item
+        <div className="kds-ribbon-actions">
+          <button
+            type="button"
+            className={`kds-ribbon-btn-primary ${action.cls} ${status === 'ready' ? 'btn-action-disabled' : ''}`}
+            onClick={() => status !== 'ready' && onAdvance(item.id, status)}
+            disabled={status === 'ready'}
+            title={action.full}
+          >
+            {action.icon && <span className="btn-action-icon">{action.icon}</span>}
+            <span className="kds-ribbon-btn-label">{action.full}</span>
           </button>
-        )}
-        <button className="kds-btn-reprint" onClick={handleReprint}>
-          🖨 Reprint KOT
-        </button>
+          <div className="kds-ribbon-secondary">
+            {status !== 'ready' && (
+              <button type="button" className="kds-btn-void" onClick={() => onVoid(item.id)}>
+                Void
+              </button>
+            )}
+            <button type="button" className="kds-btn-reprint" onClick={handleReprint}>
+              Reprint
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -934,7 +913,7 @@ const fetchFeed = useCallback(async () => {
 
         {/* Live view */}
         {view === 'live' && (
-          <>
+          <div className="kds-live-pane">
             {todaysFuture.length > 0 && (
               <div className="kds-todays-future-strip">
                 <div className="kds-todays-future-head">
@@ -1001,7 +980,7 @@ const fetchFeed = useCallback(async () => {
                 ))
               )}
             </div>
-          </>
+          </div>
         )}
 
         {view === 'future' && (
@@ -1146,10 +1125,20 @@ const KDS_CSS = `
   .pill-active .pill-count { background: #333; color: #f0f0f0; }
   .kds-sort-hint { margin-left: auto; font-size: 11px; color: #444; }
 
+  .kds-live-pane {
+    flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+  }
+
   .kds-board {
-    flex: 1; overflow-y: auto; padding: 16px 20px;
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 14px; align-content: start;
+    flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
+    padding: 12px 20px 24px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(520px, 1fr));
+    gap: 12px; align-content: start; align-items: start;
+  }
+
+  @media (max-width: 1100px) {
+    .kds-board { grid-template-columns: 1fr; }
   }
 
   .kds-empty {
@@ -1160,24 +1149,84 @@ const KDS_CSS = `
   .kds-empty p   { font-size: 16px; color: #555; }
   .kds-empty-sub { font-size: 13px; color: #383838; }
 
-  .kds-card {
+  /* Live item ribbon — one line item, large tap targets */
+  .kds-ribbon {
     background: #141414; border-radius: 12px; border: 2px solid #252525;
-    display: flex; flex-direction: column; overflow: hidden; transition: border-color .2s;
+    min-height: 108px; flex-shrink: 0; overflow: visible;
+    transition: border-color .2s;
   }
-  .kds-card.status-pending     { border-color: #ef4444; }
-  .kds-card.status-in_progress { border-color: #f97316; }
-  .kds-card.status-ready       { border-color: #22c55e; }
-  .kds-card.status-cancelled   { opacity: .4; border-color: #374151; }
+  .kds-ribbon.status-pending     { border-color: #ef4444; }
+  .kds-ribbon.status-in_progress { border-color: #f97316; }
+  .kds-ribbon.status-ready       { border-color: #22c55e; }
+  .kds-ribbon.status-cancelled   { opacity: .45; border-color: #374151; }
 
-  .kds-card-head {
-    padding: 12px 14px 10px; display: flex; align-items: flex-start;
-    justify-content: space-between; border-bottom: 1px solid #1a1a1a;
+  .kds-ribbon-body {
+    display: flex; align-items: stretch; gap: 14px;
+    padding: 14px 16px; min-height: 108px;
   }
-  .kds-card-head-left { display: flex; align-items: center; gap: 9px; }
-  .kds-service-icon   { font-size: 20px; line-height: 1; }
-  .kds-service-label  { font-size: 16px; font-weight: 500; color: #f0f0f0; }
-  .kds-order-id       { font-size: 11px; color: #555; margin-top: 2px; }
-  .kds-card-head-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+
+  .kds-ribbon-main {
+    flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 12px;
+  }
+
+  .kds-ribbon-icon { font-size: 28px; line-height: 1; flex-shrink: 0; margin-top: 2px; }
+
+  .kds-ribbon-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+
+  .kds-ribbon-title {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  }
+
+  .kds-ribbon-name {
+    font-size: 18px; font-weight: 600; color: #f5f5f5; line-height: 1.25;
+    word-break: break-word;
+  }
+  .kds-ribbon.status-pending .kds-ribbon-name     { color: #fecaca; }
+  .kds-ribbon.status-in_progress .kds-ribbon-name { color: #fed7aa; }
+  .kds-ribbon.status-ready .kds-ribbon-name     { color: #bbf7d0; text-decoration: line-through; }
+
+  .kds-ribbon-qty { font-size: 16px; font-weight: 700; color: #9ca3af; flex-shrink: 0; }
+
+  .kds-ribbon-meta {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+    font-size: 12px; color: #6b7280;
+  }
+
+  .kds-ribbon-notes {
+    font-size: 12px; color: #fde68a; line-height: 1.35;
+    padding: 6px 8px; border-radius: 6px; background: #eab30814;
+    border-left: 3px solid #eab308;
+  }
+
+  .kds-ribbon-actions {
+    flex-shrink: 0; width: 172px; display: flex; flex-direction: column;
+    justify-content: center; gap: 8px;
+  }
+
+  .kds-ribbon-btn-primary {
+    width: 100%; min-height: 56px; padding: 10px 12px;
+    border-radius: 10px; border: none; cursor: pointer;
+    font-size: 13px; font-weight: 700; letter-spacing: .04em;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    transition: opacity .1s, transform .1s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .kds-ribbon-btn-primary:active:not(:disabled) { opacity: 0.88; transform: scale(0.98); }
+  .kds-ribbon-btn-label { line-height: 1.2; text-align: center; }
+  .btn-action-start  { background: #1d4ed8; color: #fff; }
+  .btn-action-ready  { background: #15803d; color: #fff; }
+  .btn-action-served { background: #1a2e1a; color: #22c55e; cursor: default; }
+  .btn-action-disabled { opacity: 1; }
+  .btn-action-icon   { font-size: 15px; flex-shrink: 0; }
+
+  .kds-ribbon-secondary {
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .kds-ribbon-secondary .kds-btn-void,
+  .kds-ribbon-secondary .kds-btn-reprint {
+    flex: 1; min-height: 36px; padding: 6px 8px;
+    font-size: 11px; border-radius: 6px;
+  }
 
   .kds-badge {
     font-size: 11px; padding: 3px 9px; border-radius: 12px;
@@ -1193,68 +1242,16 @@ const KDS_CSS = `
   .timer-warn   { color: #f97316; }
   .timer-ok     { color: #555; }
 
-  .kds-items { padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
-  .kds-item-row {
-    display: flex; align-items: center; gap: 10px;
-    padding: 10px 12px; border-radius: 8px; border-left: 3px solid transparent;
-    transition: background .1s; min-height: 44px;
-  }
-  .item-row-pending     { background: #ef444418; border-left-color: #ef4444; }
-  .item-row-cooking     { background: #f9731618; border-left-color: #f97316; }
-  .item-row-ready       { background: #22c55e18; border-left-color: #22c55e; }
-  .item-row-cancelled   { background: #1f293733; border-left-color: #374151; opacity: .5; }
-
-  .item-check { font-size: 14px; width: 18px; text-align: center; flex-shrink: 0; color: #555; }
-  .item-row-pending .item-check   { color: #ef4444; }
-  .item-row-cooking .item-check   { color: #f97316; }
-  .item-check-done                { color: #22c55e !important; }
-
-  .kds-item-name { font-size: 14px; color: #e0e0e0; flex: 1; line-height: 1.3; }
-  .item-row-pending .kds-item-name     { color: #fca5a5; }
-  .item-row-cooking .kds-item-name     { color: #fdba74; }
-  .item-row-ready   .kds-item-name     { color: #86efac; }
-  .item-row-cancelled .kds-item-name   { color: #6b7280; text-decoration: line-through; }
-  .item-name-done { text-decoration: line-through; color: #86efac !important; }
-
-  .kds-item-qty { font-size: 13px; color: #666; flex-shrink: 0; font-weight: 500; }
-
-  .kds-notes {
-    margin: 2px 12px 8px; padding: 8px 10px; border-radius: 6px;
-    border-left: 3px solid #eab308; background: #eab30810;
-    font-size: 12px; color: #fde68a; line-height: 1.4;
-  }
-
-  .kds-card-actions { padding: 10px 12px 4px; }
-
-  .kds-btn-action {
-    width: 100%; padding: 16px; border-radius: 10px;
-    font-size: 15px; font-weight: 700; letter-spacing: .06em;
-    border: none; cursor: pointer; display: flex; align-items: center;
-    justify-content: center; gap: 8px; transition: opacity .1s, transform .1s;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .kds-btn-action:active { opacity: 0.85; transform: scale(0.98); }
-  .btn-action-start  { background: #1d4ed8; color: #fff; }
-  .btn-action-ready  { background: #15803d; color: #fff; }
-  .btn-action-served { background: #1a2e1a; color: #22c55e; cursor: default; }
-  .btn-action-disabled { opacity: 1; }
-  .btn-action-icon   { font-size: 16px; }
-
-  /* Card footer: void + reprint side by side */
-  .kds-card-footer {
-    display: flex; align-items: center;
-    padding: 0 8px 8px; gap: 4px;
-  }
   .kds-btn-void {
-    flex: 1; padding: 9px; background: transparent; border: none;
-    color: #3f3f3f; font-size: 12px; cursor: pointer; text-align: center;
-    transition: color .15s; border-radius: 6px;
+    background: transparent; border: none;
+    color: #3f3f3f; cursor: pointer; text-align: center;
+    transition: color .15s;
   }
   .kds-btn-void:hover  { color: #ef4444; background: #ef444410; }
   .kds-btn-reprint {
-    flex: 1; padding: 9px; background: transparent;
-    border: 0.5px solid #2a2a2a; color: #555; font-size: 12px;
-    cursor: pointer; text-align: center; border-radius: 6px; transition: all .15s;
+    background: transparent;
+    border: 0.5px solid #2a2a2a; color: #555;
+    cursor: pointer; text-align: center; transition: all .15s;
   }
   .kds-btn-reprint:hover { color: #f0f0f0; border-color: #555; background: #1a1a1a; }
 
