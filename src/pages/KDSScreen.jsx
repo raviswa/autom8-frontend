@@ -358,73 +358,202 @@ function itemServiceIcon(item) {
   return '🍽️';
 }
 
-// ─── Item ribbon (one cart line = one actionable strip) ───────────────────────
+function orderGroupKey(item) {
+  const orderNum = item.order_item?.order?.order_number;
+  if (orderNum) return `order:${orderNum}`;
+  const token = item.token_number;
+  if (token) return `token:${String(token).toUpperCase()}`;
+  return `item:${item.id}`;
+}
 
-function ItemCard({ item, allItems, onAdvance, onVoid }) {
+function aggregateOrderStatus(items) {
+  const statuses = items.map((i) => i.status);
+  if (statuses.some((s) => s === 'pending')) return 'pending';
+  if (statuses.some((s) => s === 'in_progress')) return 'in_progress';
+  return 'ready';
+}
+
+function orderServiceTypeKey(item) {
+  const tableNum = item.order_item?.order?.table?.table_number;
+  if (tableNum) return 'dine_in';
+  const t = (item.service_type ?? '').toLowerCase();
+  if (t.includes('delivery')) return 'delivery';
+  if (t.includes('takeaway')) return 'takeaway';
+  if (t.includes('dine')) return 'dine_in';
+  return 'other';
+}
+
+function portalTokenMonthKeyIST() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: IST,
+    year: '2-digit',
+    month: '2-digit',
+  }).formatToParts(new Date());
+  const get = (t) => parts.find((p) => p.type === t)?.value || '00';
+  return `${get('year')}${get('month')}`;
+}
+
+function formatTokenDisplay(tokenId) {
+  const raw = String(tokenId || '').trim();
+  const monthly = raw.match(/^T-(\d{4})-(\d+)$/i);
+  if (monthly) {
+    const [, yymm, num] = monthly;
+    const n = parseInt(num, 10);
+    if (yymm === portalTokenMonthKeyIST()) return `T-${n}`;
+    return `T-${n} (${yymm.slice(0, 2)}/${yymm.slice(2)})`;
+  }
+  return raw || '—';
+}
+
+function orderHeaderTitle(item) {
+  const tableNum = item.order_item?.order?.table?.table_number;
+  if (tableNum) return `TABLE : ${tableNum}`;
+  const token = item.token_number;
+  if (token) return `TOKEN : ${formatTokenDisplay(token)}`;
+  return itemServiceLabel(item).toUpperCase();
+}
+
+function orderHeaderSubtitle(item) {
+  const tableNum = item.order_item?.order?.table?.table_number;
+  if (tableNum) return 'DINE IN';
+  const t = (item.service_type ?? '').toLowerCase();
+  if (t.includes('delivery')) return 'DELIVERY';
+  if (t.includes('takeaway')) return 'TAKE AWAY';
+  if (t.includes('dine')) return 'DINE IN';
+  return 'ORDER';
+}
+
+/** Group live KDS lines into one ticket per table / order / token. */
+function groupItemsByOrder(items) {
+  const map = new Map();
+  for (const item of items) {
+    const key = orderGroupKey(item);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(item);
+  }
+
+  return Array.from(map.entries()).map(([key, groupItems]) => {
+    const sorted = [...groupItems].sort(
+      (a, b) => new Date(toUTC(a.created_at)) - new Date(toUTC(b.created_at)),
+    );
+    const anchor = sorted[0];
+    const orderNum = anchor.order_item?.order?.order_number;
+    const createdAtMs = sorted.reduce(
+      (min, i) => {
+        const t = new Date(toUTC(i.created_at)).getTime();
+        return Number.isFinite(t) ? Math.min(min, t) : min;
+      },
+      Date.now(),
+    );
+    return {
+      key,
+      items: sorted,
+      anchor,
+      orderNumber: orderNum?.slice(-8) ?? formatTokenDisplay(anchor.token_number) ?? anchor.id,
+      serviceType: orderServiceTypeKey(anchor),
+      aggregateStatus: aggregateOrderStatus(sorted),
+      createdAt: new Date(createdAtMs).toISOString(),
+    };
+  }).sort((a, b) => new Date(toUTC(b.createdAt)) - new Date(toUTC(a.createdAt)));
+}
+
+// ─── Order ticket (grouped by table / order) ─────────────────────────────────
+
+function OrderItemRow({ item, onAdvance, onVoid }) {
+  const name = item.order_item?.menu_item?.name ?? item.item_name ?? 'Item';
+  const qty = item.order_item?.quantity ?? 1;
   const status = item.status;
 
-  const actionMap = {
-    pending:     { label: 'Start', full: 'START COOKING', cls: 'btn-action-start',  icon: '▶' },
-    in_progress: { label: 'Ready', full: 'MARK READY',    cls: 'btn-action-ready',  icon: '✓' },
-    ready:       { label: 'Served', full: 'SERVED ✓',     cls: 'btn-action-served', icon: ''  },
-  };
-  const action = actionMap[status] ?? actionMap.pending;
-
-  const name     = item.order_item?.menu_item?.name ?? item.item_name ?? 'Item';
-  const qty      = item.order_item?.quantity ?? 1;
-  const orderNum = item.order_item?.order?.order_number?.slice(-6)
-    ?? item.token_number
-    ?? item.id;
-
-  const handleReprint = () => printKOT(buildKOTFromFeedItem(item, allItems));
+  const btnLabel = status === 'pending' ? 'Start' : status === 'in_progress' ? 'Done' : 'Done';
+  const btnCls = status === 'ready' ? 'row-btn-done' : status === 'in_progress' ? 'row-btn-cooking' : 'row-btn-new';
 
   return (
-    <div className={`kds-ribbon status-${status}`}>
-      <div className="kds-ribbon-body">
-        <div className="kds-ribbon-main">
-          <span className="kds-ribbon-icon" aria-hidden>{itemServiceIcon(item)}</span>
-          <div className="kds-ribbon-copy">
-            <div className="kds-ribbon-title">
-              <span className="kds-ribbon-name">{name}</span>
-              <span className="kds-ribbon-qty">×{qty}</span>
-              <StatusBadge status={status} isServed={false} />
-            </div>
-            <div className="kds-ribbon-meta">
-              <span>{itemServiceLabel(item)} · #{orderNum}</span>
-              <TimerLabel
-                createdAt={item.created_at}
-                status={status}
-                readyAt={item.updated_at}
-              />
-            </div>
-            {item.special_instructions && (
-              <div className="kds-ribbon-notes">⚠ {item.special_instructions}</div>
-            )}
-          </div>
+    <div className={`kds-ticket-row status-${status}`}>
+      <div className="kds-ticket-row-body">
+        <div className="kds-ticket-row-title">
+          <span className="kds-ticket-qty">{qty}x</span>
+          <span className="kds-ticket-item-name">{name}</span>
         </div>
-
-        <div className="kds-ribbon-actions">
-          <button
-            type="button"
-            className={`kds-ribbon-btn-primary ${action.cls} ${status === 'ready' ? 'btn-action-disabled' : ''}`}
-            onClick={() => status !== 'ready' && onAdvance(item.id, status)}
-            disabled={status === 'ready'}
-            title={action.full}
-          >
-            {action.icon && <span className="btn-action-icon">{action.icon}</span>}
-            <span className="kds-ribbon-btn-label">{action.full}</span>
+        {item.special_instructions && (
+          <div className="kds-ticket-mod">* {item.special_instructions}</div>
+        )}
+      </div>
+      <div className="kds-ticket-row-actions">
+        {status !== 'ready' && (
+          <button type="button" className="kds-ticket-void" onClick={() => onVoid(item.id)} title="Void item">
+            ✕
           </button>
-          <div className="kds-ribbon-secondary">
-            {status !== 'ready' && (
-              <button type="button" className="kds-btn-void" onClick={() => onVoid(item.id)}>
-                Void
-              </button>
-            )}
-            <button type="button" className="kds-btn-reprint" onClick={handleReprint}>
-              Reprint
-            </button>
-          </div>
+        )}
+        <button
+          type="button"
+          className={`kds-ticket-row-btn ${btnCls}`}
+          onClick={() => status !== 'ready' && onAdvance(item.id, status)}
+          disabled={status === 'ready'}
+        >
+          {btnLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll }) {
+  const { anchor, items, orderNumber, serviceType, aggregateStatus, createdAt } = order;
+  const handleReprint = () => printKOT(buildKOTFromFeedItem(anchor, allItems));
+
+  const pendingCount = items.filter((i) => i.status === 'pending').length;
+  const cookingCount = items.filter((i) => i.status === 'in_progress').length;
+  const readyCount = items.filter((i) => i.status === 'ready').length;
+
+  let checkAllLabel = 'Check all';
+  let checkAllDisabled = false;
+  if (pendingCount > 0) checkAllLabel = `Start all (${pendingCount})`;
+  else if (cookingCount > 0) checkAllLabel = `Mark all ready (${cookingCount})`;
+  else {
+    checkAllLabel = `All ready (${readyCount})`;
+    checkAllDisabled = true;
+  }
+
+  return (
+    <div className={`kds-ticket status-${aggregateStatus} type-${serviceType}`}>
+      <div className={`kds-ticket-head type-${serviceType}`}>
+        <div className="kds-ticket-head-left">
+          <p className="kds-ticket-table">{orderHeaderTitle(anchor)}</p>
+          <p className="kds-ticket-type">{orderHeaderSubtitle(anchor)}</p>
         </div>
+        <div className="kds-ticket-head-right">
+          <p className="kds-ticket-time">{formatISTTime(createdAt)}</p>
+          <p className="kds-ticket-order-no">Order no. {orderNumber}</p>
+        </div>
+      </div>
+
+      <div className="kds-ticket-items">
+        {items.map((item) => (
+          <OrderItemRow
+            key={item.id}
+            item={item}
+            onAdvance={onAdvance}
+            onVoid={onVoid}
+          />
+        ))}
+      </div>
+
+      <div className="kds-ticket-footer">
+        <button
+          type="button"
+          className="kds-ticket-btn kds-ticket-btn-reprint"
+          onClick={handleReprint}
+        >
+          Reprint KOT
+        </button>
+        <button
+          type="button"
+          className="kds-ticket-btn kds-ticket-btn-checkall"
+          onClick={() => !checkAllDisabled && onAdvanceAll(items)}
+          disabled={checkAllDisabled}
+        >
+          {checkAllLabel}
+        </button>
       </div>
     </div>
   );
@@ -697,16 +826,17 @@ export default function KDSScreen() {
   // ── Fetch feed ──────────────────────────────────────────────────────────────
 const fetchFeed = useCallback(async () => {
   const token = localStorage.getItem('authToken');
-  if (!token) return [];                          // ← don't fire without a token
+  if (!token) return [];
   try {
     const res = await apiClient.get('/api/kds/feed', {
       params: { status: 'all' },
-      headers: { Authorization: `Bearer ${token}` },  // ← attach inline as fallback
+      headers: { Authorization: `Bearer ${token}` },
     });
-    setAllItems(res.data.items || []);
-    return res.data.items || [];
+    const items = res.data.items || [];
+    setAllItems(items);
+    return items;
   } catch (err) {
-    console.error('[KDS] fetchFeed error:', err);
+    console.error('[KDS] fetchFeed error:', err?.response?.data || err.message);
     return [];
   } finally {
     setLoading(false);
@@ -800,29 +930,29 @@ const fetchFeed = useCallback(async () => {
   // ── Live item filtering ─────────────────────────────────────────────────────
   const nowMs = Date.now();
 
-  const todayActive = allItems.filter((i) => {
+  // Pending/cooking stay until done. Ready stays until READY_TIMEOUT_MINS — no calendar-day cutoff.
+  const liveItems = allItems.filter((i) => {
     if (!['pending', 'in_progress', 'ready'].includes(i.status)) return false;
-    // Pending/cooking ribbons stay visible until done — even if kitchen_start was yesterday.
-    if (i.status === 'pending' || i.status === 'in_progress') return true;
-    return isTodayIST(i.created_at);
+    if (i.status !== 'ready') return true;
+    const readyAt = i.updated_at ?? i.created_at;
+    const readyMs = new Date(toUTC(readyAt)).getTime();
+    if (!Number.isFinite(readyMs)) return true;
+    return (nowMs - readyMs) / 60000 <= READY_TIMEOUT_MINS;
   });
+
+  liveItems.sort((a, b) => new Date(toUTC(b.created_at)) - new Date(toUTC(a.created_at)));
 
   const laterScheduled = scheduledOrders.filter(o => o.bucket === 'future');
   const todaysFuture = scheduledOrders.filter(o => o.bucket === 'todays_future');
   const startingNow = scheduledOrders.filter(o => o.bucket === 'present');
 
-  const liveItems = todayActive.filter(i => {
-    if (i.status !== 'ready') return true;
-    const readyAt = i.updated_at ?? i.created_at;
-    return (nowMs - new Date(toUTC(readyAt))) / 60000 <= READY_TIMEOUT_MINS;
-  });
-
-  liveItems.sort((a, b) => new Date(toUTC(b.created_at)) - new Date(toUTC(a.created_at)));
-
   const filterItems = (f) =>
     f === 'all' ? liveItems : liveItems.filter(i => i.status === f);
 
-  const displayItems = filterItems(filter);
+  const allOrders = groupItemsByOrder(liveItems);
+  const displayOrders = filter === 'all'
+    ? allOrders
+    : allOrders.filter((o) => o.items.some((i) => i.status === filter));
 
   const counts = {
     all:         liveItems.length,
@@ -854,6 +984,13 @@ const fetchFeed = useCallback(async () => {
       console.error('[KDS] voidItem error:', err);
       fetchFeed();
     }
+  };
+
+  const advanceAllInOrder = async (items) => {
+    const pending = items.filter((i) => i.status === 'pending');
+    const cooking = items.filter((i) => i.status === 'in_progress');
+    const batch = pending.length ? pending : cooking;
+    await Promise.all(batch.map((i) => advanceItem(i.id, i.status)));
   };
 
   if (loading) {
@@ -958,24 +1095,27 @@ const fetchFeed = useCallback(async () => {
                   <span className="pill-count">{counts[key]}</span>
                 </button>
               ))}
-              <span className="kds-sort-hint">Today · newest first</span>
+              <span className="kds-sort-hint">
+                {displayOrders.length} order{displayOrders.length === 1 ? '' : 's'} · newest first
+              </span>
             </div>
 
             <div className="kds-board">
-              {displayItems.length === 0 ? (
+              {displayOrders.length === 0 ? (
                 <div className="kds-empty">
                   <p className="kds-empty-icon">😎</p>
                   <p>{filter === 'all' ? 'No active orders right now' : `No ${filter.replace('_', ' ')} orders`}</p>
                   <p className="kds-empty-sub">Kitchen is caught up</p>
                 </div>
               ) : (
-                displayItems.map(item => (
-                  <ItemCard
-                    key={item.id}
-                    item={item}
+                displayOrders.map((order) => (
+                  <OrderTicketCard
+                    key={order.key}
+                    order={order}
                     allItems={allItems}
                     onAdvance={advanceItem}
                     onVoid={voidItem}
+                    onAdvanceAll={advanceAllInOrder}
                   />
                 ))
               )}
@@ -1131,14 +1271,14 @@ const KDS_CSS = `
 
   .kds-board {
     flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
-    padding: 12px 20px 24px;
+    padding: 16px 20px 24px;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(520px, 1fr));
-    gap: 12px; align-content: start; align-items: start;
+    grid-template-columns: repeat(auto-fill, minmax(272px, 1fr));
+    gap: 16px; align-content: start; align-items: start;
   }
 
-  @media (max-width: 1100px) {
-    .kds-board { grid-template-columns: 1fr; }
+  @media (min-width: 1400px) {
+    .kds-board { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   }
 
   .kds-empty {
@@ -1149,84 +1289,105 @@ const KDS_CSS = `
   .kds-empty p   { font-size: 16px; color: #555; }
   .kds-empty-sub { font-size: 13px; color: #383838; }
 
-  /* Live item ribbon — one line item, large tap targets */
-  .kds-ribbon {
-    background: #141414; border-radius: 12px; border: 2px solid #252525;
-    min-height: 108px; flex-shrink: 0; overflow: visible;
-    transition: border-color .2s;
+  /* Order ticket — grouped by table / order (reference KDS layout) */
+  .kds-ticket {
+    background: #111; border-radius: 10px; overflow: hidden;
+    border: 2px solid #2a2a2a; display: flex; flex-direction: column;
+    min-height: 220px; flex-shrink: 0;
   }
-  .kds-ribbon.status-pending     { border-color: #ef4444; }
-  .kds-ribbon.status-in_progress { border-color: #f97316; }
-  .kds-ribbon.status-ready       { border-color: #22c55e; }
-  .kds-ribbon.status-cancelled   { opacity: .45; border-color: #374151; }
+  .kds-ticket.status-pending     { border-color: #ef4444; }
+  .kds-ticket.status-in_progress { border-color: #f97316; }
+  .kds-ticket.status-ready       { border-color: #22c55e; }
 
-  .kds-ribbon-body {
-    display: flex; align-items: stretch; gap: 14px;
-    padding: 14px 16px; min-height: 108px;
+  .kds-ticket-head {
+    display: flex; justify-content: space-between; gap: 10px;
+    padding: 10px 12px; color: #fff;
+  }
+  .kds-ticket-head.type-dine_in  { background: linear-gradient(135deg, #ea580c, #c2410c); }
+  .kds-ticket-head.type-takeaway { background: linear-gradient(135deg, #16a34a, #15803d); }
+  .kds-ticket-head.type-delivery { background: linear-gradient(135deg, #ca8a04, #a16207); }
+  .kds-ticket-head.type-other    { background: linear-gradient(135deg, #4b5563, #374151); }
+
+  .kds-ticket-table {
+    margin: 0; font-size: 14px; font-weight: 800; letter-spacing: 0.03em; line-height: 1.2;
+  }
+  .kds-ticket-type {
+    margin: 3px 0 0; font-size: 11px; font-weight: 600; opacity: 0.92; letter-spacing: 0.06em;
+  }
+  .kds-ticket-head-right { text-align: right; flex-shrink: 0; }
+  .kds-ticket-time { margin: 0; font-size: 11px; font-weight: 600; opacity: 0.95; }
+  .kds-ticket-order-no { margin: 3px 0 0; font-size: 10px; opacity: 0.85; }
+
+  .kds-ticket-items {
+    flex: 1; display: flex; flex-direction: column; gap: 0;
+    background: #0d0d0d; padding: 8px 0;
   }
 
-  .kds-ribbon-main {
-    flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 12px;
+  .kds-ticket-row {
+    display: flex; align-items: stretch; gap: 8px;
+    padding: 8px 10px; border-bottom: 1px solid #1a1a1a;
   }
+  .kds-ticket-row:last-child { border-bottom: none; }
 
-  .kds-ribbon-icon { font-size: 28px; line-height: 1; flex-shrink: 0; margin-top: 2px; }
-
-  .kds-ribbon-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-
-  .kds-ribbon-title {
-    display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  .kds-ticket-row-body { flex: 1; min-width: 0; }
+  .kds-ticket-row-title {
+    display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
   }
-
-  .kds-ribbon-name {
-    font-size: 18px; font-weight: 600; color: #f5f5f5; line-height: 1.25;
+  .kds-ticket-qty {
+    font-size: 13px; font-weight: 800; color: #fbbf24; flex-shrink: 0;
+  }
+  .kds-ticket-item-name {
+    font-size: 14px; font-weight: 600; color: #f3f4f6; line-height: 1.3;
     word-break: break-word;
   }
-  .kds-ribbon.status-pending .kds-ribbon-name     { color: #fecaca; }
-  .kds-ribbon.status-in_progress .kds-ribbon-name { color: #fed7aa; }
-  .kds-ribbon.status-ready .kds-ribbon-name     { color: #bbf7d0; text-decoration: line-through; }
-
-  .kds-ribbon-qty { font-size: 16px; font-weight: 700; color: #9ca3af; flex-shrink: 0; }
-
-  .kds-ribbon-meta {
-    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
-    font-size: 12px; color: #6b7280;
+  .kds-ticket-row.status-ready .kds-ticket-item-name {
+    color: #86efac; text-decoration: line-through;
+  }
+  .kds-ticket-mod {
+    margin-top: 4px; font-size: 11px; color: #9ca3af; line-height: 1.35;
+    padding-left: 22px;
   }
 
-  .kds-ribbon-notes {
-    font-size: 12px; color: #fde68a; line-height: 1.35;
-    padding: 6px 8px; border-radius: 6px; background: #eab30814;
-    border-left: 3px solid #eab308;
+  .kds-ticket-row-actions {
+    display: flex; align-items: center; gap: 4px; flex-shrink: 0;
   }
-
-  .kds-ribbon-actions {
-    flex-shrink: 0; width: 172px; display: flex; flex-direction: column;
-    justify-content: center; gap: 8px;
+  .kds-ticket-void {
+    width: 28px; height: 36px; border: none; background: transparent;
+    color: #4b5563; cursor: pointer; font-size: 12px; border-radius: 6px;
   }
+  .kds-ticket-void:hover { color: #ef4444; background: #ef444415; }
 
-  .kds-ribbon-btn-primary {
-    width: 100%; min-height: 56px; padding: 10px 12px;
-    border-radius: 10px; border: none; cursor: pointer;
-    font-size: 13px; font-weight: 700; letter-spacing: .04em;
-    display: flex; align-items: center; justify-content: center; gap: 6px;
-    transition: opacity .1s, transform .1s;
+  .kds-ticket-row-btn {
+    min-width: 64px; min-height: 40px; padding: 8px 10px;
+    border: none; border-radius: 8px; font-size: 12px; font-weight: 700;
+    cursor: pointer; letter-spacing: 0.03em;
     -webkit-tap-highlight-color: transparent;
   }
-  .kds-ribbon-btn-primary:active:not(:disabled) { opacity: 0.88; transform: scale(0.98); }
-  .kds-ribbon-btn-label { line-height: 1.2; text-align: center; }
-  .btn-action-start  { background: #1d4ed8; color: #fff; }
-  .btn-action-ready  { background: #15803d; color: #fff; }
-  .btn-action-served { background: #1a2e1a; color: #22c55e; cursor: default; }
-  .btn-action-disabled { opacity: 1; }
-  .btn-action-icon   { font-size: 15px; flex-shrink: 0; }
+  .kds-ticket-row-btn:disabled { cursor: default; }
+  .row-btn-new     { background: #374151; color: #e5e7eb; }
+  .row-btn-new:hover:not(:disabled)     { background: #1d4ed8; color: #fff; }
+  .row-btn-cooking { background: #7c2d12; color: #fed7aa; }
+  .row-btn-cooking:hover:not(:disabled) { background: #15803d; color: #fff; }
+  .row-btn-done    { background: #14532d; color: #86efac; }
 
-  .kds-ribbon-secondary {
-    display: flex; align-items: center; justify-content: center; gap: 6px;
+  .kds-ticket-footer {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0;
+    border-top: 1px solid #222;
   }
-  .kds-ribbon-secondary .kds-btn-void,
-  .kds-ribbon-secondary .kds-btn-reprint {
-    flex: 1; min-height: 36px; padding: 6px 8px;
-    font-size: 11px; border-radius: 6px;
+  .kds-ticket-btn {
+    min-height: 48px; border: none; cursor: pointer;
+    font-size: 12px; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; transition: opacity .15s;
   }
+  .kds-ticket-btn:disabled { opacity: 0.55; cursor: default; }
+  .kds-ticket-btn-reprint {
+    background: #1f2937; color: #d1d5db; border-right: 1px solid #222;
+  }
+  .kds-ticket-btn-reprint:hover:not(:disabled) { background: #374151; color: #fff; }
+  .kds-ticket-btn-checkall {
+    background: #14532d; color: #86efac;
+  }
+  .kds-ticket-btn-checkall:hover:not(:disabled) { background: #166534; color: #fff; }
 
   .kds-badge {
     font-size: 11px; padding: 3px 9px; border-radius: 12px;
