@@ -35,7 +35,7 @@ export function resolveSupplyApiBase() {
 
 export function resolveSupplyApiBase() {
   if (typeof window !== 'undefined' && window.location.hostname === 'app.autom8.works') {
-    return 'https://supply.api.autom8.works';
+    return 'https://supply-api.autom8.works';
   }
   return import.meta.env.VITE_SUPPLY_API_URL || 'http://localhost:3002';
 }
