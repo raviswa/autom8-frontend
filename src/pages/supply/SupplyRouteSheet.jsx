@@ -1,3 +1,4 @@
+import { resolveSupplyApiBase } from '../../config/api';
 // src/pages/supply/SupplyRouteSheet.jsx
 // MODULE 6 — Delivery Route Sheet
 // Orders for a date grouped by pincode, sorted by client name.
@@ -6,7 +7,7 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
-const API = import.meta.env.VITE_API_URL || '';
+const API = resolveSupplyApiBase();
 const todayISO = () => new Date().toISOString().split('T')[0];
 
 export default function SupplyRouteSheet() {

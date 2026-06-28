@@ -1,3 +1,4 @@
+import { resolveSupplyApiBase } from '../../config/api';
 // src/pages/supply/SupplyClients.jsx
 // ============================================================================
 // MODULE 2 — Client Management (List View)
@@ -17,7 +18,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
-const API = import.meta.env.VITE_API_URL || '';
+const API = resolveSupplyApiBase();
 
 function getToken() { return localStorage.getItem('supply_token'); }
 

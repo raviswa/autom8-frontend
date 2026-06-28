@@ -1,3 +1,4 @@
+import { resolveSupplyApiBase } from '../../config/api';
 // src/pages/supply/OrderForm.jsx
 // ============================================================================
 // MODULE 5 — Client-facing Order Form (public, no login required)
@@ -16,7 +17,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 
-const API = import.meta.env.VITE_API_URL || '';
+const API = resolveSupplyApiBase();
 
 // ── Form states ───────────────────────────────────────────────────────────────
 const STATE = {

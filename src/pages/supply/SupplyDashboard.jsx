@@ -1,3 +1,4 @@
+import { resolveSupplyApiBase } from '../../config/api';
 import { Link } from 'react-router-dom';
 
 const navItems = [

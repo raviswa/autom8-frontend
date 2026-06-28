@@ -1,3 +1,4 @@
+import { resolveSupplyApiBase } from '../../config/api';
 // src/pages/supply/SupplyPickingList.jsx
 // MODULE 6 — Aggregated Picking List
 // All items needed across all orders for a given delivery date.
@@ -5,7 +6,7 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
-const API = import.meta.env.VITE_API_URL || '';
+const API = resolveSupplyApiBase();
 const todayISO = () => new Date().toISOString().split('T')[0];
 
 export default function SupplyPickingList() {

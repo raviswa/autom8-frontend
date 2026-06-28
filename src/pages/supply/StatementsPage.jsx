@@ -1,3 +1,4 @@
+import { resolveSupplyApiBase } from '../../config/api';
 // src/pages/supply/StatementsPage.jsx
 // ============================================================================
 // MODULE 10 — Statement Engine · Frontend
@@ -16,7 +17,7 @@ import {
   Clock, Filter, ArrowUpDown
 } from 'lucide-react';
 
-const API = import.meta.env.VITE_API_URL || 'https://api.autom8.works';
+const API = resolveSupplyApiBase();
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 

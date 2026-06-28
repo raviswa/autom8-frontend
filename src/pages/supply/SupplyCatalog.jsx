@@ -14,9 +14,9 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { C, CARD, SECTION_LABEL, PILL_VARIANTS } from '../../styles/theme';
-import { resolveApiBase } from '../../config/api';
+import { resolveSupplyApiBase } from '../../config/api';
 
-const API = resolveApiBase();
+const API = resolveSupplyApiBase();
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 

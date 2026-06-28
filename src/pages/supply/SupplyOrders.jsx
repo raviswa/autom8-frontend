@@ -1,3 +1,4 @@
+import { resolveSupplyApiBase } from '../../config/api';
 // src/pages/supply/SupplyOrders.jsx
 // MODULE 6 — Supplier Order Management
 // Lists all orders with date/status/client filters. Links to detail.
@@ -5,7 +6,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 
-const API = import.meta.env.VITE_API_URL || '';
+const API = resolveSupplyApiBase();
 
 const STATUS_META = {
   confirmed:           { label: 'Confirmed',           color: 'bg-blue-100 text-blue-800'   },

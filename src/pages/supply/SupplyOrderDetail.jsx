@@ -1,7 +1,8 @@
+import { resolveSupplyApiBase } from '../../config/api';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
-const API = import.meta.env.VITE_API_URL || '';
+const API = resolveSupplyApiBase();
 
 export default function SupplyOrderDetail() {
   const { id } = useParams();

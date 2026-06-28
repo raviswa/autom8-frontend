@@ -1,6 +1,7 @@
+import { resolveSupplyApiBase } from '../../config/api';
 import { useEffect, useState } from 'react';
 
-const API = import.meta.env.VITE_API_URL || '';
+const API = resolveSupplyApiBase();
 
 function token() {
   return localStorage.getItem('supply_token') || '';

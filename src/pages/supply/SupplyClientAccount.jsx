@@ -1,3 +1,4 @@
+import { resolveSupplyApiBase } from '../../config/api';
 // src/pages/supply/SupplyClientAccount.jsx
 // ============================================================================
 // MODULE 7 + 8 — Client Account Page
@@ -11,7 +12,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 
-const API_BASE = import.meta.env.VITE_API_URL || '';
+const API_BASE = resolveSupplyApiBase();
 
 function getToken() {
   return localStorage.getItem('supply_token');

@@ -1,3 +1,4 @@
+import { resolveSupplyApiBase } from '../../config/api';
 // src/pages/supply/SupplyPaymentClaims.jsx
 // ============================================================================
 // MODULE 8 — Payment Claims Dashboard
@@ -10,7 +11,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 
-const API_BASE = import.meta.env.VITE_API_URL || '';
+const API_BASE = resolveSupplyApiBase();
 
 function getToken() {
   return localStorage.getItem('supply_token');

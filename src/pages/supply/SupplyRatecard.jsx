@@ -15,9 +15,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { C, CARD, SECTION_LABEL } from '../../styles/theme';
-import { resolveApiBase } from '../../config/api';
+import { resolveSupplyApiBase } from '../../config/api';
 
-const API = resolveApiBase();
+const API = resolveSupplyApiBase();
 
 const CATEGORIES = [
   'Vegetables', 'Fruits', 'Dairy', 'Eggs & Poultry',
