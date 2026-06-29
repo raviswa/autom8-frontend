@@ -1,11 +1,16 @@
-// Dashboard v202605291757
+//  - Live / Analytics tab split
+//  - useChartData: orders sorted by created_at before building labels
+//  - useKotStats: table changed from kot_tickets → kds_items
+//  - CloudKitchenLocationTip removed (not relevant for dine-in restaurants)
+//  - useCancelStats: maps new backend fields (sessionsCompleted, sessionsAborted)
+//  - CancellationVoids: uses correct session fields
 
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { supabase, useAuth } from "../contexts/AuthContext";
 import { Link } from "react-router-dom";
 import OwnerInsights from "../components/OwnerInsights";
 
-// ── Export to Excel (no npm install — uses plain CSV download) ────────────────
+// ── Export to CSV ─────────────────────────────────────────────────────────────
 function exportToCSV(rows, filename) {
   if (!rows?.length) return;
   const headers = Object.keys(rows[0]);
@@ -110,7 +115,6 @@ function RevenueChart({ labels, revenue, orders, covers, preset }) {
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const maxLabels = 15;
       chartRef.current = new window.Chart(ctx, {
         data: {
           labels,
@@ -123,7 +127,7 @@ function RevenueChart({ labels, revenue, orders, covers, preset }) {
           responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
           plugins: { legend: { display: false } },
           scales: {
-            x: { ticks: { color: "#888", font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: maxLabels }, grid: { display: false } },
+            x: { ticks: { color: "#888", font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 15 }, grid: { display: false } },
             y: { ticks: { color: "#888", font: { size: 10 }, callback: v => fmtINR(v), maxTicksLimit: 6 }, grid: { color: "rgba(0,0,0,0.06)" } },
             y2: { position: "right", ticks: { color: "#888", font: { size: 10 }, maxTicksLimit: 6 }, grid: { display: false } },
           },
@@ -245,31 +249,23 @@ function TableOccupancy({ tables, takeawayActive = 0, queueWaiting = 0 }) {
   const free     = tables?.filter(t => t.status === "free").length ?? 0;
   const total    = tables?.length ?? 0;
   const occRate  = total ? Math.round((occupied / total) * 100) : 0;
-  const livePulse = takeawayActive + queueWaiting + occupied;
   return (
     <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "16px 20px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <span style={{ fontSize: 14, fontWeight: 500, color: "#111" }}>Table occupancy</span>
-        <span style={{ fontSize: 11, color: "#aaa" }}>live now</span>
+        <span style={{ fontSize: 11, color: "#aaa", display: "flex", alignItems: "center", gap: 4 }}>
+          <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: "#1D9E75", animation: "pulse 2s infinite" }}></span>
+          live now
+        </span>
       </div>
       {(takeawayActive > 0 || queueWaiting > 0) && (
         <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-          {takeawayActive > 0 && (
-            <span style={{ fontSize: 11, fontWeight: 500, color: "#185FA5", background: "#E6F1FB", padding: "4px 10px", borderRadius: 20 }}>
-              Takeaway active: {takeawayActive}
-            </span>
-          )}
-          {queueWaiting > 0 && (
-            <span style={{ fontSize: 11, fontWeight: 500, color: "#633806", background: "#FAEEDA", padding: "4px 10px", borderRadius: 20 }}>
-              Queue waiting: {queueWaiting}
-            </span>
-          )}
+          {takeawayActive > 0 && <span style={{ fontSize: 11, fontWeight: 500, color: "#185FA5", background: "#E6F1FB", padding: "4px 10px", borderRadius: 20 }}>Takeaway active: {takeawayActive}</span>}
+          {queueWaiting > 0 && <span style={{ fontSize: 11, fontWeight: 500, color: "#633806", background: "#FAEEDA", padding: "4px 10px", borderRadius: 20 }}>Queue waiting: {queueWaiting}</span>}
         </div>
       )}
-      {livePulse === 0 && (
-        <div style={{ fontSize: 11, color: "#aaa", marginBottom: 10, lineHeight: 1.45 }}>
-          No tables occupied right now. Takeaway orders don&apos;t use tables — see badges above when active.
-        </div>
+      {(occupied + takeawayActive + queueWaiting) === 0 && (
+        <div style={{ fontSize: 11, color: "#aaa", marginBottom: 10, lineHeight: 1.45 }}>No tables occupied right now.</div>
       )}
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
         <div style={{ minWidth: 90 }}>
@@ -330,6 +326,7 @@ function KRow({ label, value, danger, warn }) {
   );
 }
 
+// FIX: changed from kot_tickets → kds_items with correct column names
 function KotStatus({ stats }) {
   const total = (stats?.open ?? 0) + (stats?.inProgress ?? 0) + (stats?.served ?? 0);
   const isEmpty = total === 0;
@@ -353,11 +350,12 @@ function KotStatus({ stats }) {
   );
 }
 
+// FIX: uses new backend fields: sessionsCompleted, sessionsAborted, totalSessions, sessionAbortRate
 function CancellationVoids({ stats }) {
-  const sessionAborts = stats?.sessionAborts ?? stats?.bookingCancels ?? 0;
-  const totalSessions = stats?.totalSessions ?? stats?.totalBookings ?? 0;
   const sessionsCompleted = stats?.sessionsCompleted ?? 0;
-  const abortRate = stats?.sessionAbortRate ?? stats?.bookingRate;
+  const sessionsAborted   = stats?.sessionsAborted   ?? 0;
+  const totalSessions     = stats?.totalSessions     ?? 0;
+  const sessionAbortRate  = stats?.sessionAbortRate  ?? 0;
 
   return (
     <StatCard title="Session outcomes &amp; voids" sub="selected period">
@@ -365,8 +363,8 @@ function CancellationVoids({ stats }) {
         fontSize: 12, color: "#633806", background: "#FAEEDA", border: "0.5px solid #FAC775",
         borderRadius: 8, padding: "10px 12px", marginBottom: 14, lineHeight: 1.55,
       }}>
-        <strong>Not the same as lost revenue.</strong> WhatsApp &quot;aborts&quot; are usually customers tapping Home or restarting — not no-shows.
-        Completed visits below are normal check-outs.
+        <strong>Not the same as lost revenue.</strong> WhatsApp &ldquo;aborts&rdquo; are customers who
+        explicitly cancelled their session — not no-shows. Completed visits are normal check-outs.
       </div>
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 11, fontWeight: 500, color: "#888", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>
@@ -374,9 +372,9 @@ function CancellationVoids({ stats }) {
         </div>
         <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
           <MiniStat label="Completed visits" value={sessionsCompleted} color="#1D9E75" />
-          <MiniStat label="Customer aborted" value={sessionAborts} color={sessionAborts > 0 ? "#BA7517" : "#111"} />
+          <MiniStat label="Customer aborted" value={sessionsAborted}   color={sessionsAborted > 0 ? "#BA7517" : "#111"} />
           <MiniStat label="Total sessions"   value={totalSessions} />
-          <MiniStat label="Abort rate"       value={abortRate != null ? `${abortRate}%` : "—"} color="#BA7517" />
+          <MiniStat label="Abort rate"       value={`${sessionAbortRate}%`} color={sessionAbortRate > 10 ? "#BA7517" : "#111"} />
         </div>
       </div>
       <div style={{ borderTop: "0.5px solid #F0F0EE", marginBottom: 14 }} />
@@ -387,7 +385,7 @@ function CancellationVoids({ stats }) {
         <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
           <MiniStat label="Cancelled"    value={stats?.cancelled   ?? 0} color="#A32D2D" />
           <MiniStat label="Revenue lost" value={fmtINR(stats?.revLost ?? 0)} color="#BA7517" />
-          <MiniStat label="Rate"         value={stats?.rate != null ? `${stats.rate}%` : "—"} color="#BA7517" />
+          <MiniStat label="Rate"         value={`${stats?.rate ?? 0}%`} color="#BA7517" />
         </div>
         <KRow label="Revenue lost"        value={stats?.revLost != null ? `₹${stats.revLost.toLocaleString("en-IN")}` : "₹0"} danger />
         <KRow label="Total orders (base)" value={stats?.totalOrders ?? "—"} />
@@ -425,13 +423,21 @@ function useKpiData(restaurantId, startISO, endISO) {
   return data;
 }
 
+// FIX: added .order('created_at', { ascending: true }) so chart labels are always chronological
 function useChartData(restaurantId, startISO, endISO, preset) {
   const [data, setData] = useState(null);
   useEffect(() => {
     if (!restaurantId) return;
     setData(null);
     (async () => {
-      const { data: orders } = await supabase.from("orders").select("total_amount, created_at").eq("restaurant_id", restaurantId).not("status", "eq", "cancelled").gte("created_at", startISO).lte("created_at", endISO);
+      const { data: orders } = await supabase
+        .from("orders")
+        .select("total_amount, created_at")
+        .eq("restaurant_id", restaurantId)
+        .not("status", "eq", "cancelled")
+        .gte("created_at", startISO)
+        .lte("created_at", endISO)
+        .order("created_at", { ascending: true });   // ← FIX: chronological order
       if (!orders) return;
       const byLabel = {};
       orders.forEach(o => {
@@ -478,7 +484,7 @@ function useMenuItems(restaurantId, startISO, endISO) {
 function useTables(restaurantId) {
   const [snapshot, setSnapshot] = useState({ tables: [], takeawayActive: 0, queueWaiting: 0 });
   const ACTIVE_ORDER_STATUSES = ['pending', 'confirmed', 'in_progress'];
-  const fetch = useCallback(async () => {
+  const fetchTables = useCallback(async () => {
     if (!restaurantId) return;
     const [{ data: rawTables }, { data: orders }, { data: tokens }] = await Promise.all([
       supabase.from("tables").select("id, table_number, section, status, capacity").eq("restaurant_id", restaurantId).order("table_number", { ascending: true }),
@@ -486,7 +492,7 @@ function useTables(restaurantId) {
       supabase.from("walk_in_tokens").select("table_id, status, type").eq("restaurant_id", restaurantId).in("status", ["waiting", "seated", "takeaway", "pending_approval"]),
     ]);
     const enriched = (rawTables ?? []).map(t => {
-      const hasOrder = (orders ?? []).some(o => o.table_id === t.id);
+      const hasOrder  = (orders ?? []).some(o => o.table_id === t.id);
       const seatedTok = (tokens ?? []).find(tok => tok.table_id === t.id && tok.status === "seated");
       let status = "free";
       if (hasOrder || seatedTok) status = "occupied";
@@ -494,36 +500,58 @@ function useTables(restaurantId) {
       return { ...t, status };
     });
     const takeawayActive = (tokens ?? []).filter(t => t.status === "takeaway" || t.type === "takeaway").length;
-    const queueWaiting = (tokens ?? []).filter(t => t.status === "waiting").length;
+    const queueWaiting   = (tokens ?? []).filter(t => t.status === "waiting").length;
     setSnapshot({ tables: enriched, takeawayActive, queueWaiting });
   }, [restaurantId]);
   useEffect(() => {
-    fetch();
-    const interval = setInterval(fetch, 12000);
-    const ch = supabase.channel(`tables-${restaurantId}`).on("postgres_changes", { event: "*", schema: "public", table: "tables", filter: `restaurant_id=eq.${restaurantId}` }, fetch).subscribe();
+    fetchTables();
+    const interval = setInterval(fetchTables, 12000);
+    const ch = supabase.channel(`tables-${restaurantId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "tables", filter: `restaurant_id=eq.${restaurantId}` }, fetchTables)
+      .subscribe();
     return () => { clearInterval(interval); supabase.removeChannel(ch); };
-  }, [restaurantId, fetch]);
+  }, [restaurantId, fetchTables]);
   return snapshot;
 }
 
+// FIX: changed table from kot_tickets → kds_items; adjusted column/status names
 function useKotStats(restaurantId) {
   const [stats, setStats] = useState(null);
-  const fetch = useCallback(async () => {
+  const fetchKot = useCallback(async () => {
     if (!restaurantId) return;
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    const { data, error } = await supabase.from("kot_tickets").select("status, created_at, completed_at").eq("restaurant_id", restaurantId).gte("created_at", today.toISOString());
-    if (error || !data) { setStats({ open: 0, inProgress: 0, served: 0, avgTime: null, delayed: 0, fastestItem: null, slowestItem: null }); return; }
-    const times = data.filter(k => k.completed_at).map(k => (new Date(k.completed_at) - new Date(k.created_at)) / 60000);
-    setStats({ open: data.filter(k => k.status === "open").length, inProgress: data.filter(k => k.status === "in_progress").length, served: data.filter(k => k.status === "served").length, avgTime: times.length ? Math.round(times.reduce((s, v) => s + v, 0) / times.length) : null, delayed: times.filter(t => t > 20).length, fastestItem: null, slowestItem: null });
+    const { data, error } = await supabase
+      .from("kds_items")
+      .select("status, created_at, updated_at")
+      .eq("restaurant_id", restaurantId)
+      .gte("created_at", today.toISOString());
+    if (error || !data) {
+      setStats({ open: 0, inProgress: 0, served: 0, avgTime: null, delayed: 0, fastestItem: null, slowestItem: null });
+      return;
+    }
+    // kds_items status values: 'pending' | 'in_progress' | 'completed'
+    const open       = data.filter(k => k.status === "pending").length;
+    const inProgress = data.filter(k => k.status === "in_progress").length;
+    const served     = data.filter(k => k.status === "completed").length;
+    // Use updated_at as completion time for completed items
+    const times = data
+      .filter(k => k.status === "completed" && k.updated_at && k.created_at)
+      .map(k => (new Date(k.updated_at) - new Date(k.created_at)) / 60000);
+    const avgTime = times.length ? Math.round(times.reduce((s, v) => s + v, 0) / times.length) : null;
+    const delayed = times.filter(t => t > 20).length;
+    setStats({ open, inProgress, served, avgTime, delayed, fastestItem: null, slowestItem: null });
   }, [restaurantId]);
   useEffect(() => {
-    fetch();
-    const ch = supabase.channel(`kot-${restaurantId}`).on("postgres_changes", { event: "*", schema: "public", table: "kot_tickets", filter: `restaurant_id=eq.${restaurantId}` }, fetch).subscribe();
+    fetchKot();
+    const ch = supabase.channel(`kds-${restaurantId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "kds_items", filter: `restaurant_id=eq.${restaurantId}` }, fetchKot)
+      .subscribe();
     return () => supabase.removeChannel(ch);
-  }, [restaurantId, fetch]);
+  }, [restaurantId, fetchKot]);
   return stats;
 }
 
+// FIX: maps new backend fields: sessionsCompleted, sessionsAborted, totalSessions, sessionAbortRate
 function useCancelStats(apiClient, restaurantId, startISO, endISO) {
   const [stats, setStats] = useState(null);
   useEffect(() => {
@@ -534,7 +562,18 @@ function useCancelStats(apiClient, restaurantId, startISO, endISO) {
         const res = await apiClient.get('/api/dashboard/cancel-stats', { params: { start: startISO, end: endISO } });
         if (cancelled) return;
         const d = res.data;
-        setStats({ cancelled: d.orderCancels, revLost: d.orderRevLost, totalOrders: d.totalOrders, rate: d.orderRate, bookingCancels: d.bookingCancels, totalBookings: d.totalBookings, bookingRate: d.bookingRate, sessionAborts: d.sessionAborts, totalSessions: d.totalSessions, sessionsCompleted: d.sessionsCompleted, sessionAbortRate: d.sessionAbortRate });
+        setStats({
+          // Order cancellations
+          cancelled:         d.orderCancels,
+          revLost:           d.orderRevLost,
+          totalOrders:       d.totalOrders,
+          rate:              d.orderRate,
+          // Session outcomes (new fields)
+          sessionsCompleted: d.sessionsCompleted,
+          sessionsAborted:   d.sessionsAborted,
+          totalSessions:     d.totalSessions,
+          sessionAbortRate:  d.sessionAbortRate,
+        });
       } catch (err) { console.error('[useCancelStats]', err.message); }
     })();
     return () => { cancelled = true; };
@@ -577,41 +616,6 @@ function useWAOrders(apiClient, startISO, endISO) {
   return orders;
 }
 
-// ─── Cloud kitchen setup tip (owner dashboard) ───────────────────────────────
-function CloudKitchenLocationTip({ restaurant }) {
-  if (!restaurant || restaurant.restaurant_type !== 'cloud_kitchen') return null;
-
-  const hasCoords = restaurant.pickup_latitude != null && restaurant.pickup_longitude != null
-    && String(restaurant.pickup_latitude) !== '' && String(restaurant.pickup_longitude) !== '';
-
-  return (
-    <div style={{
-      marginBottom: 12, padding: '12px 14px', borderRadius: 12,
-      background: hasCoords ? '#F5FAFF' : '#FFFBEB',
-      border: `0.5px solid ${hasCoords ? '#B5D4F4' : '#FAC775'}`,
-      fontSize: 12, color: '#444', lineHeight: 1.6,
-    }}>
-      {!hasCoords && (
-        <div style={{ fontWeight: 600, color: '#92400E', marginBottom: 6 }}>
-          Pickup location not set — delivery distance and charges may be inaccurate.
-        </div>
-      )}
-      <div>
-        <strong>Tip:</strong> In Settings → Restaurant, paste a full{' '}
-        <span style={{ fontFamily: 'monospace', fontSize: 11 }}>maps.google.com</span> share link from Google Maps
-        (Share → copy link). Short <span style={{ fontFamily: 'monospace', fontSize: 11 }}>maps.app.goo.gl</span> links
-        often won&apos;t work — use <strong>Resolve location</strong> with your pickup address instead.
-      </div>
-      <Link
-        to="/settings?tab=restaurant"
-        style={{ display: 'inline-block', marginTop: 8, fontSize: 12, fontWeight: 500, color: '#185FA5', textDecoration: 'none' }}
-      >
-        {hasCoords ? 'Review pickup location in Settings →' : 'Set pickup location in Settings →'}
-      </Link>
-    </div>
-  );
-}
-
 // ─── WABA Info Panel ──────────────────────────────────────────────────────────
 function WABAPanel({ info }) {
   const row = (label, value) => (
@@ -634,9 +638,8 @@ function WABAPanel({ info }) {
         <div>1. Go to <strong>Meta Business Suite</strong> → WhatsApp Manager</div>
         <div>2. Create or select a WhatsApp Business Account</div>
         <div>3. Copy your <strong>WABA ID</strong> and <strong>Phone Number ID</strong></div>
-        <div>4. Add them to your Munafe Chat restaurant settings</div>
+        <div>4. Add them to your restaurant settings</div>
         <div>5. Generate a <strong>Permanent Access Token</strong> from Meta Developer Console</div>
-        <div>6. Add the token to your backend <code>.env</code> as <code>WHATSAPP_ACCESS_TOKEN</code></div>
       </div>
     </div>
   );
@@ -654,13 +657,13 @@ function WABAPanel({ info }) {
       {row("Dining duration", info.dining_duration_minutes ? `${info.dining_duration_minutes} min` : null)}
       {row("Payment mode",    info.payment_mode)}
       <div style={{ marginTop: 12, padding: "8px 12px", background: "#F7F7F5", borderRadius: 8, fontSize: 12, color: "#888" }}>
-        📲 Test ordering bot: send <strong>"Hi"</strong> to <strong>+{info.whatsapp_number}</strong>
+        📲 Test ordering bot: send <strong>&ldquo;Hi&rdquo;</strong> to <strong>+{info.whatsapp_number}</strong>
       </div>
     </div>
   );
 }
 
-// ─── WhatsApp Orders Table ─────────────────────────────────────────────────────
+// ─── WhatsApp Orders Table ────────────────────────────────────────────────────
 function formatPartySize(order) {
   const svc = String(order.service_type || order.event_type || "").toLowerCase();
   if (svc === "takeaway" || svc === "delivery") return "n/a";
@@ -679,7 +682,7 @@ function WAOrdersTable({ orders, rangeLabel }) {
       const name  = (o.customers?.name || o.customer_id || "").toLowerCase();
       const phone = (o.customers?.phone || "").toLowerCase();
       const svc   = (o.service_type || o.event_type || "").toLowerCase();
-      const token = (o.token_number || "").toLowerCase();
+      const token = String(o.token_number || "").toLowerCase();
       return name.includes(q) || phone.includes(q) || svc.includes(q) || token.includes(q);
     });
   }, [orders, search]);
@@ -688,9 +691,9 @@ function WAOrdersTable({ orders, rangeLabel }) {
     if (!filtered?.length) return;
     const rows = filtered.map(o => ({
       Date:       o.created_at ? new Date(o.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "—",
-      Name:       o.customers?.name || o.customer_id || "—",
+      Name:       o.customers?.name || "—",
       Phone:      o.customers?.phone || "—",
-      Service:    o.service_type || o.event_type || "—",
+      Service:    o.service_type || "—",
       Token:      o.token_number || "—",
       Party_Size: o.party_size || "—",
       Amount:     o.total_amount != null ? `₹${o.total_amount}` : "—",
@@ -703,7 +706,7 @@ function WAOrdersTable({ orders, rangeLabel }) {
     if (!s) return "#888";
     if (["completed","confirmed","paid"].includes(s)) return "#3B6D11";
     if (["cancelled","failed"].includes(s)) return "#A32D2D";
-    if (["pending","awaiting"].includes(s)) return "#BA7517";
+    if (["pending","awaiting","takeaway","seated"].includes(s)) return "#BA7517";
     return "#555";
   };
 
@@ -719,6 +722,10 @@ function WAOrdersTable({ orders, rangeLabel }) {
           <button onClick={handleExport} disabled={!filtered?.length} style={{ fontSize: 12, padding: "5px 12px", borderRadius: 8, border: "0.5px solid #E0E0DC", background: filtered?.length ? "#F7F7F5" : "#fafafa", color: filtered?.length ? "#111" : "#aaa", cursor: filtered?.length ? "pointer" : "default" }}>⬇ Export CSV</button>
         </div>
       </div>
+      {/* Note about amounts: per-phone aggregation until token_id FK is added to orders */}
+      <div style={{ fontSize: 11, color: "#aaa", marginBottom: 10, padding: "6px 10px", background: "#F7F7F5", borderRadius: 8 }}>
+        💡 Amounts show total spend per phone number in this period. For per-visit amounts, add a <code>token_id</code> FK to the orders table.
+      </div>
       {orders === null && <div style={{ textAlign: "center", padding: "24px 0", fontSize: 13, color: "#aaa" }}>Loading...</div>}
       {orders !== null && filtered?.length === 0 && <div style={{ textAlign: "center", padding: "24px 0", fontSize: 13, color: "#aaa" }}>No orders in this period</div>}
       {filtered?.length > 0 && (
@@ -727,7 +734,7 @@ function WAOrdersTable({ orders, rangeLabel }) {
             <thead style={{ position: "sticky", top: 0, background: "#fff", zIndex: 1 }}>
               <tr style={{ borderBottom: "0.5px solid #E8E8E5" }}>
                 {["Date & Time","Name","Phone","Service","Token","Party (dine-in)","Amount","Status"].map(h => (
-                  <th key={h} style={{ textAlign: "left", color: "#aaa", fontWeight: 400, fontSize: 11, padding: "8px 8px 8px 0", whiteSpace: "nowrap", background: "#fff" }} title={h === "Party (dine-in)" ? "Party size for dine-in only. Takeaway/delivery show n/a." : undefined}>{h}</th>
+                  <th key={h} style={{ textAlign: "left", color: "#aaa", fontWeight: 400, fontSize: 11, padding: "8px 8px 8px 0", whiteSpace: "nowrap", background: "#fff" }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -735,12 +742,16 @@ function WAOrdersTable({ orders, rangeLabel }) {
               {filtered.map((o, i) => (
                 <tr key={o.id || i} style={{ borderBottom: "0.5px solid #F7F7F5" }} onMouseEnter={e => e.currentTarget.style.background="#F7F7F5"} onMouseLeave={e => e.currentTarget.style.background=""}>
                   <td style={{ padding: "5px 8px 5px 0", color: "#555", whiteSpace: "nowrap", fontSize: 11 }}>{o.created_at ? new Date(o.created_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" }) : "—"}</td>
-                  <td style={{ padding: "7px 8px 7px 0", fontWeight: 500, color: "#111", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.customers?.name || o.customer_id || "—"}</td>
+                  <td style={{ padding: "7px 8px 7px 0", fontWeight: 500, color: "#111", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.customers?.name || "—"}</td>
                   <td style={{ padding: "7px 8px 7px 0", color: "#555", whiteSpace: "nowrap" }}>{o.customers?.phone ? `+${o.customers.phone}` : "—"}</td>
-                  <td style={{ padding: "7px 8px 7px 0", color: "#555", whiteSpace: "nowrap", textTransform: "capitalize" }}>{(o.service_type || o.event_type || "—").replace(/_/g, " ")}</td>
-                  <td style={{ padding: "7px 8px 7px 0", color: "#555", fontFamily: "monospace" }}>{o.token_number || "—"}</td>
+                  <td style={{ padding: "7px 8px 7px 0", color: "#555", whiteSpace: "nowrap", textTransform: "capitalize" }}>{(o.service_type || "—").replace(/_/g, " ")}</td>
+                  <td style={{ padding: "7px 8px 7px 0", color: "#555", fontFamily: "monospace", fontSize: 11 }}>{o.token_number || "—"}</td>
                   <td style={{ padding: "7px 8px 7px 0", color: "#555", textAlign: "center", fontSize: 11 }}>{formatPartySize(o)}</td>
-                  <td style={{ padding: "7px 8px 7px 0", fontWeight: 500, color: "#111", whiteSpace: "nowrap" }}>{o.total_amount != null ? `₹${Number(o.total_amount).toLocaleString("en-IN")}` : "—"}</td>
+                  <td style={{ padding: "7px 8px 7px 0", fontWeight: 500, color: "#111", whiteSpace: "nowrap" }}>
+                    {o.total_amount != null && o.total_amount > 0
+                      ? `₹${Number(o.total_amount).toLocaleString("en-IN")}`
+                      : <span style={{ color: "#aaa" }}>—</span>}
+                  </td>
                   <td style={{ padding: "7px 8px 7px 0" }}>
                     <span style={{ fontSize: 11, fontWeight: 500, color: statusColor(o.status), background: statusColor(o.status) + "18", padding: "2px 7px", borderRadius: 5, textTransform: "capitalize" }}>{o.status || "—"}</span>
                   </td>
@@ -781,6 +792,8 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
     };
   }, [apiClientProp, apiClientCtx]);
 
+  // ── Tab state: 'live' | 'analytics' ──────────────────────────────────────
+  const [activeTab,   setActiveTab]   = useState("analytics");
   const [preset,      setPreset]      = useState("today");
   const [customStart, setCustomStart] = useState(null);
   const [customEnd,   setCustomEnd]   = useState(null);
@@ -791,30 +804,33 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
     return getRangeISO(preset);
   }, [preset, customStart, customEnd]);
 
-  const kpi         = useKpiData(restaurantId, startISO, endISO);
-  const chartData   = useChartData(restaurantId, startISO, endISO, preset);
-  const menuItems   = useMenuItems(restaurantId, startISO, endISO);
+  // Analytics data (date-range filtered)
+  const kpi           = useKpiData(restaurantId, startISO, endISO);
+  const chartData     = useChartData(restaurantId, startISO, endISO, preset);
+  const menuItems     = useMenuItems(restaurantId, startISO, endISO);
+  const cancelStats   = useCancelStats(apiClient, restaurantId, startISO, endISO);
+  const wabaInfo      = useWABAInfo(apiClient);
+  const waOrders      = useWAOrders(apiClient, startISO, endISO);
+
+  // Live data (always current, not date-range)
   const tableSnapshot = useTables(restaurantId);
-  const kotStats    = useKotStats(restaurantId);
-  const cancelStats = useCancelStats(apiClient, restaurantId, startISO, endISO);
-  const wabaInfo    = useWABAInfo(apiClient);
-  const waOrders    = useWAOrders(apiClient, startISO, endISO);
+  const kotStats      = useKotStats(restaurantId);
 
   const rangeLabel = (customStart && customEnd)
     ? `Custom · ${fmtDate(customStart)} – ${fmtDate(customEnd)}`
     : { today: "Today", yesterday: "Yesterday", "7d": "Last 7 days", "30d": "Last 30 days" }[preset];
 
   const row1 = [
-    { icon: "₹",  label: "Total revenue",  value: kpi ? fmtINR(kpi.totalRevenue) : "—", badge: null, sub: "selected period" },
-    { icon: "🛒", label: "Orders",          value: kpi?.totalOrders ?? "—",               badge: null, sub: "selected period" },
-    { icon: "🧾", label: "Avg order value", value: kpi ? `₹${kpi.aov}` : "—",             badge: null, sub: "selected period", tooltip: "Total revenue ÷ orders. Excludes cancelled orders." },
-    { icon: "👥", label: "Total covers",    value: kpi?.totalCovers ?? "—",               neutral: true, sub: "selected period", tooltip: "Total orders placed. Each order = 1 cover." },
+    { icon: "₹",  label: "Total revenue",  value: kpi ? fmtINR(kpi.totalRevenue) : "—", sub: "selected period" },
+    { icon: "🛒", label: "Orders",          value: kpi?.totalOrders ?? "—",               sub: "selected period" },
+    { icon: "🧾", label: "Avg order value", value: kpi ? `₹${kpi.aov}` : "—",             sub: "selected period", tooltip: "Total revenue ÷ orders. Excludes cancelled orders." },
+    { icon: "👥", label: "Total covers",    value: kpi?.totalCovers ?? "—",                neutral: true, sub: "selected period", tooltip: "Total orders placed. Each order = 1 cover." },
   ];
   const row2 = [
-    { icon: "🔄", label: "Table turns",    value: kpi && tableSnapshot.tables?.length ? (kpi.totalOrders / tableSnapshot.tables.length).toFixed(1) : "—", sub: "selected period", tooltip: "Total orders ÷ tables." },
-    { icon: "⏱",  label: "Avg dining time",value: kpi?.avgDining ? `${kpi.avgDining} min` : "—", sub: "Benchmark: 90 min", tooltip: "Avg mins from table assignment to visit completion." },
+    { icon: "🔄", label: "Table turns",     value: kpi && tableSnapshot.tables?.length ? (kpi.totalOrders / tableSnapshot.tables.length).toFixed(1) : "—", sub: "selected period", tooltip: "Total orders ÷ tables." },
+    { icon: "⏱",  label: "Avg dining time", value: kpi?.avgDining ? `${kpi.avgDining} min` : "—", sub: "Benchmark: 90 min", tooltip: "Avg mins from table assignment to visit completion." },
     { icon: "🎟",  label: "Tokens issued",  value: kpi?.tokensIssued ?? "—", sub: "selected period", tooltip: "Walk-in customers who received a queue token." },
-    { icon: "⏳", label: "Avg wait time",  value: kpi?.avgWait ? `${kpi.avgWait} min` : "—", sub: "selected period", tooltip: "Avg mins from check-in to table assignment (queue only)." },
+    { icon: "⏳", label: "Avg wait time",   value: kpi?.avgWait ? `${kpi.avgWait} min` : "—", sub: "selected period", tooltip: "Avg mins from check-in to table assignment (queue only)." },
   ];
 
   const btnStyle = (active) => ({
@@ -822,6 +838,15 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
     background:  active ? "#F0F0EE" : "transparent",
     color:       active ? "#111"    : "#888",
     borderColor: active ? "#C8C8C4" : "#E0E0DC",
+  });
+
+  const tabStyle = (active) => ({
+    fontSize: 12, padding: "5px 16px", borderRadius: 8, border: "none", cursor: "pointer",
+    background:  active ? "#fff" : "transparent",
+    color:       active ? "#111" : "#888",
+    fontWeight:  active ? 500   : 400,
+    boxShadow:   active ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+    transition:  "all 0.15s",
   });
 
   return (
@@ -835,120 +860,111 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
             <p style={{ fontSize: 13, color: "#888", margin: "2px 0 0" }}>{restaurantName} · {new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</p>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            {/* Date presets */}
-            <div style={{ display: "flex", gap: 4 }}>
-              {PRESETS.map(p => (
-                <button key={p.key} style={btnStyle(preset === p.key && !customStart)} onClick={() => { setPreset(p.key); setCustomStart(null); setCustomEnd(null); setShowCal(false); }}>
-                  {p.label}
-                </button>
-              ))}
+
+            {/* Live / Analytics tabs */}
+            <div style={{ display: "flex", gap: 2, background: "#EDEDEB", borderRadius: 10, padding: 3 }}>
+              <button style={tabStyle(activeTab === "live")}      onClick={() => setActiveTab("live")}>🔴 Live</button>
+              <button style={tabStyle(activeTab === "analytics")} onClick={() => setActiveTab("analytics")}>📊 Analytics</button>
             </div>
+
             <div style={{ width: 1, height: 18, background: "#E0E0DC" }} />
-            {/* Custom date picker toggle */}
-            <button style={{ ...btnStyle(!!customStart), display: "flex", alignItems: "center", gap: 5 }} onClick={() => setShowCal(v => !v)}>
-              📅 {customStart ? `${fmtDate(customStart)} – ${fmtDate(customEnd)}` : "Custom"}
-            </button>
+
+            {/* Date presets — only shown on analytics tab */}
+            {activeTab === "analytics" && (
+              <>
+                <div style={{ display: "flex", gap: 4 }}>
+                  {PRESETS.map(p => (
+                    <button key={p.key} style={btnStyle(preset === p.key && !customStart)} onClick={() => { setPreset(p.key); setCustomStart(null); setCustomEnd(null); setShowCal(false); }}>
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ width: 1, height: 18, background: "#E0E0DC" }} />
+                <button style={{ ...btnStyle(!!customStart), display: "flex", alignItems: "center", gap: 5 }} onClick={() => setShowCal(v => !v)}>
+                  📅 {customStart ? `${fmtDate(customStart)} – ${fmtDate(customEnd)}` : "Custom"}
+                </button>
+                <div style={{ width: 1, height: 18, background: "#E0E0DC" }} />
+              </>
+            )}
+
+            <Link to="/settings?tab=kitchen#scheduled-ordering" style={{ fontSize: 12, padding: "4px 12px", borderRadius: 8, border: "0.5px solid #B5D4F4", background: "#E6F1FB", color: "#185FA5", cursor: "pointer", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}>Kitchen hours</Link>
             <div style={{ width: 1, height: 18, background: "#E0E0DC" }} />
-            <Link
-              to="/settings?tab=kitchen#scheduled-ordering"
-              style={{
-                fontSize: 12, padding: "4px 12px", borderRadius: 8,
-                border: "0.5px solid #B5D4F4", background: "#E6F1FB",
-                color: "#185FA5", cursor: "pointer", textDecoration: "none",
-                display: "inline-flex", alignItems: "center", gap: 4,
-              }}
-            >
-              Kitchen hours
-            </Link>
-            <Link
-              to="/settings?tab=kitchen#scheduled-ordering"
-              style={{
-                fontSize: 12, padding: "4px 12px", borderRadius: 8,
-                border: "0.5px solid #B5D4F4", background: "#E6F1FB",
-                color: "#185FA5", cursor: "pointer", textDecoration: "none",
-                display: "inline-flex", alignItems: "center", gap: 4,
-              }}
-            >
-              Scheduled ordering
-            </Link>
+            <Link to="/settings" style={{ fontSize: 12, padding: "4px 12px", borderRadius: 8, border: "0.5px solid #E0E0DC", background: "#F7F7F5", color: "#555", cursor: "pointer", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}>⚙️ Settings</Link>
             <div style={{ width: 1, height: 18, background: "#E0E0DC" }} />
-            {/* ⚙️ Settings link — navigates to /settings */}
-            <Link
-              to="/settings"
-              style={{
-                fontSize: 12, padding: "4px 12px", borderRadius: 8,
-                border: "0.5px solid #E0E0DC", background: "#F7F7F5",
-                color: "#555", cursor: "pointer", textDecoration: "none",
-                display: "inline-flex", alignItems: "center", gap: 4,
-              }}
-            >
-              ⚙️ Settings
-            </Link>
-            <div style={{ width: 1, height: 18, background: "#E0E0DC" }} />
-            {/* Logout */}
-            <button onClick={onLogout} style={{ fontSize: 12, padding: "4px 12px", borderRadius: 8, border: "0.5px solid #FCEBEB", background: "#FFF5F5", color: "#A32D2D", cursor: "pointer" }}>
-              Logout
-            </button>
+            <button onClick={onLogout} style={{ fontSize: 12, padding: "4px 12px", borderRadius: 8, border: "0.5px solid #FCEBEB", background: "#FFF5F5", color: "#A32D2D", cursor: "pointer" }}>Logout</button>
           </div>
         </div>
 
-        <CloudKitchenLocationTip restaurant={wabaInfo} />
-
-        {/* Custom date picker */}
-        {showCal && (
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, padding: 12, background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, flexWrap: "wrap" }}>
-            <label style={{ fontSize: 12, color: "#888" }}>From</label>
-            <input type="date" style={{ border: "0.5px solid #E0E0DC", borderRadius: 8, padding: "4px 8px", fontSize: 12 }} onChange={e => setCustomStart(new Date(e.target.value))} />
-            <label style={{ fontSize: 12, color: "#888" }}>To</label>
-            <input type="date" style={{ border: "0.5px solid #E0E0DC", borderRadius: 8, padding: "4px 8px", fontSize: 12 }} onChange={e => setCustomEnd(new Date(e.target.value + "T23:59:59"))} />
-            <button onClick={() => { if (customStart && customEnd) { setPreset(null); setShowCal(false); } }} style={{ fontSize: 12, padding: "4px 14px", borderRadius: 8, border: "none", background: "#378ADD", color: "#fff", cursor: "pointer" }}>Apply</button>
-          </div>
+        {/* ── LIVE TAB ──────────────────────────────────────────────────── */}
+        {activeTab === "live" && (
+          <>
+            {/* Live summary strip */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 10, marginBottom: 14 }}>
+              <MetricCard icon="🪑" label="Tables occupied"   value={`${tableSnapshot.tables.filter(t=>t.status==="occupied").length}/${tableSnapshot.tables.length}`} sub="right now" />
+              <MetricCard icon="⏳" label="Queue waiting"     value={tableSnapshot.queueWaiting}    sub="tokens in queue" />
+              <MetricCard icon="🛵" label="Takeaway active"   value={tableSnapshot.takeawayActive}  sub="in progress" />
+              <MetricCard icon="🍳" label="KOT open"          value={(kotStats?.open ?? 0) + (kotStats?.inProgress ?? 0)} sub="kitchen orders" />
+            </div>
+            {/* Table grid + KOT side by side */}
+            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12, marginBottom: 12 }}>
+              <TableOccupancy tables={tableSnapshot.tables} takeawayActive={tableSnapshot.takeawayActive} queueWaiting={tableSnapshot.queueWaiting} />
+              <KotStatus stats={kotStats} />
+            </div>
+            {/* WABA quick ref in live tab */}
+            <WABAPanel info={wabaInfo} />
+          </>
         )}
 
-        <p style={{ fontSize: 11, color: "#aaa", marginBottom: 12 }}>Showing: {rangeLabel}</p>
+        {/* ── ANALYTICS TAB ─────────────────────────────────────────────── */}
+        {activeTab === "analytics" && (
+          <>
+            {/* Custom date picker */}
+            {showCal && (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, padding: 12, background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, flexWrap: "wrap" }}>
+                <label style={{ fontSize: 12, color: "#888" }}>From</label>
+                <input type="date" style={{ border: "0.5px solid #E0E0DC", borderRadius: 8, padding: "4px 8px", fontSize: 12 }} onChange={e => setCustomStart(new Date(e.target.value))} />
+                <label style={{ fontSize: 12, color: "#888" }}>To</label>
+                <input type="date" style={{ border: "0.5px solid #E0E0DC", borderRadius: 8, padding: "4px 8px", fontSize: 12 }} onChange={e => setCustomEnd(new Date(e.target.value + "T23:59:59"))} />
+                <button onClick={() => { if (customStart && customEnd) { setPreset(null); setShowCal(false); } }} style={{ fontSize: 12, padding: "4px 14px", borderRadius: 8, border: "none", background: "#378ADD", color: "#fff", cursor: "pointer" }}>Apply</button>
+              </div>
+            )}
 
-        {/* KPI rows */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 10, marginBottom: 10 }}>
-          {row1.map((m, i) => <MetricCard key={i} {...m} />)}
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 10, marginBottom: 14 }}>
-          {row2.map((m, i) => <MetricCard key={i} {...m} />)}
-        </div>
+            <p style={{ fontSize: 11, color: "#aaa", marginBottom: 12 }}>Showing: {rangeLabel}</p>
 
-        {/* Revenue chart */}
-        {chartData && chartData.labels?.length > 0 && (
-          <RevenueChart labels={chartData.labels} revenue={chartData.revenue} orders={chartData.orders} covers={chartData.covers} preset={preset} />
+            {/* KPI rows */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 10, marginBottom: 10 }}>
+              {row1.map((m, i) => <MetricCard key={i} {...m} />)}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 10, marginBottom: 14 }}>
+              {row2.map((m, i) => <MetricCard key={i} {...m} />)}
+            </div>
+
+            {/* Revenue chart */}
+            {chartData && chartData.labels?.length > 0 && <RevenueChart labels={chartData.labels} revenue={chartData.revenue} orders={chartData.orders} covers={chartData.covers} preset={preset} />}
+            {chartData && chartData.labels?.length === 0 && <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "32px 20px", marginBottom: 12, textAlign: "center", fontSize: 13, color: "#aaa" }}>No orders in this period</div>}
+            {!chartData && <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "32px 20px", marginBottom: 12, textAlign: "center", fontSize: 13, color: "#aaa" }}>Loading chart...</div>}
+
+            {/* Menu items + WABA panel */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12, marginBottom: 12 }}>
+              <TopMenuItems items={menuItems} />
+              <WABAPanel info={wabaInfo} />
+            </div>
+
+            {/* WA orders (full width) */}
+            <div style={{ marginBottom: 12 }}>
+              <WAOrdersTable orders={waOrders} rangeLabel={rangeLabel} />
+            </div>
+
+            {/* Session outcomes + Cancel stats */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12, marginBottom: 12 }}>
+              <CancellationVoids stats={cancelStats} />
+              <KotStatus stats={kotStats} />
+            </div>
+
+            {/* Deep insights */}
+            <OwnerInsights apiClient={apiClient} restaurantId={restaurantId} startISO={startISO} endISO={endISO} rangeLabel={rangeLabel} />
+          </>
         )}
-        {chartData && chartData.labels?.length === 0 && (
-          <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "32px 20px", marginBottom: 12, textAlign: "center", fontSize: 13, color: "#aaa" }}>No orders in this period</div>
-        )}
-        {!chartData && (
-          <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "32px 20px", marginBottom: 12, textAlign: "center", fontSize: 13, color: "#aaa" }}>Loading chart...</div>
-        )}
-
-        {/* Menu + Tables */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12, marginBottom: 12 }}>
-          <TopMenuItems items={menuItems} />
-          <TableOccupancy
-            tables={tableSnapshot.tables}
-            takeawayActive={tableSnapshot.takeawayActive}
-            queueWaiting={tableSnapshot.queueWaiting}
-          />
-        </div>
-
-        {/* WABA + WhatsApp orders */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12, marginBottom: 12 }}>
-          <WABAPanel info={wabaInfo} />
-          <WAOrdersTable orders={waOrders} rangeLabel={rangeLabel} />
-        </div>
-
-        {/* KOT + Cancellations */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12, marginBottom: 12 }}>
-          <KotStatus stats={kotStats} />
-          <CancellationVoids stats={cancelStats} />
-        </div>
-
-        <OwnerInsights apiClient={apiClient} startISO={startISO} endISO={endISO} rangeLabel={rangeLabel} />
 
       </div>
     </div>
