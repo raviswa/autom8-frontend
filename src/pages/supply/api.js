@@ -1,32 +1,12 @@
-// Runtime API base — production hostname wins over stale Railway build env vars.
-
-export function resolveApiBase() {
-  if (typeof window !== 'undefined' && window.location.hostname === 'app.autom8.works') {
-    return 'https://api.autom8.works';
-  }
-  return import.meta.env.VITE_API_URL || 'http://localhost:3001';
-}
-
-export function resolveWsBase() {
-  if (typeof window !== 'undefined' && window.location.hostname === 'app.autom8.works') {
-    return 'wss://api.autom8.works/ws';
-  }
-  if (import.meta.env.VITE_WS_URL) {
-    const base = import.meta.env.VITE_WS_URL.split('?')[0].replace(/\/$/, '');
-    return base.endsWith('/ws') ? base : `${base}/ws`;
-  }
-  const apiUrl = import.meta.env.VITE_API_URL;
-  if (apiUrl) {
-    const wsBase = apiUrl.replace(/^http/i, 'ws').replace(/\/$/, '');
-    return wsBase.endsWith('/ws') ? wsBase : `${wsBase}/ws`;
-  }
-  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${wsProtocol}//${window.location.hostname}:3001/ws`;
-}
-
-export function resolveSupplyApiBase() {
-  if (typeof window !== 'undefined' && window.location.hostname === 'app.autom8.works') {
-    return 'https://supply-api.autom8.works';
-  }
-  return import.meta.env.VITE_SUPPLY_API_URL || 'http://localhost:3002';
-}
+// src/pages/supply/api.js
+// ============================================================================
+// Supply API URL resolver — re-exports from the canonical config location.
+//
+// All supply pages MUST import from '../../config/api', not from this file.
+// This file is kept only as a thin re-export shim so that any legacy import
+// of './api' still works without errors.
+//
+// Canonical source of truth: src/config/api.js
+// ============================================================================
+ 
+export { resolveApiBase, resolveWsBase, resolveSupplyApiBase } from '../../config/api';
