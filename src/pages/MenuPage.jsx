@@ -6,8 +6,18 @@
 // Owner can: trigger sync, toggle availability
 // Manager can: view menu when creating orders
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+
+const SLOT_OPTIONS = ['tiffin', 'lunch', 'dinner', 'anytime'];
+
+function normalizeSlots(slots) {
+  if (!Array.isArray(slots) || !slots.length) return ['anytime'];
+  const clean = [...new Set(slots.map(s => String(s || '').toLowerCase().trim()))]
+    .filter(Boolean)
+    .filter(s => SLOT_OPTIONS.includes(s));
+  return clean.length ? clean : ['anytime'];
+}
 
 export default function MenuPage() {
   const { apiClient, user } = useAuth();
@@ -20,11 +30,13 @@ export default function MenuPage() {
   const [lastSync, setLastSync] = useState(null);
   const [syncResult, setSyncResult] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [categorySlots, setCategorySlots] = useState({});
 
   const fetchMenu = useCallback(async () => {
     try {
-      const params = selectedCategory !== 'all' ? `?category=${selectedCategory}` : '';
-      const response = await apiClient.get(`/api/menu-items${params}`);
+      const params = new URLSearchParams({ ignore_slot: 'true' });
+      if (selectedCategory !== 'all') params.set('category', selectedCategory);
+      const response = await apiClient.get(`/api/menu-items?${params.toString()}`);
       const menuItems = response.data.items || [];
       setItems(menuItems);
 
@@ -38,6 +50,19 @@ export default function MenuPage() {
     }
   }, [apiClient, selectedCategory]);
 
+  const fetchCategorySlots = useCallback(async () => {
+    try {
+      const response = await apiClient.get('/api/catalog/menu-categories/slots');
+      const map = {};
+      for (const row of response.data.categories || []) {
+        map[row.name] = normalizeSlots(row.applicable_slots);
+      }
+      setCategorySlots(map);
+    } catch (err) {
+      console.error('Failed to fetch category slots:', err);
+    }
+  }, [apiClient]);
+
   const fetchSyncStatus = useCallback(async () => {
     try {
       const response = await apiClient.get('/api/catalog/status');
@@ -50,7 +75,8 @@ export default function MenuPage() {
   useEffect(() => {
     fetchMenu();
     fetchSyncStatus();
-  }, [fetchMenu, fetchSyncStatus]);
+    fetchCategorySlots();
+  }, [fetchMenu, fetchSyncStatus, fetchCategorySlots]);
 
   const triggerSync = async () => {
     setSyncing(true);
@@ -82,6 +108,64 @@ export default function MenuPage() {
     }
   };
 
+  const toggleTodaySpecial = async (item) => {
+    try {
+      const isNext = !Boolean(item.is_todays_special || item.is_special_today);
+      let specialNote = item.special_note || '';
+      if (isNext) {
+        const raw = window.prompt('Optional special note (e.g. Chef\'s recommendation):', specialNote);
+        specialNote = raw == null ? specialNote : raw;
+      }
+      await apiClient.put(`/api/menu-items/${item.id}/special-today`, {
+        is_todays_special: isNext,
+        special_note: (specialNote || '').trim() || null,
+      });
+      setItems(prev => prev.map(row =>
+        row.id === item.id
+          ? { ...row, is_todays_special: isNext, is_special_today: isNext, special_note: (specialNote || '').trim() || null }
+          : row
+      ));
+    } catch (err) {
+      console.error('Failed to update today\'s special:', err);
+    }
+  };
+
+  const saveCategorySlots = async (category, slots) => {
+    try {
+      const applicable_slots = normalizeSlots(slots);
+      await apiClient.put(`/api/catalog/menu-categories/${encodeURIComponent(category)}/slots`, {
+        applicable_slots,
+      });
+      setCategorySlots(prev => ({ ...prev, [category]: applicable_slots }));
+    } catch (err) {
+      console.error('Failed to save category slots:', err);
+    }
+  };
+
+  const saveItemSlotsOverride = async (item) => {
+    const current = normalizeSlots(item.applicable_slots || categorySlots[item.category] || ['anytime']);
+    const input = window.prompt(
+      'Override slots for this item (comma-separated: tiffin,lunch,dinner,anytime). Leave blank to clear override.',
+      item.applicable_slots ? current.join(',') : ''
+    );
+    if (input == null) return;
+    const trimmed = input.trim();
+    const payload = trimmed
+      ? normalizeSlots(trimmed.split(',').map(s => s.trim()))
+      : null;
+
+    try {
+      await apiClient.put(`/api/catalog/menu-items/${item.id}/slots`, {
+        applicable_slots: payload,
+      });
+      setItems(prev => prev.map(row =>
+        row.id === item.id ? { ...row, applicable_slots: payload } : row
+      ));
+    } catch (err) {
+      console.error('Failed to save item slot override:', err);
+    }
+  };
+
   const filteredItems = items.filter(item =>
     item.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     item.description?.toLowerCase().includes(searchTerm.toLowerCase())
@@ -93,6 +177,11 @@ export default function MenuPage() {
     acc[cat].push(item);
     return acc;
   }, {});
+
+  const specialCount = useMemo(
+    () => items.filter(i => i.is_todays_special || i.is_special_today).length,
+    [items]
+  );
 
   if (loading) {
     return (
@@ -187,6 +276,12 @@ export default function MenuPage() {
           </div>
         </div>
 
+        {specialCount > 3 && (
+          <div className="mb-6 p-3 rounded-lg border border-amber-300 bg-amber-50 text-amber-900 text-sm">
+            Too many specials dilutes the highlight. Consider narrowing to your top picks.
+          </div>
+        )}
+
         {/* Search + Filter */}
         <div className="flex flex-wrap gap-4 mb-6">
           <input
@@ -224,6 +319,28 @@ export default function MenuPage() {
               <span className="text-sm font-normal text-gray-500">({categoryItems.length} items)</span>
             </h2>
 
+            {user?.role === 'owner' && (
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <span className="text-xs text-gray-600 font-semibold">Applicable slots:</span>
+                {SLOT_OPTIONS.map(slot => {
+                  const current = normalizeSlots(categorySlots[category] || ['anytime']);
+                  const active = current.includes(slot);
+                  return (
+                    <button
+                      key={`${category}-${slot}`}
+                      onClick={() => {
+                        const next = active ? current.filter(s => s !== slot) : [...current, slot];
+                        saveCategorySlots(category, next);
+                      }}
+                      className={`px-2 py-1 rounded-full text-xs border ${active ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300'}`}
+                    >
+                      {slot}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {categoryItems.map(item => (
                 <div
@@ -259,16 +376,39 @@ export default function MenuPage() {
                         {item.is_available ? '✅ Available' : '❌ Unavailable'}
                       </span>
 
-                      {/* Toggle - Owner only */}
+                      {/* Toggles - Owner only */}
                       {user?.role === 'owner' && (
-                        <button
-                          onClick={() => toggleAvailability(item.id, item.is_available)}
-                          className={`text-xs font-semibold px-3 py-1 rounded-lg transition ${item.is_available ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}
-                        >
-                          {item.is_available ? 'Mark Unavailable' : 'Mark Available'}
-                        </button>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => toggleAvailability(item.id, item.is_available)}
+                            className={`text-xs font-semibold px-3 py-1 rounded-lg transition ${item.is_available ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}
+                          >
+                            {item.is_available ? 'Mark Unavailable' : 'Mark Available'}
+                          </button>
+                          <button
+                            onClick={() => toggleTodaySpecial(item)}
+                            className={`text-xs font-semibold px-3 py-1 rounded-lg transition ${(item.is_todays_special || item.is_special_today) ? 'bg-amber-100 text-amber-800 hover:bg-amber-200' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                          >
+                            {(item.is_todays_special || item.is_special_today) ? '⭐ Special' : '☆ Mark Special'}
+                          </button>
+                        </div>
                       )}
                     </div>
+
+                    {item.special_note && (item.is_todays_special || item.is_special_today) && (
+                      <p className="text-xs mt-2 text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                        {item.special_note}
+                      </p>
+                    )}
+
+                    {user?.role === 'owner' && (
+                      <button
+                        onClick={() => saveItemSlotsOverride(item)}
+                        className="text-xs mt-2 text-blue-700 underline text-left"
+                      >
+                        Override slots
+                      </button>
+                    )}
 
                     {/* Meta sync info */}
                     {item.meta_product_id && (

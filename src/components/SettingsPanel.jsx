@@ -833,6 +833,14 @@ function TabServices({ apiClient, showToast, refreshSubscription }) {
 // Dining duration, payment mode, workflow, slot timings
 // ═════════════════════════════════════════════════════════════════════════════
 function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
+  const SLOT_OPTIONS = ['tiffin', 'lunch', 'dinner', 'anytime'];
+  const normalizeSlots = (slots) => {
+    if (!Array.isArray(slots) || !slots.length) return ['anytime'];
+    const clean = [...new Set(slots.map(s => String(s || '').toLowerCase().trim()))]
+      .filter(Boolean)
+      .filter(s => SLOT_OPTIONS.includes(s));
+    return clean.length ? clean : ['anytime'];
+  };
   const hasPaid = (f) => paidFeatures.includes(f);
   const hasAnyPaid = (...fs) => fs.some(f => paidFeatures.includes(f));
   const showDineIn = hasPaid(FEATURES.DINE_IN);
@@ -853,6 +861,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
   // Multi-counter section management
   const [sections,  setSections]  = useState([]);   // [{ id, name }]
   const [catMap,    setCatMap]    = useState({});    // { categoryName: sectionId }
+  const [catSlots,  setCatSlots]  = useState({});    // { categoryName: ['tiffin',..] }
   const [menuCats,  setMenuCats]  = useState([]);    // distinct categories from menu_items
   const [newSecName, setNewSecName] = useState('');
 
@@ -860,7 +869,8 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
     Promise.all([
       apiClient.get('/api/dashboard/waba'),
       apiClient.get('/api/menu-items?ignore_slot=true').catch(() => ({ data: { items: [] } })),
-    ]).then(([wabaRes, menuRes]) => {
+      apiClient.get('/api/catalog/menu-categories/slots').catch(() => ({ data: { categories: [] } })),
+    ]).then(([wabaRes, menuRes, catRes]) => {
       const d = wabaRes.data.restaurant ?? {};
       setForm({
         dining_duration_minutes: d.dining_duration_minutes ?? 45,
@@ -910,6 +920,15 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
         }
       });
       setCatMap(map);
+
+      const slotMap = {};
+      (catRes.data.categories || []).forEach(row => {
+        if (row?.name) slotMap[row.name] = normalizeSlots(row.applicable_slots);
+      });
+      cats.forEach(cat => {
+        if (!slotMap[cat]) slotMap[cat] = ['anytime'];
+      });
+      setCatSlots(slotMap);
     }).catch(() => showToast('Failed to load kitchen config', 'error'));
   }, [apiClient, showToast]);
 
@@ -966,6 +985,14 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
           }).catch(() => {});
         }
       }
+
+      // Persist category slot defaults for web menu "Available Now" logic
+      for (const [cat, slots] of Object.entries(catSlots)) {
+        await apiClient.put(`/api/catalog/menu-categories/${encodeURIComponent(cat)}/slots`, {
+          applicable_slots: normalizeSlots(slots),
+        }).catch(() => {});
+      }
+
       setSaved(true);
       notifySaveResult(showToast, res, 'Kitchen settings saved');
     } catch (e) { showToast(e.response?.data?.error ?? 'Save failed', 'error'); }
@@ -1278,11 +1305,40 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
               </div>
               {menuCats.map(cat => (
                 <div key={cat} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: `0.5px solid ${C.border}` }}>
-                  <span style={{ fontSize: 13, color: C.text }}>{cat}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ fontSize: 13, color: C.text }}>{cat}</span>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+                      {SLOT_OPTIONS.map(slot => {
+                        const current = normalizeSlots(catSlots[cat] || ['anytime']);
+                        const active = current.includes(slot);
+                        return (
+                          <button
+                            key={`${cat}-${slot}`}
+                            type="button"
+                            onClick={() => {
+                              const next = active ? current.filter(s => s !== slot) : [...current, slot];
+                              setCatSlots(p => ({ ...p, [cat]: normalizeSlots(next) }));
+                            }}
+                            style={{
+                              padding: '4px 8px',
+                              borderRadius: 999,
+                              border: `0.5px solid ${active ? C.primary : C.border}`,
+                              background: active ? C.primaryLight : C.cardBg,
+                              color: active ? C.primaryDark : C.textSub,
+                              fontSize: 11,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {slot}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                   <select
                     value={catMap[cat] || ''}
                     onChange={e => setCatMap(p => ({ ...p, [cat]: e.target.value || undefined }))}
-                    style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, border: `0.5px solid ${C.border}`, background: C.cardBg }}
+                    style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, border: `0.5px solid ${C.border}`, background: C.cardBg, marginLeft: 10 }}
                   >
                     <option value="">— unassigned —</option>
                     {sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
