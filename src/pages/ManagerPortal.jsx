@@ -117,6 +117,22 @@ const SLOT_DB_TO_LABEL = {
   dinner:         'Dinner',
 };
 
+const WEB_SLOT_OPTIONS = ['tiffin', 'lunch', 'dinner', 'anytime'];
+const WEB_SLOT_LABEL = {
+  tiffin: 'Breakfast/Tiffin',
+  lunch: 'Lunch',
+  dinner: 'Dinner',
+  anytime: 'All time',
+};
+
+function normalizeWebSlots(slots) {
+  if (!Array.isArray(slots) || !slots.length) return ['anytime'];
+  const clean = [...new Set(slots.map(s => String(s || '').toLowerCase().trim()))]
+    .filter(Boolean)
+    .filter(s => WEB_SLOT_OPTIONS.includes(s));
+  return clean.length ? clean : ['anytime'];
+}
+
 // Reservation duration options (minutes)
 const RESERVATION_DURATIONS = [30, 60, 90, 120];
 const TABLE_SECTIONS = ['Main Hall', 'Terrace', 'Private Room', 'Counter', 'Outdoor'];
@@ -593,6 +609,7 @@ export default function ManagerPortal() {
   const [togglingSpecialId, setTogglingSpecialId] = useState(null);
   const [menuSearch,     setMenuSearch]     = useState('');
   const [menuCategory,   setMenuCategory]   = useState('all');
+  const [categorySlots,  setCategorySlots]  = useState({});
   const [kitchenStatus,  setKitchenStatus]  = useState(null);
   const [kitchenToggling,setKitchenToggling]= useState(false);
   const [kitchenBusyToggling, setKitchenBusyToggling] = useState(false);
@@ -665,6 +682,18 @@ export default function ManagerPortal() {
     }
   }, [apiClient]);
   const fetchMenuItems = useCallback(async () => { try { const r = await apiClient.get('/api/menu-items?ignore_slot=true'); setMenuItems(r.data.items || r.data || []); } catch(e) {} }, [apiClient]);
+  const fetchCategorySlots = useCallback(async () => {
+    try {
+      const r = await apiClient.get('/api/catalog/menu-categories/slots');
+      const map = {};
+      for (const row of r.data.categories || []) {
+        if (row?.name) map[row.name] = normalizeWebSlots(row.applicable_slots);
+      }
+      setCategorySlots(map);
+    } catch (e) {
+      console.error('[ManagerPortal] fetchCategorySlots failed:', e.response?.data || e.message);
+    }
+  }, [apiClient]);
   const fetchKitchenStatus = useCallback(async () => {
     try {
       const r = await apiClient.get('/api/catalog/kitchen-status');
@@ -693,11 +722,11 @@ export default function ManagerPortal() {
   }, [apiClient]);
   const fetchData      = useCallback(async () => {
     await Promise.all([
-      fetchTables(), fetchOrders(), fetchTokens(), fetchMenuItems(), fetchKitchenStatus(),
+      fetchTables(), fetchOrders(), fetchTokens(), fetchMenuItems(), fetchCategorySlots(), fetchKitchenStatus(),
       fetchKdsFeed(), fetchScheduledBoard(), fetchCatalogStatus(),
     ]);
     setLoading(false);
-  }, [fetchTables, fetchOrders, fetchTokens, fetchMenuItems, fetchKitchenStatus, fetchKdsFeed, fetchScheduledBoard, fetchCatalogStatus]);
+  }, [fetchTables, fetchOrders, fetchTokens, fetchMenuItems, fetchCategorySlots, fetchKitchenStatus, fetchKdsFeed, fetchScheduledBoard, fetchCatalogStatus]);
 
   useEffect(() => {
     fetchData();
@@ -1183,6 +1212,19 @@ export default function ManagerPortal() {
       showToast(newValue ? `${item.name} marked as today's special` : `${item.name} removed from today's specials`);
     } catch (err) { showToast(err.response?.data?.error || `Failed to update ${item.name}`); }
     finally { setTogglingSpecialId(null); }
+  };
+
+  const saveCategorySlots = async (category, slots) => {
+    const applicable_slots = normalizeWebSlots(slots);
+    try {
+      await apiClient.put(`/api/catalog/menu-categories/${encodeURIComponent(category)}/slots`, {
+        applicable_slots,
+      });
+      setCategorySlots(prev => ({ ...prev, [category]: applicable_slots }));
+      showToast(`Saved slots for ${category}`);
+    } catch (err) {
+      showToast(err.response?.data?.error || `Failed to save slots for ${category}`);
+    }
   };
 
   // ── Order helpers ─────────────────────────────────────────────────────────
@@ -3003,7 +3045,40 @@ export default function ManagerPortal() {
                               colSpan={showMenuSlotColumn ? 7 : 6}
                               style={{ padding: "8px 14px", fontSize: 11, fontWeight: 600, color: C.textSub, letterSpacing: '0.04em', textTransform: 'uppercase' }}
                             >
-                              {cat} ({groupedMenuItems[cat].length})
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                                <span>{cat} ({groupedMenuItems[cat].length})</span>
+                                {cat !== 'Uncategorized' && (
+                                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                                  <span style={{ fontSize: 10, color: C.textMuted, textTransform: 'none', letterSpacing: 0 }}>Category slots:</span>
+                                  {WEB_SLOT_OPTIONS.map(slot => {
+                                    const current = normalizeWebSlots(categorySlots[cat] || ['anytime']);
+                                    const active = current.includes(slot);
+                                    return (
+                                      <button
+                                        key={`${cat}-${slot}`}
+                                        onClick={() => {
+                                          const next = active ? current.filter(s => s !== slot) : [...current, slot];
+                                          saveCategorySlots(cat, next);
+                                        }}
+                                        style={{
+                                          fontSize: 10,
+                                          padding: '3px 8px',
+                                          borderRadius: 999,
+                                          border: `0.5px solid ${active ? C.primary : C.border}`,
+                                          background: active ? C.primaryLight : C.cardBg,
+                                          color: active ? C.primaryDark : C.textSub,
+                                          textTransform: 'none',
+                                          letterSpacing: 0,
+                                          cursor: 'pointer',
+                                        }}
+                                      >
+                                        {WEB_SLOT_LABEL[slot] || slot}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                                )}
+                              </div>
                             </td>
                           </tr>
                           {groupedMenuItems[cat].map(item => {
