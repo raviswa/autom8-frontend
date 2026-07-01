@@ -961,12 +961,14 @@ const fetchFeed = useCallback(async () => {
     f === 'all' ? liveItems : liveItems.filter(i => i.status === f);
 
   const allOrders = groupItemsByOrder(liveItems);
+  const allActiveOrders = allOrders.filter((o) => o.aggregateStatus !== 'ready');
+  const allActiveCount = allActiveOrders.reduce((sum, o) => sum + o.items.length, 0);
   const displayOrders = filter === 'all'
-    ? allOrders
+    ? allActiveOrders
     : allOrders.filter((o) => o.items.some((i) => i.status === filter));
 
   const counts = {
-    all:         liveItems.length,
+    all:         allActiveCount,
     pending:     filterItems('pending').length,
     in_progress: filterItems('in_progress').length,
     ready:       filterItems('ready').length,
