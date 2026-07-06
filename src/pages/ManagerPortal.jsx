@@ -28,7 +28,7 @@ import DateRangeApply, { formatDateDMY } from '../components/DateRangeApply';
 import BrandHeader from '../components/BrandHeader';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
-import { C } from '../theme/brand'; 
+import { C, FONT } from '../theme/brand'; 
 
 const CARD = {
   background: C.cardBg,
@@ -1734,7 +1734,6 @@ export default function ManagerPortal() {
   subtitle="Manage tables, orders and kitchen operations"
   right={
     <>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               {kitchenStatus && (
                 <button
                   onClick={toggleKitchen}
@@ -1814,6 +1813,7 @@ export default function ManagerPortal() {
               <Btn variant="danger" onClick={logout}>Logout</Btn>
               </>
   }
+   />
       <div style={{ maxWidth: 1280, margin: "0 auto", padding: "24px" }}>
 
         {/* ── Stats strip ───────────────────────────────────────────────── */}
