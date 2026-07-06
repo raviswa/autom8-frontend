@@ -11,18 +11,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
 // ── Design tokens (matches OwnerDashboard aesthetic) ─────────────────────────
-const C = {
-  bg:          '#F4F4F0',
-  card:        '#FFFFFF',
-  border:      '#E8E8E5',
-  text:        '#1A1A1A',
-  textMuted:   '#888884',
-  primary:     '#378ADD',
-  primaryDark: '#2563EB',
-  success:     '#1D9E75',
-  warning:     '#BA7517',
-  danger:      '#A32D2D',
-};
+
+import { C } from '../theme/brand';
 
 const CARD = {
   background: C.card,
