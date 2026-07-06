@@ -28,7 +28,7 @@ import DateRangeApply, { formatDateDMY } from '../components/DateRangeApply';
 import BrandHeader from '../components/BrandHeader';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
-import { C, FONT } from '../theme/brand'; 
+import { C, FONTS } from '../theme/brand'; 
 
 const CARD = {
   background: C.cardBg,
