@@ -25,6 +25,7 @@ import { useKOTPrint } from '../components/KOTPrint';
 import { kotRef } from '../App';
 import { format } from 'date-fns';
 import DateRangeApply, { formatDateDMY } from '../components/DateRangeApply';
+import BrandHeader from '../components/BrandHeader';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 import { C } from '../theme/brand'; 
@@ -1728,13 +1729,11 @@ export default function ManagerPortal() {
       )}
 
       {/* ── Header ───────────────────────────────────────────────────────── */}
-      <div style={{ background: C.cardBg, borderBottom: `0.5px solid ${C.border}` }}>
-        <div style={{ maxWidth: 1280, margin: "0 auto", padding: "16px 24px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-            <div>
-              <h1 style={{ fontFamily: FONTS.heading, fontSize: 18, fontWeight: 500, color: C.text, margin: 0 }}>Manager portal</h1>
-              <p style={{ fontSize: 13, color: C.textMuted, margin: "2px 0 0" }}>Manage tables, orders and kitchen operations</p>
-            </div>
+<BrandHeader
+  title="Manager portal"
+  subtitle="Manage tables, orders and kitchen operations"
+  right={
+    <>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               {kitchenStatus && (
                 <button
@@ -1813,11 +1812,8 @@ export default function ManagerPortal() {
               </Link>
               <Btn onClick={() => openNewOrderModal(null)}>+ New order</Btn>
               <Btn variant="danger" onClick={logout}>Logout</Btn>
-            </div>
-          </div>
-        </div>
-      </div>
-
+              </>
+  }
       <div style={{ maxWidth: 1280, margin: "0 auto", padding: "24px" }}>
 
         {/* ── Stats strip ───────────────────────────────────────────────── */}
