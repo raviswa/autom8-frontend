@@ -27,36 +27,7 @@ import { format } from 'date-fns';
 import DateRangeApply, { formatDateDMY } from '../components/DateRangeApply';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
-const C = {
-  primary:       "#378ADD",
-  primaryDark:   "#185FA5",
-  primaryLight:  "#E6F1FB",
-  primaryBorder: "#B5D4F4",
-  success:       "#1D9E75",
-  successLight:  "#E1F5EE",
-  successBorder: "#9FE1CB",
-  successDark:   "#085041",
-  warning:       "#BA7517",
-  warningLight:  "#FAEEDA",
-  warningBorder: "#FAC775",
-  warningDark:   "#633806",
-  danger:        "#A32D2D",
-  dangerLight:   "#FCEBEB",
-  dangerBorder:  "#F7C1C1",
-  dangerDark:    "#791F1F",
-  accent:        "#7B61FF",
-  accentLight:   "#EEEDFE",
-  accentBorder:  "#CECBF6",
-  accentDark:    "#3C3489",
-  pageBg:        "#F5F5F3",
-  cardBg:        "#ffffff",
-  surfaceBg:     "#F5F5F3",
-  border:        "#E8E8E5",
-  borderStrong:  "#D0D0CC",
-  text:          "#111111",
-  textSub:       "#555555",
-  textMuted:     "#999999",
-};
+import { C } from '../theme/brand'; 
 
 const CARD = {
   background: C.cardBg,
