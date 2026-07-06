@@ -1732,7 +1732,7 @@ export default function ManagerPortal() {
         <div style={{ maxWidth: 1280, margin: "0 auto", padding: "16px 24px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
             <div>
-              <h1 style={{ fontSize: 18, fontWeight: 500, color: C.text, margin: 0 }}>Manager portal</h1>
+              <h1 style={{ fontFamily: FONTS.heading, fontSize: 18, fontWeight: 500, color: C.text, margin: 0 }}>Manager portal</h1>
               <p style={{ fontSize: 13, color: C.textMuted, margin: "2px 0 0" }}>Manage tables, orders and kitchen operations</p>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -2195,7 +2195,7 @@ export default function ManagerPortal() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
               <div>
-                <h2 style={{ fontSize: 16, fontWeight: 500, color: C.text, margin: 0 }}>Scheduled orders</h2>
+                <h2 style={{ fontFamily: FONTS.heading, fontSize: 16, fontWeight: 500, color: C.text, margin: 0 }}>Scheduled orders</h2>
                 <p style={{ fontSize: 12, color: C.textMuted, margin: '4px 0 0' }}>Pre-booked takeaway and delivery — approvals, prep slots, and future dates.</p>
               </div>
               <Link to="/dashboard/kitchen" style={{ fontSize: 12, color: C.primaryDark, textDecoration: 'none' }}>Open kitchen display →</Link>
@@ -2349,7 +2349,7 @@ export default function ManagerPortal() {
         {activeTab === 'tables' && (
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
-              <h2 style={{ fontSize: 16, fontWeight: 500, color: C.text, margin: 0 }}>Tables</h2>
+              <h2 style={{ fontFamily: FONTS.heading, fontSize: 16, fontWeight: 500, color: C.text, margin: 0 }}>Tables</h2>
               <div style={{ display: 'flex', gap: 3, background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 8, padding: 3 }}>
                 {[
                   { key: 'floor', label: 'Live floor' },
@@ -2612,7 +2612,7 @@ export default function ManagerPortal() {
         {activeTab === 'orders' && (
           <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-              <h2 style={{ fontSize: 16, fontWeight: 500, color: C.text, margin: 0 }}>Active orders</h2>
+              <h2 style={{ fontFamily: FONTS.heading, fontSize: 16, fontWeight: 500, color: C.text, margin: 0 }}>Active orders</h2>
               <Link to="/dashboard/kitchen" style={{ fontSize: 12, color: C.primaryDark, textDecoration: 'none' }}>Open kitchen display →</Link>
             </div>
             <AlertBanner type="info">
@@ -2727,7 +2727,7 @@ export default function ManagerPortal() {
         {activeTab === 'reports' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <div>
-              <h2 style={{ fontSize: 16, fontWeight: 500, color: C.text, margin: 0 }}>Sales reports</h2>
+              <h2 style={{ fontFamily: FONTS.heading, fontSize: 16, fontWeight: 500, color: C.text, margin: 0 }}>Sales reports</h2>
               <p style={{ fontSize: 12, color: C.textMuted, margin: '4px 0 0' }}>
                 Completed dine-in POS orders plus paid WhatsApp prepay bookings for the selected date range (IST).
               </p>
@@ -2820,7 +2820,8 @@ export default function ManagerPortal() {
           <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
               <div>
-                <h2 style={{ fontSize: 16, fontWeight: 500, color: C.text, margin: 0 }}>Menu management</h2>
+                <h2 style={{ fontFamily: FONTS.heading, fontSize: 16, fontWeight: 500, color: C.text, margin: 0 }}>Menu management</h2>
+
                 <p style={{ fontSize: 12, color: C.textMuted, margin: "4px 0 0" }}>
                   Pull from Meta to upsert WhatsApp catalog items, toggle stock, or upload Excel to <strong>fully replace</strong> the menu. See the <strong>Column guide</strong> sheet for scheduling columns.
                 </p>
