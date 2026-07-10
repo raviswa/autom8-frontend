@@ -455,6 +455,7 @@ function TabRestaurant({ apiClient, showToast }) {
         gstin:         d.gstin         ?? '',
         logo_url:      d.logo_url      ?? '',
         restaurant_type:   d.restaurant_type ?? 'restaurant',
+        lob_type:          d.lob_type ?? 'restaurant',   // ← add this line
         pickup_address:    d.pickup_address ?? '',
         pickup_maps_link:  d.google_maps_url || (lat && lng ? `https://maps.google.com/?q=${lat},${lng}` : ''),
         pickup_latitude:   lat ?? '',
@@ -638,6 +639,33 @@ function TabRestaurant({ apiClient, showToast }) {
           </button>
         ))}
       </div>
+
+<SectionTitle>Business type</SectionTitle>
+<div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+  {[
+    { value: 'restaurant',     label: 'Restaurant / Tiffin',     desc: 'Dine-in, takeaway, delivery — time-slot menu.' },
+    { value: 'psl',            label: 'Pizza & Ice Cream',       desc: 'Sizes, flavours, toppings — variant-based menu.' },
+    { value: 'food_products',  label: 'Packaged Food / Home Baker', desc: 'Pack sizes, shelf life, ingredients.' },
+    { value: 'jewellery',      label: 'Gold Jewellery',          desc: 'Live gold rate, purity, making charges.' },
+    { value: 'retail',         label: 'Retail / Electronics',    desc: 'Condition, brand, warranty, multi-image.' },
+    { value: 'b2b',            label: 'B2B Supply',              desc: 'MOQ, unit of measure, wholesale pricing.' },
+  ].map(opt => (
+    <button key={opt.value}
+      onClick={() => set('lob_type', opt.value)}
+      style={{
+        padding: '14px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
+        background: form.lob_type === opt.value ? C.primaryLight : C.cardBg,
+        border: `0.5px solid ${form.lob_type === opt.value ? C.primary : C.border}`,
+      }}>
+      <div style={{ fontSize: 13, fontWeight: 500, color: form.lob_type === opt.value ? C.primaryDark : C.text, marginBottom: 4 }}>
+        {form.lob_type === opt.value ? '◉ ' : '○ '}{opt.label}
+      </div>
+      <div style={{ fontSize: 11, color: C.textMuted }}>{opt.desc}</div>
+    </button>
+  ))}
+</div>
+
+      
 
       {form.restaurant_type === 'cloud_kitchen' && (
         <>
