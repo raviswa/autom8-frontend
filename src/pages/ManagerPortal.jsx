@@ -2897,23 +2897,42 @@ const fetchRestaurantMeta = useCallback(async () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {uploadRows.map((row, i) => {
-                        const hasError = uploadErrors.some(e => e.includes(`Row ${i + 1}`));
-                        return (
-                          <tr key={i} style={{ borderBottom: `0.5px solid ${C.border}`, background: hasError ? C.dangerLight : "transparent" }}>
-                            <td style={{ padding: "8px 14px", fontFamily: "monospace", fontSize: 11, color: C.textMuted }}>{row.id}</td>
-                            <td style={{ padding: "8px 14px", fontWeight: 500, color: C.text }}>{row.name}</td>
-                            <td style={{ padding: "8px 14px" }}><span style={{ fontSize: 10, background: C.surfaceBg, color: C.textSub, padding: "2px 8px", borderRadius: 20, fontWeight: 500 }}>{row.category || '—'}</span></td>
-                            <td style={{ padding: "8px 14px", textAlign: "right", fontWeight: 500, color: C.text }}>₹{row.price.toFixed(2)}</td>
-                            <td style={{ padding: "8px 14px", color: C.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.description}</td>
-                            <td style={{ padding: "8px 14px" }}>
-                              {row.image_url
-                                ? <a href={row.image_url} target="_blank" rel="noopener noreferrer" style={{ color: C.primary, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{row.image_url.replace(/^https?:\/\//, '').slice(0, 40)}…</a>
-                                : <span style={{ color: C.textMuted }}>—</span>}
-                            </td>
-                          </tr>
-                        );
-                      })}
+{uploadRows.map((row, i) => {
+  const hasError = uploadErrors.some(e => e.includes(`Row ${i + 1}`));
+  return (
+    <tr key={i} style={{ borderBottom: `0.5px solid ${C.border}`, background: hasError ? C.dangerLight : "transparent" }}>
+      {schema.previewColumns.map((col) => {
+        const val = row[col.key];
+        let content;
+        if (col.image) {
+          content = val
+            ? <a href={val} target="_blank" rel="noopener noreferrer" style={{ color: C.primary, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{String(val).replace(/^https?:\/\//, '').slice(0, 40)}…</a>
+            : <span style={{ color: C.textMuted }}>—</span>;
+        } else if (col.pill) {
+          content = <span style={{ fontSize: 10, background: C.surfaceBg, color: C.textSub, padding: "2px 8px", borderRadius: 20, fontWeight: 500 }}>{val || '—'}</span>;
+        } else if (col.key === 'category') {
+          content = <span style={{ fontSize: 10, background: C.surfaceBg, color: C.textSub, padding: "2px 8px", borderRadius: 20, fontWeight: 500 }}>{val || '—'}</span>;
+        } else if (col.price) {
+          content = `₹${Number(val || 0).toFixed(2)}`;
+        } else {
+          content = val ?? '—';
+        }
+        return (
+          <td key={col.key} style={{
+            padding: "8px 14px", textAlign: col.price ? "right" : "left",
+            fontFamily: col.mono ? "monospace" : undefined,
+            fontWeight: col.bold ? 500 : undefined,
+            fontSize: col.mono ? 11 : undefined,
+            color: col.mono ? C.textMuted : C.text,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>
+            {content}
+          </td>
+        );
+      })}
+    </tr>
+  );
+})}
                     </tbody>
                   </table>
                 </div>
