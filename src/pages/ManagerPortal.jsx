@@ -16,6 +16,8 @@
 //   4. All existing functionality (queue, orders, menu, tokens) preserved.
 // ============================================================================
 
+// Add to the top import block
+import { getSchemaForLob } from '../config/catalogSchemas';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -37,6 +39,8 @@ const CARD = {
   padding: "20px 24px",
 };
 
+
+
 // ─── Table status palette ──────────────────────────────────────────────────────
 const TABLE_STATUS = {
   available: { bg: C.successLight,  text: C.successDark,  label: "Available" },
@@ -53,26 +57,6 @@ const TOKEN_STATUS = {
 };
 
 const ACTIVE_ORDER_STATUSES = ['pending', 'confirmed', 'in_progress', 'ready'];
-
-const CATALOG_TEMPLATE_HEADERS = [
-  'id', 'title', 'description', 'price', 'category', 'custom_label_0', 'image_link', 'is_available',
-  'prep_time_fixed', 'batch_size', 'time_per_batch', 'kitchen_station', 'packing_time', 'holds_well', 'fulfillment_section',
-];
-const CATALOG_TEMPLATE_COL_WIDTHS = [
-  { wch: 8 }, { wch: 28 }, { wch: 40 }, { wch: 8 }, { wch: 16 }, { wch: 16 }, { wch: 48 }, { wch: 12 },
-  { wch: 14 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 16 },
-];
-const CATALOG_COLUMN_HELP = [
-  ['Column guide'],
-  [''],
-  ['custom_label_0 — menu slot: Morning Tiffin, Lunch, Evening Snacks, Dinner (blank = all day)'],
-  ['prep_time_fixed — fixed prep minutes before batch cooking (default 5)'],
-  ['batch_size / time_per_batch — batch cook timing for scheduled orders'],
-  ['kitchen_station — tawa, steamer, kadai, beverages, assembly, cold'],
-  ['packing_time — minutes per item for takeaway packing'],
-  ['holds_well — TRUE if item can wait without quality loss'],
-  ['fulfillment_section — counter id when multi-counter mode is on (default main)'],
-];
 
 const SLOT_LABEL_TO_DB = {
   'morning tiffin': 'morning_tiffin',
@@ -356,51 +340,11 @@ function exportCategoryForTemplate(category) {
   return c && c !== 'General' ? c : '';
 }
 
-async function downloadCatalogTemplate(apiClient, showToast, currentMenuItems = []) {
-  const fromApiItems = (items) =>
-    items.map(item => [
-      item.id, item.title, item.description, item.price,
-      exportCategoryForTemplate(item.category),
-      item.custom_label_0 || '',
-      item.image_link, item.is_available,
-      item.prep_time_fixed ?? 5,
-      item.batch_size ?? 1,
-      item.time_per_batch ?? 10,
-      item.kitchen_station || 'assembly',
-      item.packing_time ?? 1,
-      item.holds_well ?? 'FALSE',
-      item.fulfillment_section || 'main',
-    ]);
-
-  const slotLabel = (item) => {
-    const db = item.time_slot;
-    if (!db || db === 'all') return '';
-    return SLOT_DB_TO_LABEL[db] || String(db).replace(/_/g, ' ');
-  };
-
-  const fromStateItems = (items) =>
-    items.map(item => [
-      item.retailer_id || item.id || '',
-      item.name || '',
-      item.description || '',
-      Number(item.price) || 0,
-      exportCategoryForTemplate(item.category),
-      slotLabel(item),
-      item.image_url || '',
-      (item.is_stocked ?? item.is_available ?? true) ? 'TRUE' : 'FALSE',
-      item.prep_time_fixed ?? 5,
-      item.batch_size ?? 1,
-      item.time_per_batch ?? 10,
-      item.kitchen_station || 'assembly',
-      item.packing_time ?? 1,
-      item.holds_well ? 'TRUE' : 'FALSE',
-      item.fulfillment_section || 'main',
-    ]);
-
+async function downloadCatalogTemplate(apiClient, showToast, currentMenuItems = [], schema) {
   const writeAndDownload = (rows, count, source) => {
-    const catalogSheet = XLSX.utils.aoa_to_sheet([CATALOG_TEMPLATE_HEADERS, ...rows]);
-    catalogSheet['!cols'] = CATALOG_TEMPLATE_COL_WIDTHS;
-    const helpSheet = XLSX.utils.aoa_to_sheet([...IMAGE_SOURCE_EXAMPLES, [''], ...CATALOG_COLUMN_HELP]);
+    const catalogSheet = XLSX.utils.aoa_to_sheet([schema.templateHeaders, ...rows]);
+    catalogSheet['!cols'] = schema.templateColWidths;
+    const helpSheet = XLSX.utils.aoa_to_sheet([...IMAGE_SOURCE_EXAMPLES, [''], ...schema.columnHelp]);
     helpSheet['!cols'] = [{ wch: 72 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, catalogSheet, 'WhatsApp Catalog');
@@ -409,30 +353,67 @@ async function downloadCatalogTemplate(apiClient, showToast, currentMenuItems = 
     showToast(`Template downloaded — ${count} item${count !== 1 ? 's' : ''} (${source})`);
   };
 
-  try {
-    showToast('Preparing template from live catalog…');
-    const res = await apiClient.get('/api/catalog/feed/template');
-    const apiItems = res.data?.items ?? [];
-    if (apiItems.length > 0) { writeAndDownload(fromApiItems(apiItems), apiItems.length, 'live catalog'); return; }
-  } catch (err) {
-    console.warn('[template-dl] API failed:', err.message);
+  // Only restaurant schema can infer from existing menu shape.
+  if (schema.id === 'restaurant') {
+    const fromApiItems = (items) =>
+      items.map(item => [
+        item.id, item.title, item.description, item.price,
+        exportCategoryForTemplate(item.category),
+        item.custom_label_0 || '',
+        item.image_link, item.is_available,
+        item.prep_time_fixed ?? 5,
+        item.batch_size ?? 1,
+        item.time_per_batch ?? 10,
+        item.kitchen_station || 'assembly',
+        item.packing_time ?? 1,
+        item.holds_well ?? 'FALSE',
+        item.fulfillment_section || 'main',
+      ]);
+
+    const slotLabel = (item) => {
+      const db = item.time_slot;
+      if (!db || db === 'all') return '';
+      return SLOT_DB_TO_LABEL[db] || String(db).replace(/_/g, ' ');
+    };
+
+    const fromStateItems = (items) =>
+      items.map(item => [
+        item.retailer_id || item.id || '',
+        item.name || '',
+        item.description || '',
+        Number(item.price) || 0,
+        exportCategoryForTemplate(item.category),
+        slotLabel(item),
+        item.image_url || '',
+        (item.is_stocked ?? item.is_available ?? true) ? 'TRUE' : 'FALSE',
+        item.prep_time_fixed ?? 5,
+        item.batch_size ?? 1,
+        item.time_per_batch ?? 10,
+        item.kitchen_station || 'assembly',
+        item.packing_time ?? 1,
+        item.holds_well ? 'TRUE' : 'FALSE',
+        item.fulfillment_section || 'main',
+      ]);
+
+    try {
+      showToast('Preparing template from live catalog…');
+      const res = await apiClient.get('/api/catalog/feed/template');
+      const apiItems = res.data?.items ?? [];
+      if (apiItems.length > 0) { writeAndDownload(fromApiItems(apiItems), apiItems.length, 'live catalog'); return; }
+    } catch (err) {
+      console.warn('[template-dl] API failed:', err.message);
+    }
+
+    const stockedItems = (currentMenuItems || []).filter(
+      i => i.is_stocked !== false && (i.retailer_id || i.id)
+    );
+    if (stockedItems.length > 0) {
+      writeAndDownload(fromStateItems(stockedItems), stockedItems.length, 'local snapshot');
+      return;
+    }
   }
 
-  const stockedItems = (currentMenuItems || []).filter(
-    i => i.is_stocked !== false && (i.retailer_id || i.id)
-  );
-  if (stockedItems.length > 0) {
-    writeAndDownload(fromStateItems(stockedItems), stockedItems.length, 'local snapshot');
-    return;
-  }
-
-  const stubRow = [
-    'M001', 'Idli', 'Soft steamed idlis with sambar and chutney', 50, 'Tiffin', 'Morning Tiffin',
-    'https://images.unsplash.com/photo-1585937421612-70a008356fbe?w=800', 'TRUE',
-    5, 1, 10, 'steamer', 1, 'FALSE', 'main',
-  ];
-  writeAndDownload([stubRow], 0, 'blank template — fill in your items');
-  showToast('No items in database yet — blank template downloaded');
+  writeAndDownload(schema.templateExamples, schema.templateExamples.length, 'example template — fill in your items');
 }
 
 // ─── Excel helpers ─────────────────────────────────────────────────────────────
@@ -546,6 +527,8 @@ export default function ManagerPortal() {
   const [tokens,         setTokens]         = useState([]);
   const [assigningToken, setAssigningToken] = useState(null);
   const [assignTableSel, setAssignTableSel] = useState({});
+  const [lobType,        setLobType]        = useState('restaurant');
+  const [allowManagerUpload, setAllowManagerUpload] = useState(false);
   const [activeTab,      setActiveTab]      = useState('queue');
   const [toastMsg,       setToastMsg]       = useState('');
 
@@ -614,6 +597,8 @@ export default function ManagerPortal() {
 
   const showToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 3500); };
 
+  const schema = getSchemaForLob(lobType);
+  
   // ── Fetchers ─────────────────────────────────────────────────────────────
   const fetchTokens    = useCallback(async () => {
     try {
@@ -674,6 +659,20 @@ export default function ManagerPortal() {
       console.error('[ManagerPortal] fetchKitchenStatus failed:', e.response?.data || e.message);
     }
   }, [apiClient]);
+
+  // Add alongside the other fetchers (near fetchCatalogStatus)
+const fetchRestaurantMeta = useCallback(async () => {
+  try {
+    const r = await apiClient.get('/api/dashboard/waba');
+    const rest = r.data?.restaurant;
+    if (rest) {
+      setLobType(rest.lob_type || 'restaurant');
+      setAllowManagerUpload(!!rest.allow_manager_menu_upload);
+    }
+  } catch (e) { /* non-fatal — falls back to restaurant schema */ }
+}, [apiClient]);
+
+  
   const fetchCatalogStatus = useCallback(async () => {
     try {
       const r = await apiClient.get('/api/catalog/status');
@@ -692,13 +691,14 @@ export default function ManagerPortal() {
       setSalesLoading(false);
     }
   }, [apiClient]);
-  const fetchData      = useCallback(async () => {
+  
+  const fetchData = useCallback(async () => {
     await Promise.all([
       fetchTables(), fetchOrders(), fetchTokens(), fetchMenuItems(), fetchCategorySlots(), fetchKitchenStatus(),
-      fetchKdsFeed(), fetchScheduledBoard(), fetchCatalogStatus(),
+      fetchKdsFeed(), fetchScheduledBoard(), fetchCatalogStatus(), fetchRestaurantMeta(),
     ]);
     setLoading(false);
-  }, [fetchTables, fetchOrders, fetchTokens, fetchMenuItems, fetchCategorySlots, fetchKitchenStatus, fetchKdsFeed, fetchScheduledBoard, fetchCatalogStatus]);
+  }, [fetchTables, fetchOrders, fetchTokens, fetchMenuItems, fetchCategorySlots, fetchKitchenStatus, fetchKdsFeed, fetchScheduledBoard, fetchCatalogStatus, fetchRestaurantMeta]);
 
   useEffect(() => {
     fetchData();
@@ -1265,10 +1265,10 @@ export default function ManagerPortal() {
         const sheetName = workbook.SheetNames.includes('WhatsApp Catalog') ? 'WhatsApp Catalog' : workbook.SheetNames[0];
         const rawRows   = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' });
         if (rawRows.length === 0) { setUploadErrors(['The selected sheet appears to be empty.']); setUploadStatus('idle'); return; }
-        const mapped   = rawRows.map(mapExcelRowToMenuItem);
+        const mapped   = rawRows.map(schema.mapRow);
         const nonEmpty = mapped.filter(r => r.id || r.name);
         setUploadRows(nonEmpty);
-        setUploadErrors(nonEmpty.flatMap((r, i) => validateRow(r, i)));
+        setUploadErrors(nonEmpty.flatMap((r, i) => schema.validateRow(r, i + 1)));
         setUploadStatus('preview');
       } catch(err) { setUploadErrors([`Could not read the file: ${err.message}`]); setUploadStatus('idle'); }
     };
@@ -2830,7 +2830,7 @@ export default function ManagerPortal() {
                   {metaSyncing ? <Spinner size={14} /> : '↻'} Pull from Meta
                 </button>
                 <button
-                  onClick={async () => { setDownloadingTpl(true); await downloadCatalogTemplate(apiClient, showToast, menuItems); setDownloadingTpl(false); }}
+                  onClick={async () => { setDownloadingTpl(true); await downloadCatalogTemplate(apiClient, showToast, menuItems, schema); setDownloadingTpl(false); }}
                   disabled={downloadingTpl}
                   style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 500, padding: "7px 14px", borderRadius: 8, border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.textSub, cursor: "pointer" }}>
                   {downloadingTpl ? <Spinner size={14} /> : '↓'} Download template
@@ -2891,8 +2891,8 @@ export default function ManagerPortal() {
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed" }}>
                     <thead>
                       <tr style={{ borderBottom: `0.5px solid ${C.border}`, background: C.surfaceBg }}>
-                        {["ID","Name","Category","Price","Description","Image URL"].map((h, i) => (
-                          <th key={h} style={{ textAlign: i >= 3 ? "right" : "left", padding: "10px 14px", fontSize: 11, fontWeight: 500, color: C.textMuted, width: ["6%","18%","14%","8%","26%","28%"][i] }}>{h}</th>
+                          {schema.previewColumns.map((col) => (
+                         <th key={col.key} style={{ textAlign: col.price ? "right" : "left", padding: "10px 14px", fontSize: 11, fontWeight: 500, color: C.textMuted, width: col.width }}>{col.label}</th>
                         ))}
                       </tr>
                     </thead>
