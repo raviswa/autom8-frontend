@@ -456,6 +456,7 @@ function TabRestaurant({ apiClient, showToast }) {
         logo_url:      d.logo_url      ?? '',
         restaurant_type:   d.restaurant_type ?? 'restaurant',
         lob_type:          d.lob_type ?? 'restaurant',   // ← add this line
+        allow_manager_menu_upload: d.allow_manager_menu_upload ?? false,
         pickup_address:    d.pickup_address ?? '',
         pickup_maps_link:  d.google_maps_url || (lat && lng ? `https://maps.google.com/?q=${lat},${lng}` : ''),
         pickup_latitude:   lat ?? '',
@@ -666,6 +667,36 @@ function TabRestaurant({ apiClient, showToast }) {
 </div>
 
       
+
+      <SectionTitle>Staff permissions</SectionTitle>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '14px', borderRadius: 10, marginBottom: 16,
+        background: C.surfaceBg, border: `0.5px solid ${C.border}`,
+      }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 500, color: C.text }}>
+            Allow managers to upload/replace the menu
+          </div>
+          <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>
+            When off, only you (the owner) can upload or replace the catalog via Excel.
+            Managers can still toggle individual items in/out of stock from the Manager Portal.
+          </div>
+        </div>
+        <div
+          onClick={() => set('allow_manager_menu_upload', !form.allow_manager_menu_upload)}
+          style={{
+            width: 40, height: 22, borderRadius: 11, cursor: 'pointer', position: 'relative',
+            background: form.allow_manager_menu_upload ? C.success : C.border,
+            transition: 'background .2s', flexShrink: 0, marginLeft: 16,
+          }}
+        >
+          <div style={{
+            position: 'absolute', top: 3, left: form.allow_manager_menu_upload ? 21 : 3,
+            width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left .2s',
+          }} />
+        </div>
+      </div>
 
       {form.restaurant_type === 'cloud_kitchen' && (
         <>
