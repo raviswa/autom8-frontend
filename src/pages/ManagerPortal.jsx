@@ -2973,6 +2973,45 @@ const fetchRestaurantMeta = useCallback(async () => {
     )}
   </>
 )}
+            {/* Current menu table */}
+<div>
+  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+    <div style={{ fontSize: 14, fontWeight: 500, color: C.text }}>
+      Current menu{' '}
+      <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 400 }}>
+        ({filteredMenuItems.length}{filteredMenuItems.length !== menuItems.length ? ` of ${menuItems.length}` : ''} items)
+      </span>
+    </div>
+    <span style={{ fontSize: 11, color: C.textMuted }}>Toggle to mark in/out of stock instantly</span>
+  </div>
+
+  {menuItems.length > 0 && (
+    <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+      <input
+        type="search"
+        value={menuSearch}
+        onChange={e => setMenuSearch(e.target.value)}
+        placeholder="Search menu items…"
+        style={{
+          flex: '1 1 220px', minWidth: 180, fontSize: 12, padding: '8px 12px',
+          borderRadius: 8, border: `0.5px solid ${C.border}`, outline: 'none',
+        }}
+      />
+      <select
+        value={menuCategory}
+        onChange={e => setMenuCategory(e.target.value)}
+        style={{
+          fontSize: 12, padding: '8px 12px', borderRadius: 8,
+          border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.text,
+        }}
+      >
+        <option value="all">All categories</option>
+        {menuCategories.map(cat => (
+          <option key={cat} value={cat}>{cat}</option>
+        ))}
+      </select>
+    </div>
+  )}
               {menuItems.length === 0 ? (
                 <div style={{ ...CARD, textAlign: "center", padding: "40px 20px", color: C.textMuted, fontSize: 13 }}>No menu items yet. Upload the catalog Excel to get started.</div>
               ) : filteredMenuItems.length === 0 ? (
