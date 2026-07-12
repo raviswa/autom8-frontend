@@ -2846,6 +2846,14 @@ const fetchRestaurantMeta = useCallback(async () => {
               <span style={{ fontSize: 11, color: C.textMuted }}>Excel upload replaces all items · Meta pull updates by product ID</span>
             </div>
 
+            {user?.role === 'manager' && !allowManagerUpload ? (
+              <div style={{ ...CARD, textAlign: 'center', padding: '32px 20px', color: C.textMuted, fontSize: 13 }}>
+                🔒 Menu upload is restricted to the owner for this outlet.
+                <p style={{ fontSize: 12, marginTop: 6 }}>Ask your owner to enable it in Settings → Restaurant → Staff permissions.</p>
+              </div>
+            ) : (
+              <>
+                
             {uploadStatus === 'idle' && (
               <div
                 onDragOver={e => { e.preventDefault(); setUploadDragOver(true); }}
@@ -2963,6 +2971,7 @@ const fetchRestaurantMeta = useCallback(async () => {
                 </div>
                 <Btn variant="success" onClick={handleResetUpload}>Upload another file</Btn>
               </div>
+                </>
             )}
 
             {/* Current menu table */}
