@@ -2846,174 +2846,133 @@ const fetchRestaurantMeta = useCallback(async () => {
               <span style={{ fontSize: 11, color: C.textMuted }}>Excel upload replaces all items · Meta pull updates by product ID</span>
             </div>
 
-            {user?.role === 'manager' && !allowManagerUpload ? (
-              <div style={{ ...CARD, textAlign: 'center', padding: '32px 20px', color: C.textMuted, fontSize: 13 }}>
-                🔒 Menu upload is restricted to the owner for this outlet.
-                <p style={{ fontSize: 12, marginTop: 6 }}>Ask your owner to enable it in Settings → Restaurant → Staff permissions.</p>
-              </div>
-            ) : (
-              <>
-                
-            {uploadStatus === 'idle' && (
-              <div
-                onDragOver={e => { e.preventDefault(); setUploadDragOver(true); }}
-                onDragLeave={() => setUploadDragOver(false)}
-                onDrop={handleDrop}
-                onClick={() => fileInputRef.current?.click()}
-                style={{
-                  border: `1px dashed ${uploadDragOver ? C.primary : C.border}`,
-                  borderRadius: 12, padding: "40px 20px", textAlign: "center", cursor: "pointer",
-                  background: uploadDragOver ? C.primaryLight : C.cardBg, transition: "all .2s",
-                }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>📂</div>
-                <p style={{ fontSize: 13, fontWeight: 500, color: C.text, margin: "0 0 4px" }}>Drop your catalog Excel here</p>
-                <p style={{ fontSize: 11, color: C.textMuted, margin: 0 }}>or click to browse — .xlsx, .xls, or .csv</p>
-                <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={e => handleFileSelect(e.target.files[0])} />
-              </div>
-            )}
+{user?.role === 'manager' && !allowManagerUpload ? (
+  <div style={{ ...CARD, textAlign: 'center', padding: '32px 20px', color: C.textMuted, fontSize: 13 }}>
+    🔒 Menu upload is restricted to the owner for this outlet.
+    <p style={{ fontSize: 12, marginTop: 6 }}>Ask your owner to enable it in Settings → Restaurant → Staff permissions.</p>
+  </div>
+) : (
+  <>
+    {uploadStatus === 'idle' && (
+      <div
+        onDragOver={e => { e.preventDefault(); setUploadDragOver(true); }}
+        onDragLeave={() => setUploadDragOver(false)}
+        onDrop={handleDrop}
+        onClick={() => fileInputRef.current?.click()}
+        style={{
+          border: `1px dashed ${uploadDragOver ? C.primary : C.border}`,
+          borderRadius: 12, padding: "40px 20px", textAlign: "center", cursor: "pointer",
+          background: uploadDragOver ? C.primaryLight : C.cardBg, transition: "all .2s",
+        }}>
+        <div style={{ fontSize: 32, marginBottom: 8 }}>📂</div>
+        <p style={{ fontSize: 13, fontWeight: 500, color: C.text, margin: "0 0 4px" }}>Drop your catalog Excel here</p>
+        <p style={{ fontSize: 11, color: C.textMuted, margin: 0 }}>or click to browse — .xlsx, .xls, or .csv</p>
+        <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={e => handleFileSelect(e.target.files[0])} />
+      </div>
+    )}
 
-            {uploadStatus === 'parsing' && (
-              <div style={{ ...CARD, textAlign: "center", padding: "40px 20px" }}>
-                <Spinner size={32} />
-                <p style={{ fontSize: 13, color: C.textSub, marginTop: 12 }}>Reading file…</p>
-              </div>
-            )}
+    {uploadStatus === 'parsing' && (
+      <div style={{ ...CARD, textAlign: "center", padding: "40px 20px" }}>
+        <Spinner size={32} />
+        <p style={{ fontSize: 13, color: C.textSub, marginTop: 12 }}>Reading file…</p>
+      </div>
+    )}
 
-            {uploadStatus === 'preview' && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, background: C.primaryLight, border: `0.5px solid ${C.primaryBorder}`, borderRadius: 20, padding: "4px 12px", fontSize: 12, color: C.primaryDark, fontWeight: 500 }}>
-                    {uploadFile?.name} — {uploadRows.length} rows
-                  </div>
-                  <button onClick={handleResetUpload} style={{ fontSize: 12, color: C.textMuted, background: "none", border: "none", cursor: "pointer" }}>✕ Choose different file</button>
-                </div>
-                {uploadErrors.length > 0 && (
-                  <AlertBanner type="error">
-                    <strong>{uploadErrors.length} issue{uploadErrors.length !== 1 ? 's' : ''} found</strong> — fix in Excel and re-upload
-                    <ul style={{ listStyle: "disc", paddingLeft: 18, marginTop: 6 }}>
-                      {uploadErrors.map((e, i) => <li key={i} style={{ marginTop: 2 }}>{e}</li>)}
-                    </ul>
-                  </AlertBanner>
-                )}
-                <div style={{ ...CARD, padding: 0, overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed" }}>
-                    <thead>
-                      <tr style={{ borderBottom: `0.5px solid ${C.border}`, background: C.surfaceBg }}>
-                          {schema.previewColumns.map((col) => (
-                         <th key={col.key} style={{ textAlign: col.price ? "right" : "left", padding: "10px 14px", fontSize: 11, fontWeight: 500, color: C.textMuted, width: col.width }}>{col.label}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-{uploadRows.map((row, i) => {
-  const hasError = uploadErrors.some(e => e.includes(`Row ${i + 1}`));
-  return (
-    <tr key={i} style={{ borderBottom: `0.5px solid ${C.border}`, background: hasError ? C.dangerLight : "transparent" }}>
-      {schema.previewColumns.map((col) => {
-        const val = row[col.key];
-        let content;
-        if (col.image) {
-          content = val
-            ? <a href={val} target="_blank" rel="noopener noreferrer" style={{ color: C.primary, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{String(val).replace(/^https?:\/\//, '').slice(0, 40)}…</a>
-            : <span style={{ color: C.textMuted }}>—</span>;
-        } else if (col.pill) {
-          content = <span style={{ fontSize: 10, background: C.surfaceBg, color: C.textSub, padding: "2px 8px", borderRadius: 20, fontWeight: 500 }}>{val || '—'}</span>;
-        } else if (col.key === 'category') {
-          content = <span style={{ fontSize: 10, background: C.surfaceBg, color: C.textSub, padding: "2px 8px", borderRadius: 20, fontWeight: 500 }}>{val || '—'}</span>;
-        } else if (col.price) {
-          content = `₹${Number(val || 0).toFixed(2)}`;
-        } else {
-          content = val ?? '—';
-        }
-        return (
-          <td key={col.key} style={{
-            padding: "8px 14px", textAlign: col.price ? "right" : "left",
-            fontFamily: col.mono ? "monospace" : undefined,
-            fontWeight: col.bold ? 500 : undefined,
-            fontSize: col.mono ? 11 : undefined,
-            color: col.mono ? C.textMuted : C.text,
-            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-          }}>
-            {content}
-          </td>
-        );
-      })}
-    </tr>
-  );
-})}
-                    </tbody>
-                  </table>
-                </div>
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-                  <Btn variant="secondary" onClick={handleResetUpload}>Cancel</Btn>
-                  <Btn onClick={handleConfirmUpload} disabled={uploadErrors.length > 0}>Confirm &amp; upload {uploadRows.length} items</Btn>
-                </div>
-              </div>
-            )}
+    {uploadStatus === 'preview' && (
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, background: C.primaryLight, border: `0.5px solid ${C.primaryBorder}`, borderRadius: 20, padding: "4px 12px", fontSize: 12, color: C.primaryDark, fontWeight: 500 }}>
+            {uploadFile?.name} — {uploadRows.length} rows
+          </div>
+          <button onClick={handleResetUpload} style={{ fontSize: 12, color: C.textMuted, background: "none", border: "none", cursor: "pointer" }}>✕ Choose different file</button>
+        </div>
+        {uploadErrors.length > 0 && (
+          <AlertBanner type="error">
+            <strong>{uploadErrors.length} issue{uploadErrors.length !== 1 ? 's' : ''} found</strong> — fix in Excel and re-upload
+            <ul style={{ listStyle: "disc", paddingLeft: 18, marginTop: 6 }}>
+              {uploadErrors.map((e, i) => <li key={i} style={{ marginTop: 2 }}>{e}</li>)}
+            </ul>
+          </AlertBanner>
+        )}
+        <div style={{ ...CARD, padding: 0, overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed" }}>
+            <thead>
+              <tr style={{ borderBottom: `0.5px solid ${C.border}`, background: C.surfaceBg }}>
+                {schema.previewColumns.map((col) => (
+                  <th key={col.key} style={{ textAlign: col.price ? "right" : "left", padding: "10px 14px", fontSize: 11, fontWeight: 500, color: C.textMuted, width: col.width }}>{col.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {uploadRows.map((row, i) => {
+                const hasError = uploadErrors.some(e => e.includes(`Row ${i + 1}`));
+                return (
+                  <tr key={i} style={{ borderBottom: `0.5px solid ${C.border}`, background: hasError ? C.dangerLight : "transparent" }}>
+                    {schema.previewColumns.map((col) => {
+                      const val = row[col.key];
+                      let content;
+                      if (col.image) {
+                        content = val
+                          ? <a href={val} target="_blank" rel="noopener noreferrer" style={{ color: C.primary, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{String(val).replace(/^https?:\/\//, '').slice(0, 40)}…</a>
+                          : <span style={{ color: C.textMuted }}>—</span>;
+                      } else if (col.pill) {
+                        content = <span style={{ fontSize: 10, background: C.surfaceBg, color: C.textSub, padding: "2px 8px", borderRadius: 20, fontWeight: 500 }}>{val || '—'}</span>;
+                      } else if (col.key === 'category') {
+                        content = <span style={{ fontSize: 10, background: C.surfaceBg, color: C.textSub, padding: "2px 8px", borderRadius: 20, fontWeight: 500 }}>{val || '—'}</span>;
+                      } else if (col.price) {
+                        content = `₹${Number(val || 0).toFixed(2)}`;
+                      } else {
+                        content = val ?? '—';
+                      }
+                      return (
+                        <td key={col.key} style={{
+                          padding: "8px 14px", textAlign: col.price ? "right" : "left",
+                          fontFamily: col.mono ? "monospace" : undefined,
+                          fontWeight: col.bold ? 500 : undefined,
+                          fontSize: col.mono ? 11 : undefined,
+                          color: col.mono ? C.textMuted : C.text,
+                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        }}>
+                          {content}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <Btn variant="secondary" onClick={handleResetUpload}>Cancel</Btn>
+          <Btn onClick={handleConfirmUpload} disabled={uploadErrors.length > 0}>Confirm &amp; upload {uploadRows.length} items</Btn>
+        </div>
+      </div>
+    )}
 
-            {uploadStatus === 'uploading' && (
-              <div style={{ ...CARD, textAlign: "center", padding: "40px 20px" }}>
-                <Spinner size={32} />
-                <p style={{ fontSize: 13, fontWeight: 500, color: C.text, marginTop: 12 }}>Saving to database…</p>
-                <p style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>Updating Meta catalog in the background</p>
-              </div>
-            )}
+    {uploadStatus === 'uploading' && (
+      <div style={{ ...CARD, textAlign: "center", padding: "40px 20px" }}>
+        <Spinner size={32} />
+        <p style={{ fontSize: 13, fontWeight: 500, color: C.text, marginTop: 12 }}>Saving to database…</p>
+        <p style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>Updating Meta catalog in the background</p>
+      </div>
+    )}
 
-            {uploadStatus === 'done' && uploadResult && (
-              <div style={{ background: C.successLight, border: `0.5px solid ${C.successBorder}`, borderRadius: 12, padding: "28px 24px", textAlign: "center" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
-                <div style={{ fontSize: 15, fontWeight: 500, color: C.successDark, marginBottom: 4 }}>Catalog replaced successfully</div>
-                <div style={{ fontSize: 12, color: C.success, marginBottom: 16 }}>
-                  {uploadResult.upserted} item{uploadResult.upserted !== 1 ? 's' : ''} saved
-                  {uploadResult.skipped > 0 ? ` · ${uploadResult.skipped} skipped` : ''}
-                  {uploadResult.purged  > 0 ? ` · ${uploadResult.purged} removed`  : ''}
-                  {' '}· WhatsApp catalog updated
-                </div>
-                <Btn variant="success" onClick={handleResetUpload}>Upload another file</Btn>
-              </div>
-                </>
-            )}
-
-            {/* Current menu table */}
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
-                <div style={{ fontSize: 14, fontWeight: 500, color: C.text }}>
-                  Current menu{' '}
-                  <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 400 }}>
-                    ({filteredMenuItems.length}{filteredMenuItems.length !== menuItems.length ? ` of ${menuItems.length}` : ''} items)
-                  </span>
-                </div>
-                <span style={{ fontSize: 11, color: C.textMuted }}>Toggle to mark in/out of stock instantly</span>
-              </div>
-
-              {menuItems.length > 0 && (
-                <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <input
-                    type="search"
-                    value={menuSearch}
-                    onChange={e => setMenuSearch(e.target.value)}
-                    placeholder="Search menu items…"
-                    style={{
-                      flex: '1 1 220px', minWidth: 180, fontSize: 12, padding: '8px 12px',
-                      borderRadius: 8, border: `0.5px solid ${C.border}`, outline: 'none',
-                    }}
-                  />
-                  <select
-                    value={menuCategory}
-                    onChange={e => setMenuCategory(e.target.value)}
-                    style={{
-                      fontSize: 12, padding: '8px 12px', borderRadius: 8,
-                      border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.text,
-                    }}
-                  >
-                    <option value="all">All categories</option>
-                    {menuCategories.map(cat => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
+    {uploadStatus === 'done' && uploadResult && (
+      <div style={{ background: C.successLight, border: `0.5px solid ${C.successBorder}`, borderRadius: 12, padding: "28px 24px", textAlign: "center" }}>
+        <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
+        <div style={{ fontSize: 15, fontWeight: 500, color: C.successDark, marginBottom: 4 }}>Catalog replaced successfully</div>
+        <div style={{ fontSize: 12, color: C.success, marginBottom: 16 }}>
+          {uploadResult.upserted} item{uploadResult.upserted !== 1 ? 's' : ''} saved
+          {uploadResult.skipped > 0 ? ` · ${uploadResult.skipped} skipped` : ''}
+          {uploadResult.purged  > 0 ? ` · ${uploadResult.purged} removed`  : ''}
+          {' '}· WhatsApp catalog updated
+        </div>
+        <Btn variant="success" onClick={handleResetUpload}>Upload another file</Btn>
+      </div>
+    )}
+  </>
+)}
               {menuItems.length === 0 ? (
                 <div style={{ ...CARD, textAlign: "center", padding: "40px 20px", color: C.textMuted, fontSize: 13 }}>No menu items yet. Upload the catalog Excel to get started.</div>
               ) : filteredMenuItems.length === 0 ? (
