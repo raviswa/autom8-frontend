@@ -963,6 +963,15 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
         has_dinner:   d.opening_hours?.dinner !== false,
         dinner_start: d.opening_hours?.dinner_start ?? '19:00',
         dinner_end:   d.opening_hours?.dinner_end   ?? '23:00',
+        lob_type: d.lob_type ?? 'restaurant',
+        shiprocket_connected: !!d.shiprocket_connected,
+        shiprocket_api_key: '',
+        shiprocket_has_key: !!d.shiprocket_connected,
+        intra_city_charge: d.intra_city_charge ?? '',
+        outstation_charge: d.outstation_charge ?? '',
+        free_delivery_above: d.free_delivery_above ?? '',
+        cod_enabled_city: !!d.cod_enabled_city,
+        cod_enabled_outstation: !!d.cod_enabled_outstation,
       });
       // Fulfillment sections
       const secs = d.fulfillment_sections ?? [];
@@ -1035,6 +1044,13 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
           snacks: form.has_snacks, snacks_start: form.snacks_start, snacks_end: form.snacks_end,
           dinner: form.has_dinner, dinner_start: form.dinner_start, dinner_end: form.dinner_end,
         },
+        shiprocket_connected: !!form.shiprocket_connected,
+        ...(form.shiprocket_api_key?.trim() ? { shiprocket_api_key: form.shiprocket_api_key.trim() } : {}),
+        intra_city_charge: parseFloat(form.intra_city_charge) || 0,
+        outstation_charge: parseFloat(form.outstation_charge) || 0,
+        free_delivery_above: parseFloat(form.free_delivery_above) || 0,
+        cod_enabled_city: !!form.cod_enabled_city,
+        cod_enabled_outstation: !!form.cod_enabled_outstation,
       });
       // Bulk-update menu_items.fulfillment_section per category mapping
       if (form.takeaway_fulfillment_mode === 'multi_counter' && Object.keys(catMap).length) {
@@ -1290,6 +1306,55 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
               Orders beyond this distance are declined when location is known. Set 0 for no limit. Uses road distance when Google Maps API is configured.
             </div>
           </div>
+        </>
+      )}
+
+      {showDelivery && ['food_products', 'retail', 'psl', 'b2b'].includes(form.lob_type) && (
+        <>
+          <SectionTitle>Outstation shipping</SectionTitle>
+          <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 12, lineHeight: 1.5 }}>
+            Pincode-based delivery: same-city uses intra-city charge; other pincodes use Shiprocket rates when connected, otherwise the flat outstation charge.
+          </div>
+          <ToggleRow
+            label="Shiprocket connected (auto rates for outstation)"
+            checked={form.shiprocket_connected}
+            onToggle={() => set('shiprocket_connected', !form.shiprocket_connected)}
+          />
+          {form.shiprocket_connected && (
+            <div style={{ marginBottom: 12 }}>
+              <Label>Shiprocket API token</Label>
+              <Input
+                value={form.shiprocket_api_key}
+                onChange={v => set('shiprocket_api_key', v)}
+                type="password"
+                placeholder={form.shiprocket_has_key ? 'Saved — enter only to replace' : 'Paste Shiprocket API token'}
+              />
+            </div>
+          )}
+          <div style={grid2}>
+            <div>
+              <Label>Intra-city charge (₹)</Label>
+              <Input value={form.intra_city_charge} onChange={v => set('intra_city_charge', v)} type="number" placeholder="49" />
+            </div>
+            <div>
+              <Label>Outstation flat charge (₹)</Label>
+              <Input value={form.outstation_charge} onChange={v => set('outstation_charge', v)} type="number" placeholder="99" />
+            </div>
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <Label>Free delivery above (₹ cart total, 0 = disabled)</Label>
+            <Input value={form.free_delivery_above} onChange={v => set('free_delivery_above', v)} type="number" placeholder="999" />
+          </div>
+          <ToggleRow
+            label="COD enabled — same city"
+            checked={form.cod_enabled_city}
+            onToggle={() => set('cod_enabled_city', !form.cod_enabled_city)}
+          />
+          <ToggleRow
+            label="COD enabled — outstation"
+            checked={form.cod_enabled_outstation}
+            onToggle={() => set('cod_enabled_outstation', !form.cod_enabled_outstation)}
+          />
         </>
       )}
 
