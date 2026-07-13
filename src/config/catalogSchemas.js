@@ -8,6 +8,14 @@ function parsePrice(val) {
   return parseFloat(String(val).replace(/[^0-9.]/g, '')) || 0;
 }
 
+function parseBool(val, defaultVal = true) {
+  if (val === null || val === undefined || val === '') return defaultVal;
+  const s = String(val).toLowerCase().trim();
+  if (s === 'true' || s === '1' || s === 'yes') return true;
+  if (s === 'false' || s === '0' || s === 'no') return false;
+  return defaultVal;
+}
+
 function baseFields(row) {
   const id = strOrNull(row['id'] ?? row['ID'] ?? row['sku'] ?? row['SKU']);
   const name = strOrNull(row['title'] ?? row['name'] ?? row['Title'] ?? row['Name']);
@@ -179,30 +187,48 @@ export const LOB_SCHEMAS = {
   psl: {
     id: 'psl',
     label: 'Pizza & Ice Cream (mixed outlet)',
-    templateHeaders: ['id', 'item_type', 'variant_group_id', 'size_label', 'title', 'description', 'price', 'category', 'image_link', 'is_available'],
-    templateColWidths: [{ wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 10 }, { wch: 26 }, { wch: 40 }, { wch: 8 }, { wch: 16 }, { wch: 48 }, { wch: 12 }],
+    templateHeaders: [
+      'id', 'item_type', 'variant_group_id', 'size_label', 'flavour_group', 'scoop_count',
+      'crust_options', 'toppings_allowed', 'topping_extra_price',
+      'title', 'description', 'price', 'category', 'image_link', 'is_available',
+    ],
+    templateColWidths: [
+      { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 10 },
+      { wch: 16 }, { wch: 14 }, { wch: 14 },
+      { wch: 26 }, { wch: 40 }, { wch: 8 }, { wch: 16 }, { wch: 48 }, { wch: 12 },
+    ],
     templateExamples: [
-      ['PZ001-S', 'PIZZA', 'PZ001', 'Small', 'Margherita', 'Classic tomato base, mozzarella, basil', 199, 'Pizza', 'https://images.unsplash.com/photo-1574071318508-1cdbab80d002?w=800', 'TRUE'],
-      ['PZ001-M', 'PIZZA', 'PZ001', 'Medium', 'Margherita', 'Classic tomato base, mozzarella, basil', 299, 'Pizza', 'https://images.unsplash.com/photo-1574071318508-1cdbab80d002?w=800', 'TRUE'],
-      ['PZ001-L', 'PIZZA', 'PZ001', 'Large', 'Margherita', 'Classic tomato base, mozzarella, basil', 449, 'Pizza', 'https://images.unsplash.com/photo-1574071318508-1cdbab80d002?w=800', 'TRUE'],
-      ['IC001', 'PRODUCT', '', '', 'Single Scoop Cup', 'Pick any flavour at the counter', 80, 'Ice Cream', '', 'TRUE'],
-      ['FR001', 'PRODUCT', '', '', 'French Fries', 'Crispy golden fries with seasoning', 79, 'Snacks', '', 'TRUE'],
+      ['IC-CUP', 'CUP', '', '', 'GRP-A', 2, '', '', '', 'Double Scoop Cup', 'Pick 2 flavours', 120, 'Ice Cream', '', 'TRUE'],
+      ['IC-FV1', 'FLAVOUR', '', '', 'GRP-A', '', '', '', '', 'Vanilla', '', 0, 'Flavours', '', 'TRUE'],
+      ['IC-FV2', 'FLAVOUR', '', '', 'GRP-A,GRP-B', '', '', '', '', 'Chocolate', '', 0, 'Flavours', '', 'TRUE'],
+      ['PZ001-S', 'PIZZA', 'PZ001', 'Small', '', 1, 'Thin,Thick,Stuffed', 'TRUE', 49, 'Margherita', 'Classic tomato base, mozzarella, basil', 199, 'Pizza', 'https://images.unsplash.com/photo-1574071318508-1cdbab80d002?w=800', 'TRUE'],
+      ['PZ001-M', 'PIZZA', 'PZ001', 'Medium', '', 1, 'Thin,Thick,Stuffed', 'TRUE', 49, 'Margherita', 'Classic tomato base, mozzarella, basil', 299, 'Pizza', 'https://images.unsplash.com/photo-1574071318508-1cdbab80d002?w=800', 'TRUE'],
+      ['PZ001-L', 'PIZZA', 'PZ001', 'Large', '', 1, 'Thin,Thick,Stuffed', 'TRUE', 49, 'Margherita', 'Classic tomato base, mozzarella, basil', 449, 'Pizza', 'https://images.unsplash.com/photo-1574071318508-1cdbab80d002?w=800', 'TRUE'],
+      ['EX001', 'ADDON', '', '', '', '', '', '', '', 'Garlic Bread', 'Side', 99, 'Sides', '', 'TRUE'],
+      ['FR001', 'PRODUCT', '', '', '', '', '', '', '', 'French Fries', 'Crispy golden fries with seasoning', 79, 'Snacks', '', 'TRUE'],
     ],
     columnHelp: [
       ['Column guide - Pizza & Ice Cream'],
       [''],
-      ['item_type - PIZZA for size-linked rows, PRODUCT for all other items'],
+      ['item_type - PIZZA | CUP | CONE | SUNDAE | FLAVOUR | ADDON | PRODUCT (fallback for blank/unrecognized)'],
       ['variant_group_id - same ID across size rows for one pizza (e.g. PZ001)'],
-      ['size_label - Small / Medium / Large. Keep blank for PRODUCT rows'],
-      ['Toppings/crust/flavour choices are configured separately in customization'],
+      ['size_label - Small / Medium / Large. Required for PIZZA rows with variant_group_id'],
+      ['flavour_group - groups CUP/CONE/SUNDAE with FLAVOUR options; comma-separated for multi-group flavours'],
+      ['scoop_count - max flavours selectable (default 1 if blank)'],
+      ['crust_options - comma-separated crust choices, PIZZA only (e.g. Thin,Thick,Stuffed)'],
+      ['toppings_allowed - TRUE/FALSE for PIZZA crust/topping customizer'],
+      ['topping_extra_price - price per topping when toppings_allowed = TRUE'],
+      ['Flavours, scoops, crust, toppings, and add-ons are defined in the catalog upload schema and rendered in webcart at order time.'],
     ],
     previewColumns: [
       { key: 'id', label: 'SKU', mono: true, width: '8%' },
       { key: 'item_type', label: 'Type', pill: true, width: '8%' },
       { key: 'variant_group_id', label: 'Group', width: '8%' },
       { key: 'size_label', label: 'Size', width: '7%' },
-      { key: 'name', label: 'Name', bold: true, width: '17%' },
-      { key: 'category', label: 'Category', width: '12%' },
+      { key: 'flavour_group', label: 'Flavour Grp', width: '9%' },
+      { key: 'scoop_count', label: 'Scoops', width: '6%' },
+      { key: 'name', label: 'Name', bold: true, width: '15%' },
+      { key: 'category', label: 'Category', width: '11%' },
       { key: 'price', label: 'Price', price: true, width: '8%' },
       { key: 'image_url', label: 'Image', image: true, width: '20%' },
     ],
@@ -216,15 +242,40 @@ export const LOB_SCHEMAS = {
         item_type: itemType,
         variant_group_id: strOrNull(row['variant_group_id'] ?? row['Variant Group Id']),
         size_label: strOrNull(row['size_label'] ?? row['Size Label'] ?? row['size']),
+        flavour_group: strOrNull(row['flavour_group'] ?? row['Flavour Group']),
+        scoop_count: Math.max(1, parseInt(row['scoop_count'], 10) || 1),
+        crust_options: strOrNull(row['crust_options'] ?? row['Crust Options']),
+        toppings_allowed: parseBool(row['toppings_allowed'], false),
+        topping_extra_price: parsePrice(row['topping_extra_price']),
       };
     },
     validateRow(item, rowNum) {
-      const errors = baseValidate(item, rowNum);
+      const errors = [];
+      if (!item.id) errors.push(`Row ${rowNum}: missing id/SKU`);
+      if (!item.name) errors.push(`Row ${rowNum}: missing title/name`);
+      if (item.item_type !== 'FLAVOUR' && item.price <= 0) {
+        errors.push(`Row ${rowNum} (${item.name || item.id}): price must be > 0`);
+      }
+      if (item.image_url && !/^https?:\/\//i.test(item.image_url)) {
+        errors.push(`Row ${rowNum} (${item.name || item.id}): image_link must start with http:// or https://`);
+      }
       if (item.item_type === 'PIZZA' && !item.variant_group_id) {
         errors.push(`Row ${rowNum} (${item.name || item.id}): PIZZA rows need a variant_group_id`);
       }
       if (item.variant_group_id && !item.size_label) {
         errors.push(`Row ${rowNum} (${item.name || item.id}): has variant_group_id but no size_label`);
+      }
+      if (item.item_type === 'PIZZA' && item.toppings_allowed && item.topping_extra_price <= 0) {
+        errors.push(`Row ${rowNum} (${item.name || item.id}): toppings_allowed requires topping_extra_price > 0`);
+      }
+      if (['CUP', 'CONE', 'SUNDAE'].includes(item.item_type) && !item.flavour_group) {
+        errors.push(`Row ${rowNum} (${item.name || item.id}): ${item.item_type} rows need a flavour_group`);
+      }
+      if (item.item_type === 'FLAVOUR') {
+        const groups = (item.flavour_group || '').split(',').map(s => s.trim()).filter(Boolean);
+        if (!groups.length) {
+          errors.push(`Row ${rowNum} (${item.name || item.id}): FLAVOUR rows need at least one flavour_group value`);
+        }
       }
       return errors;
     },
