@@ -106,9 +106,12 @@ export default function OrderForm() {
     : 0;
 
   // ── Qty change ─────────────────────────────────────────────────────────────
-  const handleQtyChange = (itemId, value) => {
-    // Allow empty, numbers and decimals only
-    if (value !== '' && !/^\d*\.?\d*$/.test(value)) return;
+  const handleQtyChange = (itemId, value, unitType = 'weight') => {
+    if (unitType === 'count') {
+      if (value !== '' && !/^\d*$/.test(value)) return;
+    } else if (value !== '' && !/^\d*\.?\d*$/.test(value)) {
+      return;
+    }
     setQty(prev => ({ ...prev, [itemId]: value }));
     setMoqErrors(prev => ({ ...prev, [itemId]: '' }));
   };
@@ -125,10 +128,13 @@ export default function OrderForm() {
     const orderItems = [];
 
     allItems.forEach(item => {
-      const qty = parseFloat(quantities[item.id] || 0);
+      const raw = quantities[item.id] || 0;
+      const qty = item.unit_type === 'count' ? parseInt(raw, 10) : parseFloat(raw);
       if (qty > 0) {
-        // MOQ check
-        if (item.min_order_qty > 0 && qty < item.min_order_qty) {
+        if (item.unit_type === 'count' && !Number.isInteger(qty)) {
+          newMoqErrors[item.id] = 'Whole numbers only';
+          valid = false;
+        } else if (item.min_order_qty > 0 && qty < item.min_order_qty) {
           newMoqErrors[item.id] = `Min: ${item.min_order_qty} ${item.unit}`;
           valid = false;
         } else {
@@ -285,10 +291,10 @@ export default function OrderForm() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
         <div className="bg-white rounded-2xl shadow p-6 max-w-sm w-full">
           <div className="text-center mb-5">
-            <div className="text-4xl mb-2">✅</div>
-            <h2 className="text-lg font-semibold text-gray-900">Order placed!</h2>
+            <div className="text-4xl mb-2">⏳</div>
+            <h2 className="text-lg font-semibold text-gray-900">Reservation submitted</h2>
             <p className="text-gray-500 text-sm mt-1">
-              You'll receive a WhatsApp confirmation shortly.
+              Pending supplier confirmation. You'll receive a WhatsApp update once it's accepted.
             </p>
           </div>
 
@@ -387,7 +393,7 @@ export default function OrderForm() {
                       <div className="flex items-center gap-1.5">
                         {hasQty && (
                           <button
-                            onClick={() => handleQtyChange(item.id, '')}
+                            onClick={() => handleQtyChange(item.id, '', item.unit_type)}
                             className="text-gray-300 hover:text-red-400 text-lg leading-none"
                             aria-label="Clear"
                           >×</button>
@@ -395,12 +401,12 @@ export default function OrderForm() {
                         <input
                           ref={el => { inputRefs.current[item.id] = el; }}
                           type="number"
-                          inputMode="decimal"
+                          inputMode={item.unit_type === 'count' ? 'numeric' : 'decimal'}
                           value={qty}
-                          onChange={e => handleQtyChange(item.id, e.target.value)}
+                          onChange={e => handleQtyChange(item.id, e.target.value, item.unit_type)}
                           placeholder="0"
                           min="0"
-                          step="0.5"
+                          step={item.unit_type === 'count' ? '1' : '0.5'}
                           className={`w-20 text-right border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400
                             ${moqErr ? 'border-red-400 bg-red-50' : hasQty ? 'border-indigo-300 bg-indigo-50' : 'border-gray-200'}
                           `}
@@ -446,7 +452,7 @@ export default function OrderForm() {
               disabled={state === STATE.SUBMITTING || orderedItemCount === 0}
               className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 text-white font-semibold text-sm px-6 py-3 rounded-xl transition-colors disabled:cursor-not-allowed"
             >
-              {state === STATE.SUBMITTING ? 'Placing…' : 'Place Order →'}
+              {state === STATE.SUBMITTING ? 'Submitting…' : 'Submit Reservation →'}
             </button>
           </div>
         </div>

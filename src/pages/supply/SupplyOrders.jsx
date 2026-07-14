@@ -9,6 +9,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 const API = resolveSupplyApiBase();
 
 const STATUS_META = {
+  requested:           { label: 'Requested',            color: 'bg-purple-100 text-purple-800' },
   confirmed:           { label: 'Confirmed',           color: 'bg-blue-100 text-blue-800'   },
   out_for_delivery:    { label: 'Out for Delivery',     color: 'bg-yellow-100 text-yellow-800' },
   delivered:           { label: 'Delivered',            color: 'bg-green-100 text-green-800' },
@@ -78,7 +79,7 @@ export default function SupplyOrders() {
   };
 
   const cancelOrder = async (orderId) => {
-    if (!window.confirm('Cancel this order?')) return;
+    if (!window.confirm('Cancel / reject this order?')) return;
     setUpdatingId(orderId);
     try {
       const res = await fetch(`${API}/api/supply/orders/${orderId}/cancel`, {
@@ -208,6 +209,25 @@ export default function SupplyOrders() {
                   >
                     View details
                   </Link>
+
+                  {order.status === 'requested' && (
+                    <>
+                      <button
+                        onClick={() => updateStatus(order.id, 'confirmed')}
+                        disabled={isUpdating}
+                        className="text-xs bg-blue-50 hover:bg-blue-100 text-blue-800 px-2.5 py-1 rounded-lg font-medium disabled:opacity-50"
+                      >
+                        {isUpdating ? '…' : '✓ Accept'}
+                      </button>
+                      <button
+                        onClick={() => cancelOrder(order.id)}
+                        disabled={isUpdating}
+                        className="text-xs bg-red-50 hover:bg-red-100 text-red-700 px-2.5 py-1 rounded-lg font-medium disabled:opacity-50"
+                      >
+                        {isUpdating ? '…' : '✕ Reject'}
+                      </button>
+                    </>
+                  )}
 
                   {order.status === 'confirmed' && (
                     <button

@@ -35,9 +35,16 @@ const GST_DEFAULTS = {
 const GST_OPTIONS = [0, 5, 12, 18];
 
 const UNITS = ['kg', 'g', 'litre', 'ml', 'dozen', 'piece', 'bunch', 'bag', 'crate', 'sack'];
+const UNIT_TYPES = ['count', 'weight', 'volume'];
+
+function defaultUnitType(unit) {
+  if (['piece', 'dozen', 'bunch'].includes(unit)) return 'count';
+  if (['litre', 'ml'].includes(unit)) return 'volume';
+  return 'weight';
+}
 
 const BLANK_FORM = {
-  name: '', category: 'Vegetables', unit: 'kg',
+  name: '', category: 'Vegetables', unit: 'kg', unit_type: 'weight',
   default_price: '', hsn_code: '', gst_rate: 0,
   min_order_qty: '', display_order: '', is_available: true,
 };
@@ -128,6 +135,7 @@ export default function SupplyCatalog({ onLogout }) {
       name:          item.name,
       category:      item.category,
       unit:          item.unit,
+      unit_type:     item.unit_type || defaultUnitType(item.unit),
       default_price: item.default_price,
       hsn_code:      item.hsn_code || '',
       gst_rate:      item.gst_rate,
@@ -151,6 +159,8 @@ export default function SupplyCatalog({ onLogout }) {
       const next = { ...prev, [key]: value };
       // Auto-populate GST when category changes
       if (key === 'category') next.gst_rate = GST_DEFAULTS[value] ?? 0;
+      // Suggest unit_type when unit changes (supplier can still override)
+      if (key === 'unit') next.unit_type = defaultUnitType(value);
       return next;
     });
   }
@@ -442,6 +452,17 @@ export default function SupplyCatalog({ onLogout }) {
                 </select>
               </FormField>
             </div>
+
+            <FormField label="Qty type *">
+              <select style={inputStyle} value={form.unit_type}
+                onChange={e => handleField('unit_type', e.target.value)}>
+                {UNIT_TYPES.map(t => (
+                  <option key={t} value={t}>
+                    {t === 'count' ? 'Count (whole numbers)' : t === 'volume' ? 'Volume (decimals)' : 'Weight (decimals)'}
+                  </option>
+                ))}
+              </select>
+            </FormField>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <FormField label="Default Price (₹) *">
