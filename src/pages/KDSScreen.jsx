@@ -21,9 +21,12 @@
 // ============================================================================
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useWebSocket } from '../contexts/WebSocketContext';
 import DateRangeApply from '../components/DateRangeApply';
+import BrandHeader from '../components/BrandHeader';
+import { CD } from '../theme/brand';
 
 // ─── Timezone helpers ────────────────────────────────────────────────────────
 
@@ -819,7 +822,7 @@ function FutureOrdersView({ orders }) {
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function KDSScreen() {
-  const { apiClient, logout } = useAuth();
+  const { apiClient, logout, user } = useAuth();
   const { connected, updates } = useWebSocket();
 
   const [allItems, setAllItems]   = useState([]);
@@ -1027,39 +1030,42 @@ const fetchFeed = useCallback(async () => {
       )}
 
       <div className="kds-root">
-        {/* Header */}
-        <header className="kds-header">
-          <div className="kds-logo">
-            <span className={`kds-ws-dot ${connected ? 'dot-live' : 'dot-offline'}`} />
-            <span>Kitchen display</span>
-            <span className="kds-ws-label">{connected ? '• live' : '• offline'}</span>
-          </div>
-
-          <div className="kds-header-tabs">
-            <button
-              className={`kds-tab ${view === 'live' ? 'kds-tab-active' : ''}`}
-              onClick={() => setView('live')}
-            >Live orders</button>
-            <button
-              className={`kds-tab ${view === 'future' ? 'kds-tab-active' : ''}`}
-              onClick={() => setView('future')}
-            >Future{laterScheduled.length ? ` (${laterScheduled.length})` : ''}</button>
-            <button
-              className={`kds-tab ${view === 'history' ? 'kds-tab-active' : ''}`}
-              onClick={() => setView('history')}
-            >History</button>
-          </div>
-
-          <div className="kds-header-right">
-            <button
-              className={`kds-sound-btn ${sound ? 'sound-on' : ''}`}
-              onClick={() => setSound(s => !s)}
-            >
-              {sound ? '🔔 Sound on' : '🔇 Sound off'}
-            </button>
-            <button className="kds-logout-btn" onClick={logout}>↩ Logout</button>
-          </div>
-        </header>
+        <BrandHeader
+          title="Kitchen display"
+          subtitle={connected ? '• live' : '• offline'}
+          right={
+            <>
+              <div className="kds-header-tabs kds-header-tabs-on-brand">
+                <button
+                  className={`kds-tab ${view === 'live' ? 'kds-tab-active' : ''}`}
+                  onClick={() => setView('live')}
+                >Live orders</button>
+                <button
+                  className={`kds-tab ${view === 'future' ? 'kds-tab-active' : ''}`}
+                  onClick={() => setView('future')}
+                >Future{laterScheduled.length ? ` (${laterScheduled.length})` : ''}</button>
+                <button
+                  className={`kds-tab ${view === 'history' ? 'kds-tab-active' : ''}`}
+                  onClick={() => setView('history')}
+                >History</button>
+              </div>
+              {user?.role === 'owner' && (
+                <Link to="/dashboard/owner" className="kds-ribbon-chip">
+                  ← Owner dashboard
+                </Link>
+              )}
+              <button
+                className={`kds-ribbon-chip ${sound ? 'kds-ribbon-chip-on' : ''}`}
+                onClick={() => setSound(s => !s)}
+              >
+                {sound ? 'Sound on' : 'Sound off'}
+              </button>
+              <button className="kds-ribbon-chip kds-ribbon-chip-danger" onClick={logout}>
+                Logout
+              </button>
+            </>
+          }
+        />
 
         {/* Live view */}
         {view === 'live' && (
@@ -1151,17 +1157,17 @@ const fetchFeed = useCallback(async () => {
 const KDS_CSS = `
   .kds-root {
     height: 100vh; display: flex; flex-direction: column;
-    background: #0d0d0d; color: #f0f0f0;
+    background: ${CD.bg}; color: ${CD.text};
     font-family: system-ui, -apple-system, sans-serif; overflow: hidden;
   }
   .kds-loading {
     height: 100vh; display: flex; flex-direction: column;
     align-items: center; justify-content: center;
-    background: #0d0d0d; color: #888; gap: 16px; font-size: 15px;
+    background: ${CD.bg}; color: ${CD.textMuted}; gap: 16px; font-size: 15px;
   }
   .kds-spinner {
-    width: 40px; height: 40px; border: 3px solid #2a2a2a;
-    border-top-color: #3b82f6; border-radius: 50%;
+    width: 40px; height: 40px; border: 3px solid ${CD.border};
+    border-top-color: ${CD.emerald}; border-radius: 50%;
     animation: kds-spin 0.8s linear infinite;
   }
   @keyframes kds-spin { to { transform: rotate(360deg); } }
@@ -1177,25 +1183,28 @@ const KDS_CSS = `
   }
   @keyframes toast-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
 
-  .kds-header {
-    background: #111; border-bottom: 1px solid #1e1e1e;
-    padding: 10px 20px; display: flex; align-items: center; gap: 16px; flex-shrink: 0;
-  }
-  .kds-logo { font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 7px; color: #f0f0f0; }
-  .kds-ws-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-  .dot-live    { background: #22c55e; }
-  .dot-offline { background: #ef4444; }
-  .kds-ws-label { font-size: 12px; color: #555; font-weight: 400; }
   .kds-header-tabs {
-    display: flex; gap: 2px; background: #1a1a1a;
-    border-radius: 7px; padding: 3px; margin-left: 8px;
+    display: flex; gap: 2px; background: rgba(255,255,255,0.12);
+    border-radius: 7px; padding: 3px;
   }
   .kds-tab {
     padding: 5px 14px; border-radius: 5px; font-size: 13px;
     cursor: pointer; border: none; background: transparent;
-    color: #666; font-weight: 400; transition: all .15s;
+    color: #BFE0D6; font-weight: 400; transition: all .15s;
   }
-  .kds-tab-active { background: #2a2a2a; color: #f0f0f0; font-weight: 500; }
+  .kds-tab-active { background: #fff; color: #0A4038; font-weight: 500; }
+
+  .kds-ribbon-chip {
+    padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 500;
+    border: 0.5px solid rgba(255,255,255,0.3); background: rgba(255,255,255,0.12);
+    color: #E4F2EE; cursor: pointer; text-decoration: none;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .kds-ribbon-chip:hover { background: rgba(255,255,255,0.2); color: #fff; }
+  .kds-ribbon-chip-on { background: #E4F2EE; color: #0A4038; border-color: #B8DED4; }
+  .kds-ribbon-chip-danger {
+    background: #FCEBEB; color: #791F1F; border-color: #F7C1C1;
+  }
 
   .kds-todays-future-strip {
     padding: 12px 16px 0;
@@ -1249,18 +1258,6 @@ const KDS_CSS = `
   .kds-sched-items { margin: 0 0 8px; font-size: 12px; color: #9ca3af; line-height: 1.4; }
   .kds-sched-times { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: #d1d5db; }
   .kds-sched-meta { margin: 8px 0 0; font-size: 11px; color: #6b7280; }
-
-  .kds-header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
-  .kds-sound-btn {
-    padding: 5px 12px; border-radius: 6px; font-size: 12px;
-    border: 0.5px solid #2a2a2a; background: transparent; color: #666; cursor: pointer;
-  }
-  .kds-sound-btn.sound-on { color: #22c55e; border-color: #22c55e44; }
-  .kds-logout-btn {
-    padding: 5px 12px; border-radius: 6px; font-size: 12px;
-    border: 0.5px solid #2a2a2a; background: transparent; color: #666; cursor: pointer;
-  }
-  .kds-logout-btn:hover { color: #f0f0f0; border-color: #444; }
 
   .kds-filter-bar {
     background: #0d0d0d; border-bottom: 1px solid #1a1a1a;

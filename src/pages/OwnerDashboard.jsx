@@ -9,6 +9,8 @@ import React, { useEffect, useState, useCallback, useRef, useMemo } from "react"
 import { supabase, useAuth } from "../contexts/AuthContext";
 import { Link } from "react-router-dom";
 import OwnerInsights from "../components/OwnerInsights";
+import BrandHeader from "../components/BrandHeader";
+import { C } from "../theme/brand";
 
 // ── Export to CSV ─────────────────────────────────────────────────────────────
 function exportToCSV(rows, filename) {
@@ -30,11 +32,24 @@ function exportToCSV(rows, filename) {
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const HEAT_COLORS = ["#E6F1FB", "#85B7EB", "#378ADD", "#185FA5", "#0C447C"];
+const HEAT_COLORS = [C.emeraldLight, "#7BB8A8", C.primary, C.primaryDark, C.emeraldDark];
 const TABLE_COLORS = {
-  occupied: { bg: "#1D9E75", text: "#085041" },
-  waiting:  { bg: "#BA7517", text: "#633806" },
-  free:     { bg: "#D3D1C7", text: "#444441" },
+  occupied: { bg: C.success, text: C.successDark },
+  waiting:  { bg: C.warning, text: C.warningDark },
+  free:     { bg: C.borderStrong, text: C.textSub },
+};
+
+const CHIP_PRIMARY = {
+  fontSize: 12, fontWeight: 500, padding: "6px 12px", borderRadius: 8,
+  border: `0.5px solid ${C.primaryBorder}`, background: C.primaryLight,
+  color: C.primaryDark, cursor: "pointer", textDecoration: "none",
+  display: "inline-flex", alignItems: "center", gap: 4,
+};
+const CHIP_SECONDARY = {
+  fontSize: 12, fontWeight: 500, padding: "6px 12px", borderRadius: 8,
+  border: `0.5px solid ${C.border}`, background: C.cardBg,
+  color: C.textSub, cursor: "pointer", textDecoration: "none",
+  display: "inline-flex", alignItems: "center", gap: 4,
 };
 const PRESETS = [
   { label: "Today",     key: "today" },
@@ -119,17 +134,17 @@ function RevenueChart({ labels, revenue, orders, covers, preset }) {
         data: {
           labels,
           datasets: [
-            { type: "bar",  label: "Revenue", data: revenue, backgroundColor: "#378ADD", borderRadius: 3, yAxisID: "y", maxBarThickness: 32 },
-            { type: "line", label: "Orders",  data: orders,  borderColor: "#1D9E75", backgroundColor: "transparent", borderWidth: 2, pointRadius: labels.length > 15 ? 1 : 3, tension: 0.4, yAxisID: "y2", borderDash: [4, 3] },
+            { type: "bar",  label: "Revenue", data: revenue, backgroundColor: C.primary, borderRadius: 3, yAxisID: "y", maxBarThickness: 32 },
+            { type: "line", label: "Orders",  data: orders,  borderColor: C.success, backgroundColor: "transparent", borderWidth: 2, pointRadius: labels.length > 15 ? 1 : 3, tension: 0.4, yAxisID: "y2", borderDash: [4, 3] },
           ],
         },
         options: {
           responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
           plugins: { legend: { display: false } },
           scales: {
-            x: { ticks: { color: "#888", font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 15 }, grid: { display: false } },
-            y: { ticks: { color: "#888", font: { size: 10 }, callback: v => fmtINR(v), maxTicksLimit: 6 }, grid: { color: "rgba(0,0,0,0.06)" } },
-            y2: { position: "right", ticks: { color: "#888", font: { size: 10 }, maxTicksLimit: 6 }, grid: { display: false } },
+            x: { ticks: { color: C.textMuted, font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 15 }, grid: { display: false } },
+            y: { ticks: { color: C.textMuted, font: { size: 10 }, callback: v => fmtINR(v), maxTicksLimit: 6 }, grid: { color: "rgba(0,0,0,0.06)" } },
+            y2: { position: "right", ticks: { color: C.textMuted, font: { size: 10 }, maxTicksLimit: 6 }, grid: { display: false } },
           },
         },
       });
@@ -141,15 +156,15 @@ function RevenueChart({ labels, revenue, orders, covers, preset }) {
 
   const maxC = Math.max(...(covers ?? [1]));
   return (
-    <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "16px 20px", marginBottom: 12 }}>
+    <div style={{ background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: "16px 20px", marginBottom: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <span style={{ fontSize: 14, fontWeight: 500, color: "#111" }}>Revenue trend &amp; peak hours</span>
-        <span style={{ fontSize: 11, color: "#aaa" }}>{preset === "today" || preset === "yesterday" ? "hourly" : "daily"}</span>
+        <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>Revenue trend &amp; peak hours</span>
+        <span style={{ fontSize: 11, color: C.textMuted }}>{preset === "today" || preset === "yesterday" ? "hourly" : "daily"}</span>
       </div>
-      <div style={{ display: "flex", gap: 12, fontSize: 11, color: "#888", marginBottom: 12 }}>
-        <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: "#378ADD", marginRight: 4, verticalAlign: "middle" }}></span>Revenue</span>
-        <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: "#1D9E75", marginRight: 4, verticalAlign: "middle" }}></span>Orders</span>
-        <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: "#0C447C", marginRight: 4, verticalAlign: "middle" }}></span>Cover intensity</span>
+      <div style={{ display: "flex", gap: 12, fontSize: 11, color: C.textMuted, marginBottom: 12 }}>
+        <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: C.primary, marginRight: 4, verticalAlign: "middle" }}></span>Revenue</span>
+        <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: C.success, marginRight: 4, verticalAlign: "middle" }}></span>Orders</span>
+        <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: C.primaryDark, marginRight: 4, verticalAlign: "middle" }}></span>Cover intensity</span>
       </div>
       <div style={{ height: 200, position: "relative" }}><canvas ref={canvasRef} /></div>
       {covers?.length > 0 && (
@@ -160,7 +175,7 @@ function RevenueChart({ labels, revenue, orders, covers, preset }) {
           })}
         </div>
       )}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 11, color: "#aaa" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 11, color: C.textMuted }}>
         <span>Covers</span>
         <div style={{ display: "flex", gap: 2 }}>{HEAT_COLORS.map((c, i) => <span key={i} style={{ background: c, width: 14, height: 8, borderRadius: 2, display: "inline-block" }} />)}</div>
         <span>Low → High</span>
@@ -171,10 +186,10 @@ function RevenueChart({ labels, revenue, orders, covers, preset }) {
 
 // ─── Subcomponents ────────────────────────────────────────────────────────────
 function Badge({ val, neutral }) {
-  if (neutral) return <span style={{ display: "inline-block", fontSize: 11, fontWeight: 500, padding: "1px 7px", borderRadius: 6, background: "#F1EFE8", color: "#5F5E5A" }}>→ 0%</span>;
+  if (neutral) return <span style={{ display: "inline-block", fontSize: 11, fontWeight: 500, padding: "1px 7px", borderRadius: 6, background: C.surfaceBg, color: C.textSub }}>→ 0%</span>;
   if (val === undefined || val === null) return null;
   const up = val >= 0;
-  return <span style={{ display: "inline-block", fontSize: 11, fontWeight: 500, padding: "1px 7px", borderRadius: 6, background: up ? "#EAF3DE" : "#FCEBEB", color: up ? "#3B6D11" : "#A32D2D" }}>{up ? "↑" : "↓"} {Math.abs(val)}%</span>;
+  return <span style={{ display: "inline-block", fontSize: 11, fontWeight: 500, padding: "1px 7px", borderRadius: 6, background: up ? C.successLight : C.dangerLight, color: up ? C.successDark : C.danger }}>{up ? "↑" : "↓"} {Math.abs(val)}%</span>;
 }
 
 function Tooltip({ text, children }) {
@@ -182,11 +197,11 @@ function Tooltip({ text, children }) {
   return (
     <span style={{ position: "relative", display: "inline-flex", alignItems: "center" }} onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
       {children}
-      <span style={{ marginLeft: 3, cursor: "help", color: "#C8C8C4", fontSize: 11 }}>ⓘ</span>
+      <span style={{ marginLeft: 3, cursor: "help", color: C.borderStrong, fontSize: 11 }}>ⓘ</span>
       {show && (
-        <span style={{ position: "absolute", bottom: "120%", left: "50%", transform: "translateX(-50%)", background: "#1A1A1A", color: "#fff", fontSize: 11, padding: "6px 10px", borderRadius: 8, whiteSpace: "pre-wrap", maxWidth: 220, zIndex: 100, boxShadow: "0 4px 12px rgba(0,0,0,0.2)", lineHeight: 1.5, pointerEvents: "none" }}>
+        <span style={{ position: "absolute", bottom: "120%", left: "50%", transform: "translateX(-50%)", background: C.emeraldDark, color: "#fff", fontSize: 11, padding: "6px 10px", borderRadius: 8, whiteSpace: "pre-wrap", maxWidth: 220, zIndex: 100, boxShadow: "0 4px 12px rgba(0,0,0,0.2)", lineHeight: 1.5, pointerEvents: "none" }}>
           {text}
-          <span style={{ position: "absolute", top: "100%", left: "50%", transform: "translateX(-50%)", borderLeft: "5px solid transparent", borderRight: "5px solid transparent", borderTop: "5px solid #1A1A1A" }} />
+          <span style={{ position: "absolute", top: "100%", left: "50%", transform: "translateX(-50%)", borderLeft: "5px solid transparent", borderRight: "5px solid transparent", borderTop: `5px solid ${C.emeraldDark}` }} />
         </span>
       )}
     </span>
@@ -195,10 +210,10 @@ function Tooltip({ text, children }) {
 
 function MetricCard({ icon, label, value, sub, badge, neutral, tooltip }) {
   return (
-    <div style={{ background: "#F7F7F5", borderRadius: 12, padding: "14px 16px" }}>
-      <div style={{ fontSize: 12, color: "#888", marginBottom: 4 }}>{icon} {tooltip ? <Tooltip text={tooltip}>{label}</Tooltip> : label}</div>
-      <div style={{ fontSize: 22, fontWeight: 500, color: "#111" }}>{value ?? "—"}</div>
-      <div style={{ fontSize: 11, color: "#aaa", marginTop: 4, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+    <div style={{ background: C.surfaceBg, borderRadius: 12, padding: "14px 16px", border: `0.5px solid ${C.border}` }}>
+      <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 4 }}>{icon} {tooltip ? <Tooltip text={tooltip}>{label}</Tooltip> : label}</div>
+      <div style={{ fontSize: 22, fontWeight: 500, color: C.text }}>{value ?? "—"}</div>
+      <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
         <Badge val={badge} neutral={neutral} />
         {sub && <span>{sub}</span>}
       </div>
@@ -209,30 +224,30 @@ function MetricCard({ icon, label, value, sub, badge, neutral, tooltip }) {
 function TopMenuItems({ items }) {
   const maxRev = items?.[0]?.revenue ?? 1;
   return (
-    <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "16px 20px" }}>
+    <div style={{ background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: "16px 20px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <span style={{ fontSize: 14, fontWeight: 500, color: "#111" }}>Top menu items</span>
-        <span style={{ fontSize: 11, color: "#aaa" }}>by revenue</span>
+        <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>Top menu items</span>
+        <span style={{ fontSize: 11, color: C.textMuted }}>by revenue</span>
       </div>
-      {!items?.length && <div style={{ fontSize: 12, color: "#aaa", padding: "16px 0", textAlign: "center" }}>No data for this period</div>}
+      {!items?.length && <div style={{ fontSize: 12, color: C.textMuted, padding: "16px 0", textAlign: "center" }}>No data for this period</div>}
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed" }}>
         <thead>
-          <tr style={{ borderBottom: "0.5px solid #F0F0EE" }}>
-            <th style={{ textAlign: "left", color: "#aaa", fontWeight: 400, fontSize: 11, paddingBottom: 6, width: "40%" }}>Item</th>
-            <th style={{ textAlign: "right", color: "#aaa", fontWeight: 400, fontSize: 11, paddingBottom: 6, width: "15%" }}>Qty</th>
-            <th style={{ textAlign: "right", color: "#aaa", fontWeight: 400, fontSize: 11, paddingBottom: 6, width: "25%" }}>Revenue</th>
+          <tr style={{ borderBottom: `0.5px solid ${C.border}` }}>
+            <th style={{ textAlign: "left", color: C.textMuted, fontWeight: 400, fontSize: 11, paddingBottom: 6, width: "40%" }}>Item</th>
+            <th style={{ textAlign: "right", color: C.textMuted, fontWeight: 400, fontSize: 11, paddingBottom: 6, width: "15%" }}>Qty</th>
+            <th style={{ textAlign: "right", color: C.textMuted, fontWeight: 400, fontSize: 11, paddingBottom: 6, width: "25%" }}>Revenue</th>
             <th style={{ width: "20%" }}></th>
           </tr>
         </thead>
         <tbody>
           {items?.map((it, i) => (
-            <tr key={i} style={{ borderBottom: "0.5px solid #F7F7F5" }}>
-              <td style={{ padding: "7px 0", color: "#666" }}>{i + 1}. {it.name}</td>
+            <tr key={i} style={{ borderBottom: `0.5px solid ${C.surfaceBg}` }}>
+              <td style={{ padding: "7px 0", color: C.textSub }}>{i + 1}. {it.name}</td>
               <td style={{ padding: "7px 0", textAlign: "right" }}>{it.qty}</td>
               <td style={{ padding: "7px 0", textAlign: "right", fontWeight: 500 }}>₹{it.revenue.toLocaleString("en-IN")}</td>
               <td style={{ padding: "7px 0 7px 8px" }}>
-                <div style={{ background: "#F0F0EE", borderRadius: 3, height: 5, overflow: "hidden" }}>
-                  <div style={{ width: `${Math.round(it.revenue / maxRev * 100)}%`, background: "#378ADD", height: "100%", borderRadius: 3 }} />
+                <div style={{ background: C.surfaceBg, borderRadius: 3, height: 5, overflow: "hidden" }}>
+                  <div style={{ width: `${Math.round(it.revenue / maxRev * 100)}%`, background: C.primary, height: "100%", borderRadius: 3 }} />
                 </div>
               </td>
             </tr>
@@ -250,35 +265,35 @@ function TableOccupancy({ tables, takeawayActive = 0, queueWaiting = 0 }) {
   const total    = tables?.length ?? 0;
   const occRate  = total ? Math.round((occupied / total) * 100) : 0;
   return (
-    <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "16px 20px" }}>
+    <div style={{ background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: "16px 20px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <span style={{ fontSize: 14, fontWeight: 500, color: "#111" }}>Table occupancy</span>
-        <span style={{ fontSize: 11, color: "#aaa", display: "flex", alignItems: "center", gap: 4 }}>
-          <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: "#1D9E75", animation: "pulse 2s infinite" }}></span>
+        <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>Table occupancy</span>
+        <span style={{ fontSize: 11, color: C.textMuted, display: "flex", alignItems: "center", gap: 4 }}>
+          <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: C.success, animation: "pulse 2s infinite" }}></span>
           live now
         </span>
       </div>
       {(takeawayActive > 0 || queueWaiting > 0) && (
         <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-          {takeawayActive > 0 && <span style={{ fontSize: 11, fontWeight: 500, color: "#185FA5", background: "#E6F1FB", padding: "4px 10px", borderRadius: 20 }}>Takeaway active: {takeawayActive}</span>}
-          {queueWaiting > 0 && <span style={{ fontSize: 11, fontWeight: 500, color: "#633806", background: "#FAEEDA", padding: "4px 10px", borderRadius: 20 }}>Queue waiting: {queueWaiting}</span>}
+          {takeawayActive > 0 && <span style={{ fontSize: 11, fontWeight: 500, color: C.primaryDark, background: C.primaryLight, padding: "4px 10px", borderRadius: 20 }}>Takeaway active: {takeawayActive}</span>}
+          {queueWaiting > 0 && <span style={{ fontSize: 11, fontWeight: 500, color: C.warningDark, background: C.warningLight, padding: "4px 10px", borderRadius: 20 }}>Queue waiting: {queueWaiting}</span>}
         </div>
       )}
       {(occupied + takeawayActive + queueWaiting) === 0 && (
-        <div style={{ fontSize: 11, color: "#aaa", marginBottom: 10, lineHeight: 1.45 }}>No tables occupied right now.</div>
+        <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 10, lineHeight: 1.45 }}>No tables occupied right now.</div>
       )}
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
         <div style={{ minWidth: 90 }}>
-          <div style={{ fontSize: 26, fontWeight: 500, color: "#111" }}>{occupied}<span style={{ fontSize: 15, color: "#aaa" }}>/{total}</span></div>
-          <div style={{ fontSize: 11, color: "#aaa", marginBottom: 10 }}>tables occupied</div>
-          {[{ label: "Occupied", count: occupied, color: "#1D9E75" }, { label: "Waiting", count: waiting, color: "#BA7517" }, { label: "Free", count: free, color: "#B4B2A9" }].map(r => (
+          <div style={{ fontSize: 26, fontWeight: 500, color: C.text }}>{occupied}<span style={{ fontSize: 15, color: C.textMuted }}>/{total}</span></div>
+          <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 10 }}>tables occupied</div>
+          {[{ label: "Occupied", count: occupied, color: C.success }, { label: "Waiting", count: waiting, color: C.warning }, { label: "Free", count: free, color: C.borderStrong }].map(r => (
             <div key={r.label} style={{ fontSize: 12, marginBottom: 5 }}>
               <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: r.color, marginRight: 6, verticalAlign: "middle" }}></span>
               {r.label} <strong>{r.count}</strong>
             </div>
           ))}
-          <div style={{ marginTop: 10, fontSize: 11, color: "#aaa" }}>Occupancy rate</div>
-          <div style={{ fontSize: 13, fontWeight: 500, color: "#111" }}>{occRate}%</div>
+          <div style={{ marginTop: 10, fontSize: 11, color: C.textMuted }}>Occupancy rate</div>
+          <div style={{ fontSize: 13, fontWeight: 500, color: C.text }}>{occRate}%</div>
         </div>
         <div style={{ flex: 1, display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6 }}>
           {tables?.map(t => {
@@ -298,10 +313,10 @@ function TableOccupancy({ tables, takeawayActive = 0, queueWaiting = 0 }) {
 
 function StatCard({ title, sub, children }) {
   return (
-    <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "16px 20px" }}>
+    <div style={{ background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: "16px 20px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <span style={{ fontSize: 14, fontWeight: 500, color: "#111" }}>{title}</span>
-        <span style={{ fontSize: 11, color: "#aaa" }}>{sub}</span>
+        <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>{title}</span>
+        <span style={{ fontSize: 11, color: C.textMuted }}>{sub}</span>
       </div>
       {children}
     </div>
@@ -310,18 +325,18 @@ function StatCard({ title, sub, children }) {
 
 function MiniStat({ label, value, color }) {
   return (
-    <div style={{ background: "#F7F7F5", borderRadius: 10, padding: "8px 10px", textAlign: "center", flex: 1 }}>
-      <div style={{ fontSize: 11, color: "#888", marginBottom: 2 }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 500, color: color ?? "#111" }}>{value}</div>
+    <div style={{ background: C.surfaceBg, borderRadius: 10, padding: "8px 10px", textAlign: "center", flex: 1 }}>
+      <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 2 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 500, color: color ?? C.text }}>{value}</div>
     </div>
   );
 }
 
 function KRow({ label, value, danger, warn }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: "0.5px solid #F7F7F5", fontSize: 12 }}>
-      <span style={{ color: "#888" }}>{label}</span>
-      <span style={{ fontWeight: 500, color: danger ? "#A32D2D" : warn ? "#BA7517" : "#111" }}>{value}</span>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: `0.5px solid ${C.surfaceBg}`, fontSize: 12 }}>
+      <span style={{ color: C.textMuted }}>{label}</span>
+      <span style={{ fontWeight: 500, color: danger ? C.danger : warn ? C.warning : C.text }}>{value}</span>
     </div>
   );
 }
@@ -334,11 +349,11 @@ function KotStatus({ stats }) {
     <StatCard title="KOT status" sub="kitchen orders today">
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         <MiniStat label="Open"        value={stats?.open ?? 0} />
-        <MiniStat label="In progress" value={stats?.inProgress ?? 0} color="#BA7517" />
-        <MiniStat label="Served"      value={stats?.served ?? 0}     color="#1D9E75" />
+        <MiniStat label="In progress" value={stats?.inProgress ?? 0} color={C.warning} />
+        <MiniStat label="Served"      value={stats?.served ?? 0}     color={C.success} />
       </div>
       {isEmpty && (
-        <div style={{ fontSize: 11, color: "#888", background: "#F7F7F5", borderRadius: 8, padding: "10px 12px", marginBottom: 10, lineHeight: 1.5 }}>
+        <div style={{ fontSize: 11, color: C.textMuted, background: C.surfaceBg, borderRadius: 8, padding: "10px 12px", marginBottom: 10, lineHeight: 1.5 }}>
           No KOT tickets yet today. Tracking begins when the kitchen marks the first order in progress on KDS.
         </div>
       )}
@@ -360,36 +375,36 @@ function CancellationVoids({ stats }) {
   return (
     <StatCard title="Session outcomes &amp; voids" sub="selected period">
       <div style={{
-        fontSize: 12, color: "#633806", background: "#FAEEDA", border: "0.5px solid #FAC775",
+        fontSize: 12, color: C.warningDark, background: C.warningLight, border: `0.5px solid ${C.warningBorder}`,
         borderRadius: 8, padding: "10px 12px", marginBottom: 14, lineHeight: 1.55,
       }}>
         <strong>Not the same as lost revenue.</strong> WhatsApp &ldquo;aborts&rdquo; are customers who
         explicitly cancelled their session — not no-shows. Completed visits are normal check-outs.
       </div>
       <div style={{ marginBottom: 14 }}>
-        <div style={{ fontSize: 11, fontWeight: 500, color: "#888", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>
+        <div style={{ fontSize: 11, fontWeight: 500, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>
           WhatsApp session outcomes
         </div>
         <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-          <MiniStat label="Completed visits" value={sessionsCompleted} color="#1D9E75" />
-          <MiniStat label="Customer aborted" value={sessionsAborted}   color={sessionsAborted > 0 ? "#BA7517" : "#111"} />
+          <MiniStat label="Completed visits" value={sessionsCompleted} color={C.success} />
+          <MiniStat label="Customer aborted" value={sessionsAborted}   color={sessionsAborted > 0 ? C.warning : C.text} />
           <MiniStat label="Total sessions"   value={totalSessions} />
-          <MiniStat label="Abort rate"       value={`${sessionAbortRate}%`} color={sessionAbortRate > 10 ? "#BA7517" : "#111"} />
+          <MiniStat label="Abort rate"       value={`${sessionAbortRate}%`} color={sessionAbortRate > 10 ? C.warning : C.text} />
         </div>
       </div>
-      <div style={{ borderTop: "0.5px solid #F0F0EE", marginBottom: 14 }} />
+      <div style={{ borderTop: `0.5px solid ${C.border}`, marginBottom: 14 }} />
       <div>
-        <div style={{ fontSize: 11, fontWeight: 500, color: "#888", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>
+        <div style={{ fontSize: 11, fontWeight: 500, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>
           Order cancellations (Manager portal)
         </div>
         <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-          <MiniStat label="Cancelled"    value={stats?.cancelled   ?? 0} color="#A32D2D" />
-          <MiniStat label="Revenue lost" value={fmtINR(stats?.revLost ?? 0)} color="#BA7517" />
-          <MiniStat label="Rate"         value={`${stats?.rate ?? 0}%`} color="#BA7517" />
+          <MiniStat label="Cancelled"    value={stats?.cancelled   ?? 0} color={C.danger} />
+          <MiniStat label="Revenue lost" value={fmtINR(stats?.revLost ?? 0)} color={C.warning} />
+          <MiniStat label="Rate"         value={`${stats?.rate ?? 0}%`} color={C.warning} />
         </div>
         <KRow label="Revenue lost"        value={stats?.revLost != null ? `₹${stats.revLost.toLocaleString("en-IN")}` : "₹0"} danger />
         <KRow label="Total orders (base)" value={stats?.totalOrders ?? "—"} />
-        <div style={{ marginTop: 8, fontSize: 11, color: "#aaa", padding: "6px 8px", background: "#FFF8F5", borderRadius: 6 }}>
+        <div style={{ marginTop: 8, fontSize: 11, color: C.textMuted, padding: "6px 8px", background: C.dangerLight, borderRadius: 6 }}>
           Manager cancelled placed orders in the portal. Cancellation reason not yet captured.
         </div>
       </div>
@@ -620,21 +635,21 @@ function useWAOrders(apiClient, startISO, endISO) {
 function WABAPanel({ info }) {
   const row = (label, value) => (
     <div style={{ display: "flex", gap: 12, marginBottom: 10 }}>
-      <div style={{ fontSize: 12, color: "#888", minWidth: 160 }}>{label}</div>
-      <div style={{ fontSize: 13, fontWeight: 500, color: "#111", wordBreak: "break-all" }}>{value || "—"}</div>
+      <div style={{ fontSize: 12, color: C.textMuted, minWidth: 160 }}>{label}</div>
+      <div style={{ fontSize: 13, fontWeight: 500, color: C.text, wordBreak: "break-all" }}>{value || "—"}</div>
     </div>
   );
   if (info === undefined) return (
-    <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "center", color: "#aaa", fontSize: 13 }}>Loading...</div>
+    <div style={{ background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "center", color: C.textMuted, fontSize: 13 }}>Loading...</div>
   );
   if (info === null) return (
-    <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "20px 24px" }}>
+    <div style={{ background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: "20px 24px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <span style={{ fontSize: 14, fontWeight: 500, color: "#111" }}>WhatsApp Business</span>
-        <span style={{ fontSize: 11, background: "#FCEBEB", color: "#A32D2D", padding: "2px 8px", borderRadius: 6 }}>Not configured</span>
+        <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>WhatsApp Business</span>
+        <span style={{ fontSize: 11, background: C.dangerLight, color: C.danger, padding: "2px 8px", borderRadius: 6 }}>Not configured</span>
       </div>
-      <div style={{ fontSize: 12, color: "#888", lineHeight: 1.7 }}>
-        <div style={{ fontWeight: 500, color: "#111", marginBottom: 8 }}>How to connect your WABA:</div>
+      <div style={{ fontSize: 12, color: C.textMuted, lineHeight: 1.7 }}>
+        <div style={{ fontWeight: 500, color: C.text, marginBottom: 8 }}>How to connect your WABA:</div>
         <div>1. Go to <strong>Meta Business Suite</strong> → WhatsApp Manager</div>
         <div>2. Create or select a WhatsApp Business Account</div>
         <div>3. Copy your <strong>WABA ID</strong> and <strong>Phone Number ID</strong></div>
@@ -644,10 +659,10 @@ function WABAPanel({ info }) {
     </div>
   );
   return (
-    <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "20px 24px" }}>
+    <div style={{ background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: "20px 24px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <span style={{ fontSize: 14, fontWeight: 500, color: "#111" }}>WhatsApp Business</span>
-        <span style={{ fontSize: 11, background: "#EAF3DE", color: "#3B6D11", padding: "2px 8px", borderRadius: 6 }}>● Connected</span>
+        <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>WhatsApp Business</span>
+        <span style={{ fontSize: 11, background: C.successLight, color: C.successDark, padding: "2px 8px", borderRadius: 6 }}>● Connected</span>
       </div>
       {row("Business name",   info.name)}
       {row("Phone number",    info.whatsapp_number ? `+${info.whatsapp_number}` : null)}
@@ -656,7 +671,7 @@ function WABAPanel({ info }) {
       {row("Timezone",        info.timezone)}
       {row("Dining duration", info.dining_duration_minutes ? `${info.dining_duration_minutes} min` : null)}
       {row("Payment mode",    info.payment_mode)}
-      <div style={{ marginTop: 12, padding: "8px 12px", background: "#F7F7F5", borderRadius: 8, fontSize: 12, color: "#888" }}>
+      <div style={{ marginTop: 12, padding: "8px 12px", background: C.surfaceBg, borderRadius: 8, fontSize: 12, color: C.textMuted }}>
         📲 Test ordering bot: send <strong>&ldquo;Hi&rdquo;</strong> to <strong>+{info.whatsapp_number}</strong>
       </div>
     </div>
@@ -835,41 +850,34 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
 
   const btnStyle = (active) => ({
     fontSize: 12, padding: "4px 10px", borderRadius: 8, border: "0.5px solid", cursor: "pointer",
-    background:  active ? "#F0F0EE" : "transparent",
-    color:       active ? "#111"    : "#888",
-    borderColor: active ? "#C8C8C4" : "#E0E0DC",
+    background:  active ? C.surfaceBg : "transparent",
+    color:       active ? C.text : "#BFE0D6",
+    borderColor: active ? C.borderStrong : "rgba(255,255,255,0.25)",
   });
 
   const tabStyle = (active) => ({
     fontSize: 12, padding: "5px 16px", borderRadius: 8, border: "none", cursor: "pointer",
-    background:  active ? "#fff" : "transparent",
-    color:       active ? "#111" : "#888",
+    background:  active ? C.cardBg : "transparent",
+    color:       active ? C.primaryDark : "#BFE0D6",
     fontWeight:  active ? 500   : 400,
-    boxShadow:   active ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+    boxShadow:   active ? "0 1px 3px rgba(0,0,0,0.15)" : "none",
     transition:  "all 0.15s",
   });
 
+  const dateStr = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+
   return (
-    <div style={{ minHeight: "100vh", background: "#F7F7F5", padding: "24px" }}>
-      <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-
-        {/* ── Header ────────────────────────────────────────────────────── */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
-          <div>
-            <h1 style={{ fontSize: 18, fontWeight: 500, color: "#111", margin: 0 }}>Owner dashboard</h1>
-            <p style={{ fontSize: 13, color: "#888", margin: "2px 0 0" }}>{restaurantName} · {new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</p>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-
-            {/* Live / Analytics tabs */}
-            <div style={{ display: "flex", gap: 2, background: "#EDEDEB", borderRadius: 10, padding: 3 }}>
-              <button style={tabStyle(activeTab === "live")}      onClick={() => setActiveTab("live")}>🔴 Live</button>
-              <button style={tabStyle(activeTab === "analytics")} onClick={() => setActiveTab("analytics")}>📊 Analytics</button>
+    <div style={{ minHeight: "100vh", background: C.pageBg }}>
+      <BrandHeader
+        title="Owner dashboard"
+        subtitle={`${restaurantName || "Outlet"} · ${dateStr}`}
+        right={
+          <>
+            <div style={{ display: "flex", gap: 2, background: "rgba(255,255,255,0.12)", borderRadius: 10, padding: 3 }}>
+              <button style={tabStyle(activeTab === "live")}      onClick={() => setActiveTab("live")}>Live</button>
+              <button style={tabStyle(activeTab === "analytics")} onClick={() => setActiveTab("analytics")}>Analytics</button>
             </div>
 
-            <div style={{ width: 1, height: 18, background: "#E0E0DC" }} />
-
-            {/* Date presets — only shown on analytics tab */}
             {activeTab === "analytics" && (
               <>
                 <div style={{ display: "flex", gap: 4 }}>
@@ -879,21 +887,33 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
                     </button>
                   ))}
                 </div>
-                <div style={{ width: 1, height: 18, background: "#E0E0DC" }} />
                 <button style={{ ...btnStyle(!!customStart), display: "flex", alignItems: "center", gap: 5 }} onClick={() => setShowCal(v => !v)}>
-                  📅 {customStart ? `${fmtDate(customStart)} – ${fmtDate(customEnd)}` : "Custom"}
+                  {customStart ? `${fmtDate(customStart)} – ${fmtDate(customEnd)}` : "Custom"}
                 </button>
-                <div style={{ width: 1, height: 18, background: "#E0E0DC" }} />
               </>
             )}
 
-            <Link to="/settings?tab=kitchen#scheduled-ordering" style={{ fontSize: 12, padding: "4px 12px", borderRadius: 8, border: "0.5px solid #B5D4F4", background: "#E6F1FB", color: "#185FA5", cursor: "pointer", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}>Kitchen hours</Link>
-            <div style={{ width: 1, height: 18, background: "#E0E0DC" }} />
-            <Link to="/settings" style={{ fontSize: 12, padding: "4px 12px", borderRadius: 8, border: "0.5px solid #E0E0DC", background: "#F7F7F5", color: "#555", cursor: "pointer", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}>⚙️ Settings</Link>
-            <div style={{ width: 1, height: 18, background: "#E0E0DC" }} />
-            <button onClick={onLogout} style={{ fontSize: 12, padding: "4px 12px", borderRadius: 8, border: "0.5px solid #FCEBEB", background: "#FFF5F5", color: "#A32D2D", cursor: "pointer" }}>Logout</button>
-          </div>
-        </div>
+            <Link to="/dashboard/manager" style={CHIP_PRIMARY}>Manager</Link>
+            <Link to="/dashboard/kitchen" style={CHIP_PRIMARY}>Kitchen</Link>
+            <Link to="/dashboard/captain" style={CHIP_SECONDARY}>Captain</Link>
+            <Link to="/dashboard/menu" style={CHIP_SECONDARY}>Menu</Link>
+            <Link to="/settings?tab=kitchen#scheduled-ordering" style={CHIP_PRIMARY}>Kitchen hours</Link>
+            <Link to="/settings" style={CHIP_SECONDARY}>Settings</Link>
+            <button
+              onClick={onLogout}
+              style={{
+                fontSize: 12, fontWeight: 500, padding: "6px 12px", borderRadius: 8,
+                border: `0.5px solid ${C.dangerBorder}`, background: C.dangerLight,
+                color: C.dangerDark, cursor: "pointer",
+              }}
+            >
+              Logout
+            </button>
+          </>
+        }
+      />
+
+      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "24px" }}>
 
         {/* ── LIVE TAB ──────────────────────────────────────────────────── */}
         {activeTab === "live" && (
@@ -920,16 +940,16 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
           <>
             {/* Custom date picker */}
             {showCal && (
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, padding: 12, background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, flexWrap: "wrap" }}>
-                <label style={{ fontSize: 12, color: "#888" }}>From</label>
-                <input type="date" style={{ border: "0.5px solid #E0E0DC", borderRadius: 8, padding: "4px 8px", fontSize: 12 }} onChange={e => setCustomStart(new Date(e.target.value))} />
-                <label style={{ fontSize: 12, color: "#888" }}>To</label>
-                <input type="date" style={{ border: "0.5px solid #E0E0DC", borderRadius: 8, padding: "4px 8px", fontSize: 12 }} onChange={e => setCustomEnd(new Date(e.target.value + "T23:59:59"))} />
-                <button onClick={() => { if (customStart && customEnd) { setPreset(null); setShowCal(false); } }} style={{ fontSize: 12, padding: "4px 14px", borderRadius: 8, border: "none", background: "#378ADD", color: "#fff", cursor: "pointer" }}>Apply</button>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, padding: 12, background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12, flexWrap: "wrap" }}>
+                <label style={{ fontSize: 12, color: C.textMuted }}>From</label>
+                <input type="date" style={{ border: `0.5px solid ${C.border}`, borderRadius: 8, padding: "4px 8px", fontSize: 12 }} onChange={e => setCustomStart(new Date(e.target.value))} />
+                <label style={{ fontSize: 12, color: C.textMuted }}>To</label>
+                <input type="date" style={{ border: `0.5px solid ${C.border}`, borderRadius: 8, padding: "4px 8px", fontSize: 12 }} onChange={e => setCustomEnd(new Date(e.target.value + "T23:59:59"))} />
+                <button onClick={() => { if (customStart && customEnd) { setPreset(null); setShowCal(false); } }} style={{ fontSize: 12, padding: "4px 14px", borderRadius: 8, border: "none", background: C.primary, color: "#fff", cursor: "pointer" }}>Apply</button>
               </div>
             )}
 
-            <p style={{ fontSize: 11, color: "#aaa", marginBottom: 12 }}>Showing: {rangeLabel}</p>
+            <p style={{ fontSize: 11, color: C.textMuted, marginBottom: 12 }}>Showing: {rangeLabel}</p>
 
             {/* KPI rows */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 10, marginBottom: 10 }}>
@@ -941,8 +961,8 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
 
             {/* Revenue chart */}
             {chartData && chartData.labels?.length > 0 && <RevenueChart labels={chartData.labels} revenue={chartData.revenue} orders={chartData.orders} covers={chartData.covers} preset={preset} />}
-            {chartData && chartData.labels?.length === 0 && <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "32px 20px", marginBottom: 12, textAlign: "center", fontSize: 13, color: "#aaa" }}>No orders in this period</div>}
-            {!chartData && <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "32px 20px", marginBottom: 12, textAlign: "center", fontSize: 13, color: "#aaa" }}>Loading chart...</div>}
+            {chartData && chartData.labels?.length === 0 && <div style={{ background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: "32px 20px", marginBottom: 12, textAlign: "center", fontSize: 13, color: C.textMuted }}>No orders in this period</div>}
+            {!chartData && <div style={{ background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: "32px 20px", marginBottom: 12, textAlign: "center", fontSize: 13, color: C.textMuted }}>Loading chart...</div>}
 
             {/* Menu items + WABA panel */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12, marginBottom: 12 }}>

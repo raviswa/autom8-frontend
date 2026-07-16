@@ -11,21 +11,11 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-
-const C = {
-  bg:        '#F4F4F0',
-  card:      '#FFFFFF',
-  border:    '#E8E8E5',
-  text:      '#1A1A1A',
-  muted:     '#888884',
-  primary:   '#378ADD',
-  success:   '#1D9E75',
-  warning:   '#BA7517',
-  danger:    '#A32D2D',
-};
+import BrandHeader from '../components/BrandHeader';
+import { C } from '../theme/brand';
 
 const CARD = {
-  background: C.card,
+  background: C.cardBg,
   border: `0.5px solid ${C.border}`,
   borderRadius: 14,
   padding: '20px 24px',
@@ -54,14 +44,14 @@ function ScanResult({ result, onDismiss }) {
         <p style={{ fontSize: 17, fontWeight: 600, margin: '0 0 6px', color: C.text }}>
           {icon} {isSuccess ? 'Order collected!' : isWarn ? 'Already collected' : result.message ?? 'Error'}
         </p>
-        <button onClick={onDismiss} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: C.muted }}>×</button>
+        <button onClick={onDismiss} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: C.textMuted }}>×</button>
       </div>
 
       {isSuccess && result.order && (
         <div style={{ fontSize: 13, color: C.text, display: 'flex', gap: 20, flexWrap: 'wrap' }}>
-          <span><span style={{ color: C.muted }}>Order</span> <strong>{result.order.order_number}</strong></span>
-          <span><span style={{ color: C.muted }}>Total</span> <strong>₹{result.order.total_amount}</strong></span>
-          <span><span style={{ color: C.muted }}>At</span> <strong>{fmtTime(result.order.collected_at)}</strong></span>
+          <span><span style={{ color: C.textMuted }}>Order</span> <strong>{result.order.order_number}</strong></span>
+          <span><span style={{ color: C.textMuted }}>Total</span> <strong>₹{result.order.total_amount}</strong></span>
+          <span><span style={{ color: C.textMuted }}>At</span> <strong>{fmtTime(result.order.collected_at)}</strong></span>
         </div>
       )}
 
@@ -142,7 +132,7 @@ function CameraScanner({ onDetect }) {
           <video ref={videoRef} muted playsInline style={{ width: '100%', display: 'block', maxHeight: 300, objectFit: 'cover' }} />
           {/* Targeting overlay */}
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
-            <div style={{ width: 180, height: 180, border: '2px solid rgba(55,138,221,.8)', borderRadius: 12, boxShadow: '0 0 0 2000px rgba(0,0,0,.35)' }} />
+            <div style={{ width: 180, height: 180, border: `2px solid ${C.primary}`, borderRadius: 12, boxShadow: '0 0 0 2000px rgba(0,0,0,.35)' }} />
           </div>
           <p style={{ position: 'absolute', bottom: 10, left: 0, right: 0, textAlign: 'center', fontSize: 12, color: '#ccc', margin: 0 }}>
             Point camera at customer's QR code
@@ -220,20 +210,23 @@ export default function CaptainPortal() {
   const hasCameraApi = typeof BarcodeDetector !== 'undefined';
 
   return (
-    <div style={{ minHeight: '100vh', background: C.bg }}>
-
-      {/* Header */}
-      <div style={{ background: '#1A1A1A', color: '#fff', padding: '0 20px' }}>
-        <div style={{ maxWidth: 560, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 52 }}>
-          <div>
-            <span style={{ fontSize: 15, fontWeight: 600 }}>Captain Portal</span>
-            <span style={{ fontSize: 11, marginLeft: 10, color: '#888' }}>{user?.full_name}</span>
-          </div>
-          <button onClick={logout} style={{ padding: '5px 12px', background: 'transparent', color: '#888', border: '0.5px solid #444', borderRadius: 7, fontSize: 11, cursor: 'pointer' }}>
+    <div style={{ minHeight: '100vh', background: C.pageBg }}>
+      <BrandHeader
+        title="Captain portal"
+        subtitle={user?.full_name || 'Takeaway fulfillment'}
+        right={
+          <button
+            onClick={logout}
+            style={{
+              fontSize: 12, fontWeight: 500, padding: '6px 12px', borderRadius: 8,
+              border: `0.5px solid ${C.dangerBorder}`, background: C.dangerLight,
+              color: C.dangerDark, cursor: 'pointer',
+            }}
+          >
             Logout
           </button>
-        </div>
-      </div>
+        }
+      />
 
       <div style={{ maxWidth: 560, margin: '0 auto', padding: '24px 16px' }}>
 
@@ -242,8 +235,8 @@ export default function CaptainPortal() {
 
         {/* Scan input card */}
         <div style={{ ...CARD, marginBottom: 16 }}>
-          <p style={{ fontSize: 15, fontWeight: 600, margin: '0 0 4px' }}>Scan Customer QR Code</p>
-          <p style={{ fontSize: 12, color: C.muted, margin: '0 0 16px' }}>
+          <p style={{ fontSize: 15, fontWeight: 600, margin: '0 0 4px', color: C.text }}>Scan Customer QR Code</p>
+          <p style={{ fontSize: 12, color: C.textMuted, margin: '0 0 16px' }}>
             {useCamera ? 'Point camera at the QR code' : 'Scan with a barcode reader or type the token and press Enter'}
           </p>
 
@@ -264,14 +257,14 @@ export default function CaptainPortal() {
                 style={{
                   flex: 1, padding: '12px 14px', border: `1.5px solid ${C.primary}`,
                   borderRadius: 10, fontSize: 16, letterSpacing: '.05em',
-                  outline: 'none', background: scanning ? '#f5f5f3' : '#fff',
+                  outline: 'none', background: scanning ? C.surfaceBg : C.cardBg,
                 }}
               />
               <button
                 onClick={() => processToken(inputVal)}
                 disabled={scanning || !inputVal.trim()}
                 style={{
-                  padding: '12px 20px', background: scanning ? '#aaa' : C.primary,
+                  padding: '12px 20px', background: scanning ? C.textMuted : C.primary,
                   color: '#fff', border: 'none', borderRadius: 10, fontSize: 14,
                   fontWeight: 600, cursor: scanning ? 'default' : 'pointer', minWidth: 80,
                 }}>
@@ -284,7 +277,7 @@ export default function CaptainPortal() {
           {hasCameraApi && (
             <button
               onClick={() => { setUseCamera(p => !p); setResult(null); }}
-              style={{ marginTop: 12, padding: '7px 14px', background: C.bg, border: `0.5px solid ${C.border}`, borderRadius: 8, fontSize: 12, cursor: 'pointer', color: C.muted }}>
+              style={{ marginTop: 12, padding: '7px 14px', background: C.surfaceBg, border: `0.5px solid ${C.border}`, borderRadius: 8, fontSize: 12, cursor: 'pointer', color: C.textMuted }}>
               {useCamera ? '⌨ Switch to manual entry' : '📷 Use camera scanner'}
             </button>
           )}
@@ -293,20 +286,20 @@ export default function CaptainPortal() {
         {/* Scan history */}
         {history.length > 0 && (
           <div style={CARD}>
-            <p style={{ fontSize: 13, fontWeight: 600, margin: '0 0 12px' }}>Recent Scans</p>
+            <p style={{ fontSize: 13, fontWeight: 600, margin: '0 0 12px', color: C.text }}>Recent Scans</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {history.map((h, i) => (
                 <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: i < history.length - 1 ? `0.5px solid ${C.border}` : 'none' }}>
                   <div>
-                    <span style={{ fontSize: 13, fontWeight: 500 }}>{h.order}</span>
-                    <span style={{ fontSize: 11, color: C.muted, marginLeft: 8 }}>{h.token}</span>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: C.text }}>{h.order}</span>
+                    <span style={{ fontSize: 11, color: C.textMuted, marginLeft: 8 }}>{h.token}</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 11, color: C.muted }}>{fmtTime(h.time)}</span>
+                    <span style={{ fontSize: 11, color: C.textMuted }}>{fmtTime(h.time)}</span>
                     <span style={{
                       fontSize: 10, padding: '2px 7px', borderRadius: 20, fontWeight: 500,
-                      background: h.code === 'COLLECTED' ? 'rgba(29,158,117,.12)' : h.code === 'ALREADY_COLLECTED' ? 'rgba(186,117,23,.12)' : 'rgba(163,45,45,.12)',
-                      color: h.code === 'COLLECTED' ? C.success : h.code === 'ALREADY_COLLECTED' ? C.warning : C.danger,
+                      background: h.code === 'COLLECTED' ? C.successLight : h.code === 'ALREADY_COLLECTED' ? C.warningLight : C.dangerLight,
+                      color: h.code === 'COLLECTED' ? C.successDark : h.code === 'ALREADY_COLLECTED' ? C.warningDark : C.danger,
                     }}>
                       {h.code === 'COLLECTED' ? 'Collected' : h.code === 'ALREADY_COLLECTED' ? 'Duplicate' : 'Error'}
                     </span>
@@ -319,7 +312,7 @@ export default function CaptainPortal() {
 
         {/* Empty state */}
         {history.length === 0 && !result && (
-          <div style={{ textAlign: 'center', padding: '40px 0', color: C.muted }}>
+          <div style={{ textAlign: 'center', padding: '40px 0', color: C.textMuted }}>
             <p style={{ fontSize: 40, marginBottom: 8 }}>📦</p>
             <p style={{ fontSize: 14, fontWeight: 500, color: C.text, marginBottom: 4 }}>Ready to fulfil orders</p>
             <p style={{ fontSize: 13 }}>Scan a customer's takeaway QR code above to mark it as collected.</p>

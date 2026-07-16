@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from "react";
+import BrandHeader from "../components/BrandHeader";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 import { C } from '../theme/brand';
@@ -1446,34 +1447,40 @@ export default function MarketingDashboard({ restaurantId, restaurantName, onLog
   ];
 
   const tabStyle = (key) => ({
-    fontSize: 12, padding: "5px 14px", borderRadius: 7, border: "0.5px solid", cursor: "pointer",
+    fontSize: 12, padding: "5px 14px", borderRadius: 7, border: "none", cursor: "pointer",
     fontWeight: activeTab === key ? 500 : 400,
-    background:   activeTab === key ? C.cardBg      : "transparent",
-    color:        activeTab === key ? C.text        : C.textMuted,
-    borderColor:  activeTab === key ? C.borderStrong : "transparent",
+    background:   activeTab === key ? C.cardBg : "transparent",
+    color:        activeTab === key ? C.primaryDark : "#BFE0D6",
+    boxShadow:    activeTab === key ? "0 1px 3px rgba(0,0,0,0.15)" : "none",
   });
 
-  return (
-    <div style={{ minHeight: "100vh", background: C.pageBg, padding: "24px" }}>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-      <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+  const dateStr = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 
-        {/* Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
-          <div>
-            <h1 style={{ fontSize: 18, fontWeight: 500, color: C.text, margin: 0 }}>Marketing &amp; CRM</h1>
-            <p style={{ fontSize: 13, color: C.textMuted, margin: "2px 0 0" }}>
-              {restaurantName} · {new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
-            </p>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ display: "flex", gap: 3, background: C.surfaceBg, borderRadius: 9, padding: 3 }}>
+  return (
+    <div style={{ minHeight: "100vh", background: C.pageBg }}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <BrandHeader
+        title="Marketing & CRM"
+        subtitle={`${restaurantName || "Outlet"} · ${dateStr}`}
+        right={
+          <>
+            <div style={{ display: "flex", gap: 3, background: "rgba(255,255,255,0.12)", borderRadius: 9, padding: 3 }}>
               {tabs.map(t => <button key={t.key} style={tabStyle(t.key)} onClick={() => setActiveTab(t.key)}>{t.label}</button>)}
             </div>
-            <div style={{ width: 1, height: 18, background: C.border }} />
-            <Btn variant="danger" onClick={onLogout}>Logout</Btn>
-          </div>
-        </div>
+            <button
+              onClick={onLogout}
+              style={{
+                fontSize: 12, fontWeight: 500, padding: "6px 12px", borderRadius: 8,
+                border: `0.5px solid ${C.dangerBorder}`, background: C.dangerLight,
+                color: C.dangerDark, cursor: "pointer",
+              }}
+            >
+              Logout
+            </button>
+          </>
+        }
+      />
+      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "24px" }}>
 
         <WABAStrip apiClient={apiClient} restaurantId={restaurantId} />
 

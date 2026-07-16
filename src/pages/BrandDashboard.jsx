@@ -9,13 +9,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-
-// ── Design tokens (matches OwnerDashboard aesthetic) ─────────────────────────
-
+import BrandHeader from '../components/BrandHeader';
 import { C } from '../theme/brand';
 
 const CARD = {
-  background: C.card,
+  background: C.cardBgBg,
   border: `0.5px solid ${C.border}`,
   borderRadius: 12,
   padding: '16px 20px',
@@ -59,7 +57,7 @@ function OutletCard({ outlet, onClick }) {
         <div>
           <p style={{ fontSize: 14, fontWeight: 600, color: C.text, margin: 0 }}>{outlet.name}</p>
           {outlet.outlet_code && (
-            <span style={{ fontSize: 10, color: C.textMuted, background: C.bg, padding: '1px 6px', borderRadius: 4 }}>
+            <span style={{ fontSize: 10, color: C.textMuted, background: C.surfaceBg, padding: '1px 6px', borderRadius: 4 }}>
               {outlet.outlet_code}
             </span>
           )}
@@ -86,7 +84,7 @@ function OutletCard({ outlet, onClick }) {
       </div>
 
       {/* Revenue bar */}
-      <div style={{ background: C.bg, borderRadius: 4, height: 4, overflow: 'hidden' }}>
+      <div style={{ background: C.surfaceBg, borderRadius: 4, height: 4, overflow: 'hidden' }}>
         <div style={{ width: `${pct}%`, height: '100%', background: C.primary, borderRadius: 4, transition: 'width .4s' }} />
       </div>
       {outlet.city && <p style={{ fontSize: 11, color: C.textMuted, margin: '8px 0 0' }}>📍 {outlet.city}</p>}
@@ -233,7 +231,7 @@ function MenuPushPanel({ brandId, outlets, apiClient }) {
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={() => setShowAdd(!showAdd)}
-            style={{ padding: '6px 14px', background: C.bg, border: `0.5px solid ${C.border}`, borderRadius: 8, fontSize: 12, cursor: 'pointer' }}>
+            style={{ padding: '6px 14px', background: C.surfaceBg, border: `0.5px solid ${C.border}`, borderRadius: 8, fontSize: 12, cursor: 'pointer' }}>
             + Add item
           </button>
           <button onClick={push} disabled={pushing}
@@ -252,7 +250,7 @@ function MenuPushPanel({ brandId, outlets, apiClient }) {
       )}
 
       {showAdd && (
-        <div style={{ background: C.bg, padding: 14, borderRadius: 10, marginBottom: 14, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div style={{ background: C.surfaceBg, padding: 14, borderRadius: 10, marginBottom: 14, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <div style={{ flex: '2 1 160px' }}>
             <label style={{ fontSize: 11, color: C.textMuted, display: 'block', marginBottom: 3 }}>Item name *</label>
             <input value={newItem.name} onChange={e => setNewItem(p => ({...p, name: e.target.value}))}
@@ -355,36 +353,42 @@ export default function BrandDashboard() {
 
   if (!brandId) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: C.bg }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: C.pageBg }}>
         <p style={{ color: C.textMuted }}>No brand assigned to this account.</p>
       </div>
     );
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: C.bg }}>
-
-      {/* Header */}
-      <div style={{ background: '#1A1A1A', color: '#fff', padding: '0 24px' }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 56 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span style={{ fontSize: 16, fontWeight: 600 }}>{user?.brand?.name ?? 'Brand Dashboard'}</span>
-            <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: 'rgba(255,255,255,.1)', color: '#ccc' }}>
-              {user?.role === 'brand_owner' ? 'Brand Owner' : 'Brand Manager'}
-            </span>
-          </div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <button onClick={() => navigate('/settings')}
-              style={{ padding: '6px 14px', background: 'rgba(255,255,255,.1)', color: '#ddd', border: 'none', borderRadius: 8, fontSize: 12, cursor: 'pointer' }}>
-              ⚙ Settings
+    <div style={{ minHeight: '100vh', background: C.pageBg }}>
+      <BrandHeader
+        title={user?.brand?.name ?? 'Brand dashboard'}
+        subtitle={user?.role === 'brand_owner' ? 'Brand Owner' : 'Brand Manager'}
+        right={
+          <>
+            <button
+              onClick={() => navigate('/settings')}
+              style={{
+                fontSize: 12, fontWeight: 500, padding: '6px 12px', borderRadius: 8,
+                border: `0.5px solid ${C.primaryBorder}`, background: C.primaryLight,
+                color: C.primaryDark, cursor: 'pointer',
+              }}
+            >
+              Settings
             </button>
-            <button onClick={logout}
-              style={{ padding: '6px 14px', background: 'transparent', color: '#888', border: '0.5px solid #444', borderRadius: 8, fontSize: 12, cursor: 'pointer' }}>
+            <button
+              onClick={logout}
+              style={{
+                fontSize: 12, fontWeight: 500, padding: '6px 12px', borderRadius: 8,
+                border: `0.5px solid ${C.dangerBorder}`, background: C.dangerLight,
+                color: C.dangerDark, cursor: 'pointer',
+              }}
+            >
               Logout
             </button>
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: '24px 16px' }}>
 
@@ -400,7 +404,7 @@ export default function BrandDashboard() {
 
         {/* Section tab bar + actions */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
-          <div style={{ display: 'flex', background: C.card, border: `0.5px solid ${C.border}`, borderRadius: 10, padding: 4, gap: 3 }}>
+          <div style={{ display: 'flex', background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 10, padding: 4, gap: 3 }}>
             {[{ id: 'outlets', label: '🏪 Outlets' }, { id: 'menu', label: '📋 Brand Menu' }].map(t => (
               <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
                 padding: '6px 14px', borderRadius: 7, fontSize: 12, cursor: 'pointer', fontWeight: activeTab === t.id ? 500 : 400,
@@ -416,7 +420,7 @@ export default function BrandDashboard() {
           <div style={{ display: 'flex', gap: 8 }}>
             {user?.role === 'brand_owner' && (
               <button onClick={() => navigate('/settings')}
-                style={{ padding: '7px 14px', background: C.card, border: `0.5px solid ${C.border}`, borderRadius: 8, fontSize: 12, cursor: 'pointer' }}>
+                style={{ padding: '7px 14px', background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 8, fontSize: 12, cursor: 'pointer' }}>
                 ➕ Add Outlet
               </button>
             )}
@@ -425,7 +429,7 @@ export default function BrandDashboard() {
               📣 Campaign
             </button>
             <button onClick={load}
-              style={{ padding: '7px 14px', background: C.card, border: `0.5px solid ${C.border}`, borderRadius: 8, fontSize: 12, cursor: 'pointer' }}>
+              style={{ padding: '7px 14px', background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 8, fontSize: 12, cursor: 'pointer' }}>
               ↻ Refresh
             </button>
           </div>

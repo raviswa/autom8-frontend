@@ -1788,6 +1788,18 @@ const fetchRestaurantMeta = useCallback(async () => {
                   {kitchenBusyToggling ? 'Updating…' : kitchenStatus.kitchen_busy ? 'Busy kitchen' : 'Mark busy'}
                 </button>
               )}
+              {user?.role === 'owner' && (
+                <Link
+                  to="/dashboard/owner"
+                  style={{
+                    fontSize: 11, fontWeight: 500, color: C.textSub, textDecoration: 'none',
+                    padding: '6px 10px', borderRadius: 8, border: `0.5px solid ${C.border}`,
+                    background: C.cardBg,
+                  }}
+                >
+                  ← Owner dashboard
+                </Link>
+              )}
               <Link
                 to="/settings?tab=kitchen#scheduled-ordering"
                 style={{
