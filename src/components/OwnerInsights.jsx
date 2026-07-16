@@ -91,7 +91,7 @@ function RevenueHeatmap({ data }) {
   );
 }
 
-function DonutChart({ channels, whatsappPct, whatsappRevenue }) {
+function DonutChart({ channels, whatsappPct, whatsappRevenue, whatsappOrderCount, mode, metricLabel }) {
   const canvasRef = useRef(null);
   const chartRef = useRef(null);
 
@@ -106,7 +106,7 @@ function DonutChart({ channels, whatsappPct, whatsappRevenue }) {
         data: {
           labels: channels.map(c => c.label),
           datasets: [{
-            data: channels.map(c => c.revenue),
+            data: channels.map(c => c.value ?? c.revenue ?? 0),
             backgroundColor: ["#378ADD", "#1D9E75", "#7B61FF", "#D0D0CC"],
             borderWidth: 0,
           }],
@@ -125,7 +125,14 @@ function DonutChart({ channels, whatsappPct, whatsappRevenue }) {
   return (
     <div>
       <div style={{ fontSize: 12, color: "#185FA5", marginBottom: 10 }}>
-        <strong>{whatsappPct}%</strong> of revenue ({fmtINR(whatsappRevenue)}) came through WhatsApp ordering
+        {mode === "order_count" ? (
+          <span><strong>{whatsappPct}%</strong> of orders ({whatsappOrderCount ?? 0}) came through WhatsApp ordering</span>
+        ) : (
+          <span><strong>{whatsappPct}%</strong> of revenue ({fmtINR(whatsappRevenue)}) came through WhatsApp ordering</span>
+        )}
+      </div>
+      <div style={{ fontSize: 11, color: "#888", marginBottom: 10 }}>
+        Showing service mix {metricLabel || "by revenue"}
       </div>
       <div style={{ height: 200, position: "relative" }}>
         {channels?.length ? <canvas ref={canvasRef} /> : <div style={{ fontSize: 12, color: "#aaa", paddingTop: 40, textAlign: "center" }}>No orders in period</div>}
@@ -323,6 +330,9 @@ export default function OwnerInsights({ apiClient, startISO, endISO, rangeLabel 
             channels={serviceSplit?.channels}
             whatsappPct={serviceSplit?.whatsappPct}
             whatsappRevenue={serviceSplit?.whatsappRevenue}
+            whatsappOrderCount={serviceSplit?.whatsappOrderCount}
+            mode={serviceSplit?.mode}
+            metricLabel={serviceSplit?.metricLabel}
           />
         </div>
       </div>
