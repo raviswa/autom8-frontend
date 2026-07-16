@@ -16,6 +16,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useSubscription, FEATURES } from '../contexts/SubscriptionContext';
+import { MENU_SLOT_OPTIONS, normalizeMenuSlots, toggleMenuSlot } from '../helpers/menuSlots';
 
 // ─── Design tokens (matches ManagerPortal) ────────────────────────────────────
 const C = {
@@ -892,14 +893,8 @@ function TabServices({ apiClient, showToast, refreshSubscription }) {
 // Dining duration, payment mode, workflow, slot timings
 // ═════════════════════════════════════════════════════════════════════════════
 function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
-  const SLOT_OPTIONS = ['tiffin', 'lunch', 'dinner', 'anytime'];
-  const normalizeSlots = (slots) => {
-    if (!Array.isArray(slots) || !slots.length) return ['anytime'];
-    const clean = [...new Set(slots.map(s => String(s || '').toLowerCase().trim()))]
-      .filter(Boolean)
-      .filter(s => SLOT_OPTIONS.includes(s));
-    return clean.length ? clean : ['anytime'];
-  };
+  const SLOT_OPTIONS = MENU_SLOT_OPTIONS;
+  const normalizeSlots = normalizeMenuSlots;
   const hasPaid = (f) => paidFeatures.includes(f);
   const hasAnyPaid = (...fs) => fs.some(f => paidFeatures.includes(f));
   const showDineIn = hasPaid(FEATURES.DINE_IN);
@@ -1440,8 +1435,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
                             key={`${cat}-${slot}`}
                             type="button"
                             onClick={() => {
-                              const next = active ? current.filter(s => s !== slot) : [...current, slot];
-                              setCatSlots(p => ({ ...p, [cat]: normalizeSlots(next) }));
+                              setCatSlots(p => ({ ...p, [cat]: toggleMenuSlot(current, slot) }));
                             }}
                             style={{
                               padding: '4px 8px',

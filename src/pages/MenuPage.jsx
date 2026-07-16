@@ -8,16 +8,10 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { MENU_SLOT_OPTIONS, normalizeMenuSlots, toggleMenuSlot } from '../helpers/menuSlots';
 
-const SLOT_OPTIONS = ['tiffin', 'lunch', 'dinner', 'anytime'];
-
-function normalizeSlots(slots) {
-  if (!Array.isArray(slots) || !slots.length) return ['anytime'];
-  const clean = [...new Set(slots.map(s => String(s || '').toLowerCase().trim()))]
-    .filter(Boolean)
-    .filter(s => SLOT_OPTIONS.includes(s));
-  return clean.length ? clean : ['anytime'];
-}
+const SLOT_OPTIONS = MENU_SLOT_OPTIONS;
+const normalizeSlots = normalizeMenuSlots;
 
 export default function MenuPage() {
   const { apiClient, user } = useAuth();
@@ -145,7 +139,7 @@ export default function MenuPage() {
   const saveItemSlotsOverride = async (item) => {
     const current = normalizeSlots(item.applicable_slots || categorySlots[item.category] || ['anytime']);
     const input = window.prompt(
-      'Override slots for this item (comma-separated: tiffin,lunch,dinner,anytime). Leave blank to clear override.',
+      'Override slots for this item. Use tiffin,lunch,dinner and/or anytime.\nanytime = all day and cannot combine with meal slots. Leave blank to clear override.',
       item.applicable_slots ? current.join(',') : ''
     );
     if (input == null) return;
@@ -322,6 +316,7 @@ export default function MenuPage() {
             {user?.role === 'owner' && (
               <div className="mb-3 flex flex-wrap items-center gap-2">
                 <span className="text-xs text-gray-600 font-semibold">Applicable slots:</span>
+                <span className="text-[10px] text-gray-400">anytime = all day (not with tiffin/lunch/dinner)</span>
                 {SLOT_OPTIONS.map(slot => {
                   const current = normalizeSlots(categorySlots[category] || ['anytime']);
                   const active = current.includes(slot);
@@ -329,8 +324,7 @@ export default function MenuPage() {
                     <button
                       key={`${category}-${slot}`}
                       onClick={() => {
-                        const next = active ? current.filter(s => s !== slot) : [...current, slot];
-                        saveCategorySlots(category, next);
+                        saveCategorySlots(category, toggleMenuSlot(current, slot));
                       }}
                       className={`px-2 py-1 rounded-full text-xs border ${active ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300'}`}
                     >

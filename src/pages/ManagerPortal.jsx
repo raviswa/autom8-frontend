@@ -28,6 +28,7 @@ import { kotRef } from '../App';
 import { format } from 'date-fns';
 import DateRangeApply, { formatDateDMY } from '../components/DateRangeApply';
 import BrandHeader from '../components/BrandHeader';
+import { MENU_SLOT_OPTIONS, normalizeMenuSlots, toggleMenuSlot } from '../helpers/menuSlots';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 import { C, FONTS } from '../theme/brand'; 
@@ -73,7 +74,7 @@ const SLOT_DB_TO_LABEL = {
   dinner:         'Dinner',
 };
 
-const WEB_SLOT_OPTIONS = ['tiffin', 'lunch', 'dinner', 'anytime'];
+const WEB_SLOT_OPTIONS = MENU_SLOT_OPTIONS;
 const WEB_SLOT_LABEL = {
   tiffin: 'Breakfast/Tiffin',
   lunch: 'Lunch',
@@ -82,11 +83,7 @@ const WEB_SLOT_LABEL = {
 };
 
 function normalizeWebSlots(slots) {
-  if (!Array.isArray(slots) || !slots.length) return ['anytime'];
-  const clean = [...new Set(slots.map(s => String(s || '').toLowerCase().trim()))]
-    .filter(Boolean)
-    .filter(s => WEB_SLOT_OPTIONS.includes(s));
-  return clean.length ? clean : ['anytime'];
+  return normalizeMenuSlots(slots);
 }
 
 // Reservation duration options (minutes)
@@ -3063,8 +3060,7 @@ const fetchRestaurantMeta = useCallback(async () => {
                                       <button
                                         key={`${cat}-${slot}`}
                                         onClick={() => {
-                                          const next = active ? current.filter(s => s !== slot) : [...current, slot];
-                                          saveCategorySlots(cat, next);
+                                          saveCategorySlots(cat, toggleMenuSlot(current, slot));
                                         }}
                                         style={{
                                           fontSize: 10,
