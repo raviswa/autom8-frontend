@@ -44,7 +44,7 @@ function SectionHeader({ title, sub }) {
 
 function RevenueHeatmap({ data }) {
   if (!data?.matrix?.length || !(data.max > 0)) {
-    return <div style={{ fontSize: 12, color: "#aaa" }}>No revenue in the last 7 days</div>;
+    return <div style={{ fontSize: 12, color: "#aaa" }}>No orders in selected period</div>;
   }
   const max = data.max || 1;
   const hourLabels = (h) => (h % 4 === 0 ? `${h % 12 || 12}${h < 12 ? "a" : "p"}` : "");
@@ -54,7 +54,7 @@ function RevenueHeatmap({ data }) {
       {data.peaks?.length > 0 && (
         <div style={{ fontSize: 12, color: "#185FA5", background: "#E6F1FB", borderRadius: 8, padding: "8px 12px", marginBottom: 12, lineHeight: 1.5 }}>
           <strong>Peak slots:</strong>{" "}
-          {data.peaks.slice(0, 3).map(p => `${p.label} (${fmtINR(p.revenue)})`).join(" · ")}
+          {data.peaks.slice(0, 3).map(p => `${p.label} (${data.aggregation === "order_count" ? `${p.revenue} orders` : fmtINR(p.revenue)})`).join(" · ")}
         </div>
       )}
       <div style={{ overflowX: "auto" }}>
@@ -265,13 +265,13 @@ function CustomerLeaderboard({ rows, sortBy }) {
   );
 }
 
-function useInsights(apiClient, startISO, endISO) {
+function useInsights(apiClient, startISO, endISO, skip = false) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    if (!apiClient || !startISO || !endISO) return;
+    if (skip || !apiClient || !startISO || !endISO) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -286,13 +286,16 @@ function useInsights(apiClient, startISO, endISO) {
       }
     })();
     return () => { cancelled = true; };
-  }, [apiClient, startISO, endISO]);
+  }, [apiClient, startISO, endISO, skip]);
 
   return { data, loading, error };
 }
 
-export default function OwnerInsights({ apiClient, startISO, endISO, rangeLabel }) {
-  const { data, loading, error } = useInsights(apiClient, startISO, endISO);
+export default function OwnerInsights({ apiClient, startISO, endISO, rangeLabel, insightsData }) {
+  const fetched = useInsights(apiClient, startISO, endISO, Boolean(insightsData));
+  const data = insightsData ?? fetched.data;
+  const loading = !insightsData && fetched.loading;
+  const error = !insightsData ? fetched.error : null;
 
   if (loading && !data) {
     return (

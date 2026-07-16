@@ -413,87 +413,40 @@ function CancellationVoids({ stats }) {
 }
 
 // ─── Data hooks ───────────────────────────────────────────────────────────────
-function useKpiData(restaurantId, startISO, endISO) {
-  const [data, setData] = useState(null);
+function useInsightsPack(apiClient, startISO, endISO, preset) {
+  const [pack, setPack] = useState(null);
   useEffect(() => {
-    if (!restaurantId) return;
+    if (!apiClient || !startISO || !endISO) return;
+    setPack(null);
+    let cancelled = false;
     (async () => {
-      const [{ data: orders }, { data: tokens }] = await Promise.all([
-        supabase.from("orders").select("total_amount").eq("restaurant_id", restaurantId).not("status", "eq", "cancelled").gte("created_at", startISO).lte("created_at", endISO),
-        supabase.from("walk_in_tokens").select("arrived_at, seated_at, completed_at").eq("restaurant_id", restaurantId).gte("arrived_at", startISO).lte("arrived_at", endISO),
-      ]);
-      const totalRevenue = (orders ?? []).reduce((s, o) => s + (o.total_amount ?? 0), 0);
-      const totalOrders  = (orders ?? []).length;
-      const seated = (tokens ?? []).filter(t => t.seated_at && t.arrived_at);
-      const avgWait = seated.length
-        ? Math.round(seated.reduce((s, t) => s + (new Date(t.seated_at) - new Date(t.arrived_at)) / 60000, 0) / seated.length)
-        : null;
-      const completed = (tokens ?? []).filter(t => t.seated_at && t.completed_at);
-      const avgDining = completed.length
-        ? Math.round(completed.reduce((s, t) => s + (new Date(t.completed_at) - new Date(t.seated_at)) / 60000, 0) / completed.length)
-        : null;
-      setData({ totalRevenue, totalOrders, aov: totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0, totalCovers: (orders ?? []).length, tokensIssued: (tokens ?? []).length, avgDining, avgWait });
+      try {
+        const res = await apiClient.get("/api/dashboard/insights", {
+          params: { start: startISO, end: endISO, preset: preset || "30d" },
+        });
+        if (!cancelled) setPack(res.data);
+      } catch (err) {
+        console.error("[useInsightsPack]", err?.response?.data || err.message);
+        if (!cancelled) setPack({ summary: null, revenueTrend: null, topMenuItems: [] });
+      }
     })();
-  }, [restaurantId, startISO, endISO]);
-  return data;
+    return () => { cancelled = true; };
+  }, [apiClient, startISO, endISO, preset]);
+  return pack;
 }
 
-// FIX: added .order('created_at', { ascending: true }) so chart labels are always chronological
-function useChartData(restaurantId, startISO, endISO, preset) {
-  const [data, setData] = useState(null);
-  useEffect(() => {
-    if (!restaurantId) return;
-    setData(null);
-    (async () => {
-      const { data: orders } = await supabase
-        .from("orders")
-        .select("total_amount, created_at")
-        .eq("restaurant_id", restaurantId)
-        .not("status", "eq", "cancelled")
-        .gte("created_at", startISO)
-        .lte("created_at", endISO)
-        .order("created_at", { ascending: true });   // ← FIX: chronological order
-      if (!orders) return;
-      const byLabel = {};
-      orders.forEach(o => {
-        const d = new Date(o.created_at);
-        const label = (preset === "today" || preset === "yesterday")
-          ? `${d.getHours()}:00`
-          : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
-        if (!byLabel[label]) byLabel[label] = { revenue: 0, orders: 0, covers: 0 };
-        byLabel[label].revenue += o.total_amount ?? 0;
-        byLabel[label].orders  += 1;
-        byLabel[label].covers  += 1;
-      });
-      const labels = Object.keys(byLabel);
-      setData({ labels, revenue: labels.map(l => byLabel[l].revenue), orders: labels.map(l => byLabel[l].orders), covers: labels.map(l => byLabel[l].covers) });
-    })();
-  }, [restaurantId, startISO, endISO, preset]);
-  return data;
+function useKpiData(insightsPack) {
+  return insightsPack?.summary ?? null;
 }
 
-function useMenuItems(restaurantId, startISO, endISO) {
-  const [items, setItems] = useState([]);
-  useEffect(() => {
-    if (!restaurantId) return;
-    (async () => {
-      const { data: orders } = await supabase.from("orders").select("id").eq("restaurant_id", restaurantId).not("status", "eq", "cancelled").gte("created_at", startISO).lte("created_at", endISO);
-      if (!orders?.length) { setItems([]); return; }
-      const orderIds = orders.map(o => o.id);
-      const { data } = await supabase.from("order_items").select("quantity, unit_price, special_instructions, menu_item:menu_item_id(name)").in("order_id", orderIds);
-      if (!data) return;
-      const map = {};
-      data.forEach(r => {
-        const n = r.menu_item?.name || r.special_instructions || null;
-        if (!n) return;
-        if (!map[n]) map[n] = { name: n, qty: 0, revenue: 0 };
-        map[n].qty     += r.quantity ?? 1;
-        map[n].revenue += (r.quantity ?? 1) * (r.unit_price ?? 0);
-      });
-      setItems(Object.values(map).sort((a, b) => b.revenue - a.revenue).slice(0, 7));
-    })();
-  }, [restaurantId, startISO, endISO]);
-  return items;
+function useChartData(insightsPack) {
+  const trend = insightsPack?.revenueTrend;
+  if (!trend?.labels) return null;
+  return trend;
+}
+
+function useMenuItems(insightsPack) {
+  return insightsPack?.topMenuItems ?? [];
 }
 
 function useTables(restaurantId) {
@@ -744,7 +697,7 @@ function WAOrdersTable({ orders, rangeLabel }) {
       </div>
       {/* Note about amounts: per-phone aggregation until token_id FK is added to orders */}
       <div style={{ fontSize: 11, color: "#aaa", marginBottom: 10, padding: "6px 10px", background: "#F7F7F5", borderRadius: 8 }}>
-        💡 Amounts show total spend per phone number in this period. For per-visit amounts, add a <code>token_id</code> FK to the orders table.
+        💡 Amounts are matched per WhatsApp session (token). When an order has no direct link, we match by phone and nearest visit time (up to 7 days).
       </div>
       {orders === null && <div style={{ textAlign: "center", padding: "24px 0", fontSize: 13, color: "#aaa" }}>Loading...</div>}
       {orders !== null && filtered?.length === 0 && <div style={{ textAlign: "center", padding: "24px 0", fontSize: 13, color: "#aaa" }}>No orders in this period</div>}
@@ -824,10 +777,11 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
     return getRangeISO(preset);
   }, [preset, customStart, customEnd]);
 
-  // Analytics data (date-range filtered)
-  const kpi           = useKpiData(restaurantId, startISO, endISO);
-  const chartData     = useChartData(restaurantId, startISO, endISO, preset);
-  const menuItems     = useMenuItems(restaurantId, startISO, endISO);
+  // Analytics data (date-range filtered) — single insights API with line-item backfill
+  const insightsPack  = useInsightsPack(apiClient, startISO, endISO, preset);
+  const kpi           = useKpiData(insightsPack);
+  const chartData     = useChartData(insightsPack);
+  const menuItems     = useMenuItems(insightsPack);
   const cancelStats   = useCancelStats(apiClient, restaurantId, startISO, endISO);
   const wabaInfo      = useWABAInfo(apiClient);
   const waOrders      = useWAOrders(apiClient, startISO, endISO);
@@ -987,7 +941,14 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
             </div>
 
             {/* Deep insights */}
-            <OwnerInsights apiClient={apiClient} restaurantId={restaurantId} startISO={startISO} endISO={endISO} rangeLabel={rangeLabel} />
+            <OwnerInsights
+              apiClient={apiClient}
+              restaurantId={restaurantId}
+              startISO={startISO}
+              endISO={endISO}
+              rangeLabel={rangeLabel}
+              insightsData={insightsPack}
+            />
           </>
         )}
 
