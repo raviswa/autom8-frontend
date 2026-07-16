@@ -529,40 +529,45 @@ function useTables(restaurantId) {
   return snapshot;
 }
 
-// FIX: changed table from kot_tickets → kds_items; adjusted column/status names
-function useKotStats(restaurantId) {
+// FIX: load via backend /api/kds/feed (service role) — direct supabase client
+// reads of kds_items are often empty under RLS for owner accounts.
+function useKotStats(apiClient, restaurantId) {
   const [stats, setStats] = useState(null);
   const fetchKot = useCallback(async () => {
-    if (!restaurantId) return;
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    const { data, error } = await supabase
-      .from("kds_items")
-      .select("status, created_at, updated_at")
-      .eq("restaurant_id", restaurantId)
-      .gte("created_at", today.toISOString());
-    if (error || !data) {
+    if (!apiClient || !restaurantId) return;
+    try {
+      const res = await apiClient.get('/api/kds/feed', { params: { status: 'all' } });
+      const data = res.data?.items ?? [];
+      // IST day start for "today"
+      const now = new Date();
+      const istNow = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+      const istMidnightUtc = Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), istNow.getUTCDate()) - 5.5 * 60 * 60 * 1000;
+      const todayItems = data.filter(k => {
+        const ts = new Date(k.created_at).getTime();
+        return Number.isFinite(ts) && ts >= istMidnightUtc;
+      });
+
+      // kds_items status values: 'pending' | 'in_progress' | 'ready'
+      // (legacy 'completed'/'served' kept for older rows)
+      const open       = todayItems.filter(k => k.status === "pending").length;
+      const inProgress = todayItems.filter(k => k.status === "in_progress").length;
+      const served     = todayItems.filter(k => k.status === "ready" || k.status === "completed" || k.status === "served").length;
+      const times = todayItems
+        .filter(k => ["ready", "completed", "served"].includes(k.status) && k.updated_at && k.created_at)
+        .map(k => (new Date(k.updated_at) - new Date(k.created_at)) / 60000);
+      const avgTime = times.length ? Math.round(times.reduce((s, v) => s + v, 0) / times.length) : null;
+      const delayed = times.filter(t => t > 20).length;
+      setStats({ open, inProgress, served, avgTime, delayed, fastestItem: null, slowestItem: null });
+    } catch (err) {
+      console.error('[useKotStats]', err?.response?.data || err.message);
       setStats({ open: 0, inProgress: 0, served: 0, avgTime: null, delayed: 0, fastestItem: null, slowestItem: null });
-      return;
     }
-    // kds_items status values: 'pending' | 'in_progress' | 'completed'
-    const open       = data.filter(k => k.status === "pending").length;
-    const inProgress = data.filter(k => k.status === "in_progress").length;
-    const served     = data.filter(k => k.status === "completed").length;
-    // Use updated_at as completion time for completed items
-    const times = data
-      .filter(k => k.status === "completed" && k.updated_at && k.created_at)
-      .map(k => (new Date(k.updated_at) - new Date(k.created_at)) / 60000);
-    const avgTime = times.length ? Math.round(times.reduce((s, v) => s + v, 0) / times.length) : null;
-    const delayed = times.filter(t => t > 20).length;
-    setStats({ open, inProgress, served, avgTime, delayed, fastestItem: null, slowestItem: null });
-  }, [restaurantId]);
+  }, [apiClient, restaurantId]);
   useEffect(() => {
     fetchKot();
-    const ch = supabase.channel(`kds-${restaurantId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "kds_items", filter: `restaurant_id=eq.${restaurantId}` }, fetchKot)
-      .subscribe();
-    return () => supabase.removeChannel(ch);
-  }, [restaurantId, fetchKot]);
+    const interval = setInterval(fetchKot, 15000);
+    return () => clearInterval(interval);
+  }, [fetchKot]);
   return stats;
 }
 
@@ -829,7 +834,7 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
 
   // Live data (always current, not date-range)
   const tableSnapshot = useTables(restaurantId);
-  const kotStats      = useKotStats(restaurantId);
+  const kotStats      = useKotStats(apiClient, restaurantId);
 
   const rangeLabel = (customStart && customEnd)
     ? `Custom · ${fmtDate(customStart)} – ${fmtDate(customEnd)}`

@@ -43,7 +43,9 @@ function SectionHeader({ title, sub }) {
 }
 
 function RevenueHeatmap({ data }) {
-  if (!data?.matrix?.length) return <div style={{ fontSize: 12, color: "#aaa" }}>No revenue in the last 7 days</div>;
+  if (!data?.matrix?.length || !(data.max > 0)) {
+    return <div style={{ fontSize: 12, color: "#aaa" }}>No revenue in the last 7 days</div>;
+  }
   const max = data.max || 1;
   const hourLabels = (h) => (h % 4 === 0 ? `${h % 12 || 12}${h < 12 ? "a" : "p"}` : "");
 
@@ -62,10 +64,10 @@ function RevenueHeatmap({ data }) {
             <div key={h} style={{ fontSize: 9, color: "#aaa", textAlign: "center" }}>{hourLabels(h)}</div>
           ))}
           {data.days.map((day, di) => (
-            <React.Fragment key={day.date}>
+            <React.Fragment key={day.date || day.key || di}>
               <div style={{ fontSize: 10, color: "#666", display: "flex", flexDirection: "column", justifyContent: "center" }}>
-                <span style={{ fontWeight: 500 }}>{day.dow}</span>
-                <span style={{ color: "#aaa" }}>{day.label}</span>
+                <span style={{ fontWeight: 500 }}>{day.dow || day.label}</span>
+                <span style={{ color: "#aaa" }}>{day.date ? day.label : ""}</span>
               </div>
               {data.hours.map(h => {
                 const v = data.matrix[di][h];
@@ -73,7 +75,7 @@ function RevenueHeatmap({ data }) {
                 return (
                   <div
                     key={`${di}-${h}`}
-                    title={`${day.dow} ${h}:00 — ${fmtINR(v)}`}
+                    title={`${day.dow || day.label} ${h}:00 — ${data.aggregation === "order_count" ? `${v} orders` : fmtINR(v)}`}
                     style={{ background: HEAT_COLORS[ci], height: 22, borderRadius: 3, border: "0.5px solid #E8E8E5" }}
                   />
                 );
@@ -321,7 +323,12 @@ export default function OwnerInsights({ apiClient, startISO, endISO, rangeLabel 
 
       <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 12, marginBottom: 12 }}>
         <div style={CARD}>
-          <SectionHeader title="Hourly revenue heatmap" sub="Last 7 days · darker = more revenue" />
+          <SectionHeader
+            title="Hourly revenue heatmap"
+            sub={revenueHeatmap?.aggregation === "order_count"
+              ? "Last 7 days · darker = more orders (totals sparsely captured)"
+              : "Last 7 days · darker = more revenue"}
+          />
           <RevenueHeatmap data={revenueHeatmap} />
         </div>
         <div style={CARD}>
