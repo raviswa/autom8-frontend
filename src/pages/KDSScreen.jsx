@@ -886,7 +886,7 @@ const fetchFeed = useCallback(async () => {
   // ── WebSocket ORDER_NEW → auto-print KOT ────────────────────────────────────
   //
   // When the WS fires ORDER_NEW:
-  //   1. Play beep (if sound on)
+  //   1. Play restaurant-bell alert (if sound on)
   //   2. Fetch fresh feed (so item names are available)
   //   3. Build KOT from the WS payload + fresh feed items
   //   4. Print immediately
@@ -897,6 +897,7 @@ const fetchFeed = useCallback(async () => {
     const latest = updates[0];
     if (latest?.type !== 'ORDER_NEW') {
       if (latest?.type === 'SCHEDULED_KDS_DISPATCH') {
+        if (sound) playOrderAlert();
         fetchFeed();
         fetchScheduled();
       }
@@ -909,7 +910,7 @@ const fetchFeed = useCallback(async () => {
     // Mark immediately to prevent double-fire if the effect re-runs
     printedOrders.current.add(orderNum);
 
-    if (sound) playBeep();
+    if (sound) playOrderAlert();
 
     // Fetch fresh items so the KOT has real item names, then print
     fetchFeed().then(freshItems => {
@@ -926,7 +927,22 @@ const fetchFeed = useCallback(async () => {
     setTimeout(() => setPrintMsg(''), 3500);
   }
 
-  function playBeep() {
+  // Restaurant bell for new Munafe/WhatsApp orders. Falls back to a short
+  // oscillator beep if the audio asset cannot play (autoplay policy, missing file).
+  function playOrderAlert() {
+    try {
+      const audio = new Audio('/restaurant-bell.mp3');
+      audio.volume = 0.85;
+      const playPromise = audio.play();
+      if (playPromise && typeof playPromise.catch === 'function') {
+        playPromise.catch(() => playBeepFallback());
+      }
+    } catch (_) {
+      playBeepFallback();
+    }
+  }
+
+  function playBeepFallback() {
     try {
       const ctx  = new (window.AudioContext || window.webkitAudioContext)();
       const now  = ctx.currentTime;
