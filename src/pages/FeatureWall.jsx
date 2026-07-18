@@ -7,14 +7,14 @@ import { useAuth } from '../contexts/AuthContext';
 
 const FEATURE_META = {
   token_management: {
-    icon: '🎟',
-    label: 'Token management',
-    desc:  'Walk-in queue, token issuance, and WhatsApp table notifications.',
+    icon: '🎫',
+    label: 'Token / Queue',
+    desc:  'Walk-in queue tokens via WhatsApp — the default offering across restaurants, retail, jewellery, and cloud kitchens.',
   },
   dine_in: {
     icon: '🍽️',
     label: 'Dine-in ordering',
-    desc:  'Table orders via WhatsApp, kitchen display system, and cart.',
+    desc:  'Full table service: allocate a table, order via WhatsApp, pay, and get a receipt.',
   },
   takeaway: {
     icon: '🛍️',

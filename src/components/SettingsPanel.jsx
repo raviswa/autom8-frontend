@@ -38,10 +38,11 @@ const CARD = {
 
 // ─── Service options ──────────────────────────────────────────────────────────
 const SERVICES = [
-  { id: 'dine_in',        label: 'Dine-In',          icon: '🪑', desc: 'Walk-in table service via WhatsApp' },
-  { id: 'takeaway',       label: 'Takeaway',          icon: '🛍️', desc: 'Counter pickup orders'              },
-  { id: 'delivery',       label: 'Door Delivery',     icon: '🛵', desc: 'Delivery to customer address'       },
-  { id: 'reserve_table',  label: 'Table Reservation', icon: '📅', desc: 'Advance booking with deposit'       },
+  { id: 'token_management', label: 'Token / Queue',     icon: '🎫', desc: 'Universal walk-in queue — lead offering for every business type' },
+  { id: 'dine_in',          label: 'Dine-In',           icon: '🪑', desc: 'Full table service: allocate → order → pay (sit-down restaurants)' },
+  { id: 'takeaway',         label: 'Takeaway',          icon: '🛍️', desc: 'Counter pickup orders'              },
+  { id: 'delivery',         label: 'Door Delivery',     icon: '🛵', desc: 'Delivery to customer address'       },
+  { id: 'reserve_table',    label: 'Table Reservation', icon: '📅', desc: 'Advance booking with deposit'       },
 ];
 
 const WORKFLOWS = [

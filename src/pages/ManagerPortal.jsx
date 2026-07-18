@@ -1979,8 +1979,9 @@ const fetchRestaurantMeta = useCallback(async () => {
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   {waitingTokens.map(token => {
-                    const isLargeParty = token.pax > LARGE_PARTY_THRESHOLD;
-                    const avail    = isLargeParty ? [] : availableTablesFor(token.pax);
+                    const isQueueToken = token.type === 'queue';
+                    const isLargeParty = !isQueueToken && token.pax > LARGE_PARTY_THRESHOLD;
+                    const avail    = isLargeParty || isQueueToken ? [] : availableTablesFor(token.pax);
                     const combo    = isLargeParty ? pickTableCombo(availableTablesForCombo(), token.pax) : null;
                     const tableLines = combo?.length
                       ? combo.map(t => `Table ${t[0]} (${t[2]}/${t[1]} seats)`).join(' + ')
@@ -1997,7 +1998,9 @@ const fetchRestaurantMeta = useCallback(async () => {
                         <div style={{ flex: 1 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
                             <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>{token.id}</span>
-                            <Pill label="Waiting" variant="amber" />
+                            {isQueueToken
+                              ? <Pill label="Token / Queue" variant="purple" />
+                              : <Pill label="Waiting" variant="amber" />}
                             {waitMins >= 20 && (
                               <Pill
                                 label={waitMins >= 90 ? `${waitMins}m — urgent` : `${waitMins}m waiting`}
@@ -2009,7 +2012,7 @@ const fetchRestaurantMeta = useCallback(async () => {
                             {token.name} · {token.pax} {token.pax === 1 ? 'person' : 'people'} · Arrived {safeFormat(token.arrived_at, 'HH:mm')}
                           </p>
                           {token.phone && <p style={{ fontSize: 11, color: C.textMuted, margin: "0 0 8px" }}>+{token.phone}</p>}
-                          {token.estimate_display && token.status === 'waiting' && !isLargeParty && (
+                          {token.estimate_display && token.status === 'waiting' && !isLargeParty && !isQueueToken && (
                             <div style={{ marginBottom: 8 }}>
                               <span style={{
                                 display: 'inline-block',
@@ -2026,6 +2029,11 @@ const fetchRestaurantMeta = useCallback(async () => {
                               <p style={{ fontSize: 10, color: C.textMuted, margin: '4px 0 0' }}>est. at arrival</p>
                             </div>
                           )}
+                          {isQueueToken && (
+                            <p style={{ fontSize: 11, color: C.textMuted, margin: "0 0 10px" }}>
+                              Assist at the counter — no table assignment needed.
+                            </p>
+                          )}
                           {isLargeParty && (
                             <div style={{ background: C.accentLight, border: `0.5px solid ${C.accentBorder}`, borderRadius: 7, padding: "6px 10px", fontSize: 11, color: C.accentDark, marginBottom: 10 }}>
                               <strong>Large party — </strong>
@@ -2033,7 +2041,11 @@ const fetchRestaurantMeta = useCallback(async () => {
                             </div>
                           )}
                           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                            {isLargeParty ? (
+                            {isQueueToken ? (
+                              <Btn variant="success" onClick={() => dismissToken(token.id)}>
+                                ✓ Assisted / clear
+                              </Btn>
+                            ) : isLargeParty ? (
                               <Btn
                                 variant="success"
                                 onClick={() => promoteLargeParty(token)}
