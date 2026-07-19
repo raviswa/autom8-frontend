@@ -1550,6 +1550,7 @@ function TabWhatsApp({ apiClient, showToast }) {
         waba_id:          d.waba_id          ?? '',
         phone_number_id:  int.phone_number_id ?? '',
         manager_phone:    d.manager_phone    ?? '',
+        sweets_counter_phone: d.sweets_counter_phone ?? '',
         access_token:     int.access_token   ?? '',
         webhook_secret:   int.webhook_secret ?? '',
       });
@@ -1567,6 +1568,7 @@ function TabWhatsApp({ apiClient, showToast }) {
         whatsapp_number: form.whatsapp_number,
         waba_id:         form.waba_id        || null,
         manager_phone:   form.manager_phone  || null,
+        sweets_counter_phone: form.sweets_counter_phone || null,
       });
       // Update integration row (phone_number_id + access_token live here)
       if (form.phone_number_id || form.access_token) {
@@ -1605,6 +1607,11 @@ function TabWhatsApp({ apiClient, showToast }) {
           <Label>Manager phone</Label>
           <Input value={form.manager_phone} onChange={v => set('manager_phone', v)} placeholder="919876543210" />
           {hint('Primary on-call number. All active managers/owners in Team with WhatsApp also receive ops alerts.')}
+        </div>
+        <div>
+          <Label>Sweets / packing phone (optional)</Label>
+          <Input value={form.sweets_counter_phone || ''} onChange={v => set('sweets_counter_phone', v)} placeholder="919876543210" />
+          {hint('Packing-ticket WhatsApp alerts. If blank, falls back to Manager phone.')}
         </div>
         <div>
           <Label>WABA ID</Label>

@@ -21,7 +21,7 @@
 // ============================================================================
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useWebSocket } from '../contexts/WebSocketContext';
 import DateRangeApply from '../components/DateRangeApply';
@@ -315,13 +315,20 @@ function buildKOTFromFeedItem(item, allItems) {
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
-function StatusBadge({ status, isServed }) {
-  const map = {
-    pending:     { label: 'New',                          cls: 'badge-pending'     },
-    in_progress: { label: 'Cooking',                      cls: 'badge-in-progress' },
-    ready:       { label: isServed ? 'Served' : 'Ready',  cls: 'badge-ready'       },
-    cancelled:   { label: 'Void',                         cls: 'badge-cancelled'   },
-  };
+function StatusBadge({ status, isServed, packingMode = false }) {
+  const map = packingMode
+    ? {
+        pending:     { label: 'New',                          cls: 'badge-pending'     },
+        in_progress: { label: 'Packing',                      cls: 'badge-in-progress' },
+        ready:       { label: isServed ? 'Packed' : 'Packed', cls: 'badge-ready'       },
+        cancelled:   { label: 'Void',                         cls: 'badge-cancelled'   },
+      }
+    : {
+        pending:     { label: 'New',                          cls: 'badge-pending'     },
+        in_progress: { label: 'Cooking',                      cls: 'badge-in-progress' },
+        ready:       { label: isServed ? 'Served' : 'Ready',  cls: 'badge-ready'       },
+        cancelled:   { label: 'Void',                         cls: 'badge-cancelled'   },
+      };
   const { label, cls } = map[status] ?? { label: status, cls: 'badge-pending' };
   return <span className={`kds-badge ${cls}`}>{label}</span>;
 }
@@ -463,12 +470,16 @@ function groupItemsByOrder(items) {
 
 // ─── Order ticket (grouped by table / order) ─────────────────────────────────
 
-function OrderItemRow({ item, onAdvance, onVoid }) {
+function OrderItemRow({ item, onAdvance, onVoid, packingMode = false }) {
   const name = item.order_item?.menu_item?.name ?? item.item_name ?? 'Item';
   const qty = item.order_item?.quantity ?? 1;
   const status = item.status;
 
-  const btnLabel = status === 'pending' ? 'Start' : status === 'in_progress' ? 'Done' : 'Done';
+  const btnLabel = status === 'pending'
+    ? (packingMode ? 'Pack' : 'Start')
+    : status === 'in_progress'
+      ? (packingMode ? 'Packed' : 'Done')
+      : (packingMode ? 'Packed' : 'Done');
   const btnCls = status === 'ready' ? 'row-btn-done' : status === 'in_progress' ? 'row-btn-cooking' : 'row-btn-new';
 
   return (
@@ -501,7 +512,7 @@ function OrderItemRow({ item, onAdvance, onVoid }) {
   );
 }
 
-function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll }) {
+function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll, packingMode = false }) {
   const { anchor, items, orderNumber, serviceType, aggregateStatus, createdAt } = order;
   const handleReprint = () => printKOT(buildKOTFromFeedItem(anchor, allItems));
   const tokenLabel = anchor.token_number ? formatTokenDisplay(anchor.token_number) : null;
@@ -513,10 +524,10 @@ function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll }) {
 
   let checkAllLabel = 'Check all';
   let checkAllDisabled = false;
-  if (pendingCount > 0) checkAllLabel = `Start all (${pendingCount})`;
-  else if (cookingCount > 0) checkAllLabel = `Mark all ready (${cookingCount})`;
+  if (pendingCount > 0) checkAllLabel = packingMode ? `Pack all (${pendingCount})` : `Start all (${pendingCount})`;
+  else if (cookingCount > 0) checkAllLabel = packingMode ? `Mark all packed (${cookingCount})` : `Mark all ready (${cookingCount})`;
   else {
-    checkAllLabel = `All ready (${readyCount})`;
+    checkAllLabel = packingMode ? `All packed (${readyCount})` : `All ready (${readyCount})`;
     checkAllDisabled = true;
   }
 
@@ -546,18 +557,21 @@ function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll }) {
             item={item}
             onAdvance={onAdvance}
             onVoid={onVoid}
+            packingMode={packingMode}
           />
         ))}
       </div>
 
       <div className="kds-ticket-footer">
-        <button
-          type="button"
-          className="kds-ticket-btn kds-ticket-btn-reprint"
-          onClick={handleReprint}
-        >
-          Reprint KOT
-        </button>
+        {!packingMode && (
+          <button
+            type="button"
+            className="kds-ticket-btn kds-ticket-btn-reprint"
+            onClick={handleReprint}
+          >
+            Reprint KOT
+          </button>
+        )}
         <button
           type="button"
           className="kds-ticket-btn kds-ticket-btn-checkall"
@@ -573,7 +587,7 @@ function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll }) {
 
 // ─── History table ────────────────────────────────────────────────────────────
 
-function HistoryView({ apiClient, active }) {
+function HistoryView({ apiClient, active, queue = 'cooking' }) {
   const today = todayISTStr();
   const [draftFrom, setDraftFrom] = useState(today);
   const [draftTo, setDraftTo] = useState(today);
@@ -588,7 +602,7 @@ function HistoryView({ apiClient, active }) {
     setLoading(true);
     try {
       const res = await apiClient.get('/api/kds/history', {
-        params: { from, to },
+        params: { from, to, queue },
         headers: { Authorization: `Bearer ${token}` },
       });
       setItems(res.data.items || []);
@@ -598,7 +612,7 @@ function HistoryView({ apiClient, active }) {
     } finally {
       setLoading(false);
     }
-  }, [apiClient]);
+  }, [apiClient, queue]);
 
   useEffect(() => {
     if (!active || appliedFrom == null || appliedTo == null) return undefined;
@@ -824,6 +838,12 @@ function FutureOrdersView({ orders }) {
 export default function KDSScreen() {
   const { apiClient, logout, user } = useAuth();
   const { connected, updates } = useWebSocket();
+  const [searchParams] = useSearchParams();
+  const location = useLocation();
+  const packingMode =
+    searchParams.get('station') === 'packing' ||
+    location.pathname.includes('/dashboard/packing');
+  const queue = packingMode ? 'packing' : 'cooking';
 
   const [allItems, setAllItems]   = useState([]);
   const [scheduledOrders, setScheduledOrders] = useState([]);
@@ -843,7 +863,7 @@ const fetchFeed = useCallback(async () => {
   if (!token) return [];
   try {
     const res = await apiClient.get('/api/kds/feed', {
-      params: { status: 'all' },
+      params: { status: 'all', queue },
       headers: { Authorization: `Bearer ${token}` },
     });
     const items = res.data.items || [];
@@ -855,7 +875,7 @@ const fetchFeed = useCallback(async () => {
   } finally {
     setLoading(false);
   }
-}, [apiClient]);
+}, [apiClient, queue]);
 
   const fetchScheduled = useCallback(async () => {
     const token = localStorage.getItem('authToken');
@@ -874,14 +894,21 @@ const fetchFeed = useCallback(async () => {
   }, [apiClient]);
 
   useEffect(() => {
+    setAllItems([]);
+    setLoading(true);
+    setFilter('all');
+    setView('live');
+  }, [queue]);
+
+  useEffect(() => {
     fetchFeed();
-    fetchScheduled();
+    if (!packingMode) fetchScheduled();
     const interval = setInterval(() => {
       fetchFeed();
-      fetchScheduled();
+      if (!packingMode) fetchScheduled();
     }, connected ? 3000 : 1000);
     return () => clearInterval(interval);
-  }, [fetchFeed, fetchScheduled, connected]);
+  }, [fetchFeed, fetchScheduled, connected, packingMode]);
 
   // ── WebSocket ORDER_NEW → auto-print KOT ────────────────────────────────────
   //
@@ -899,8 +926,15 @@ const fetchFeed = useCallback(async () => {
       if (latest?.type === 'SCHEDULED_KDS_DISPATCH') {
         if (sound) playOrderAlert();
         fetchFeed();
-        fetchScheduled();
+        if (!packingMode) fetchScheduled();
       }
+      return;
+    }
+
+    // Packing screen: refresh + sound only (no thermal KOT)
+    if (packingMode) {
+      if (sound && (latest.has_packing || latest.has_packing === undefined)) playOrderAlert();
+      fetchFeed();
       return;
     }
 
@@ -920,7 +954,7 @@ const fetchFeed = useCallback(async () => {
     });
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [updates]);
+  }, [updates, packingMode]);
 
   function showPrintToast(msg) {
     setPrintMsg(msg);
@@ -1029,7 +1063,7 @@ const fetchFeed = useCallback(async () => {
     return (
       <div className="kds-loading">
         <div className="kds-spinner" />
-        <p>Loading kitchen display…</p>
+        <p>Loading {packingMode ? 'packing' : 'kitchen'} display…</p>
       </div>
     );
   }
@@ -1047,7 +1081,7 @@ const fetchFeed = useCallback(async () => {
 
       <div className="kds-root">
         <BrandHeader
-          title="Kitchen display"
+          title={packingMode ? 'Packing display' : 'Kitchen display'}
           subtitle={connected ? '• live' : '• offline'}
           right={
             <>
@@ -1056,15 +1090,26 @@ const fetchFeed = useCallback(async () => {
                   className={`kds-tab ${view === 'live' ? 'kds-tab-active' : ''}`}
                   onClick={() => setView('live')}
                 >Live orders</button>
-                <button
-                  className={`kds-tab ${view === 'future' ? 'kds-tab-active' : ''}`}
-                  onClick={() => setView('future')}
-                >Future{laterScheduled.length ? ` (${laterScheduled.length})` : ''}</button>
+                {!packingMode && (
+                  <button
+                    className={`kds-tab ${view === 'future' ? 'kds-tab-active' : ''}`}
+                    onClick={() => setView('future')}
+                  >Future{laterScheduled.length ? ` (${laterScheduled.length})` : ''}</button>
+                )}
                 <button
                   className={`kds-tab ${view === 'history' ? 'kds-tab-active' : ''}`}
                   onClick={() => setView('history')}
                 >History</button>
               </div>
+              {packingMode ? (
+                <Link to="/dashboard/kitchen" className="kds-ribbon-chip">
+                  ← Kitchen
+                </Link>
+              ) : (
+                <Link to="/dashboard/kitchen?station=packing" className="kds-ribbon-chip">
+                  Packing →
+                </Link>
+              )}
               {user?.role === 'owner' && (
                 <Link to="/dashboard/owner" className="kds-ribbon-chip">
                   ← Owner dashboard
@@ -1086,7 +1131,7 @@ const fetchFeed = useCallback(async () => {
         {/* Live view */}
         {view === 'live' && (
           <div className="kds-live-pane">
-            {todaysFuture.length > 0 && (
+            {!packingMode && todaysFuture.length > 0 && (
               <div className="kds-todays-future-strip">
                 <div className="kds-todays-future-head">
                   <span>Scheduled bookings</span>
@@ -1100,7 +1145,7 @@ const fetchFeed = useCallback(async () => {
               </div>
             )}
 
-            {startingNow.length > 0 && (
+            {!packingMode && startingNow.length > 0 && (
               <div className="kds-todays-future-strip kds-present-strip">
                 <div className="kds-todays-future-head">
                   <span>Kitchen start time reached — loading to live board</span>
@@ -1118,8 +1163,8 @@ const fetchFeed = useCallback(async () => {
               {[
                 { key: 'all',         label: 'All active' },
                 { key: 'pending',     label: 'New'        },
-                { key: 'in_progress', label: 'Cooking'    },
-                { key: 'ready',       label: 'Ready'      },
+                { key: 'in_progress', label: packingMode ? 'Packing' : 'Cooking' },
+                { key: 'ready',       label: packingMode ? 'Packed' : 'Ready' },
               ].map(({ key, label }) => (
                 <button
                   key={key}
@@ -1140,7 +1185,7 @@ const fetchFeed = useCallback(async () => {
                 <div className="kds-empty">
                   <p className="kds-empty-icon">😎</p>
                   <p>{filter === 'all' ? 'No active orders right now' : `No ${filter.replace('_', ' ')} orders`}</p>
-                  <p className="kds-empty-sub">Kitchen is caught up</p>
+                  <p className="kds-empty-sub">{packingMode ? 'Packing counter is caught up' : 'Kitchen is caught up'}</p>
                 </div>
               ) : (
                 displayOrders.map((order) => (
@@ -1151,6 +1196,7 @@ const fetchFeed = useCallback(async () => {
                     onAdvance={advanceItem}
                     onVoid={voidItem}
                     onAdvanceAll={advanceAllInOrder}
+                    packingMode={packingMode}
                   />
                 ))
               )}
@@ -1158,11 +1204,13 @@ const fetchFeed = useCallback(async () => {
           </div>
         )}
 
-        {view === 'future' && (
+        {!packingMode && view === 'future' && (
           <FutureOrdersView orders={scheduledOrders} />
         )}
 
-        {view === 'history' && <HistoryView apiClient={apiClient} active={view === 'history'} />}
+        {view === 'history' && (
+          <HistoryView apiClient={apiClient} active={view === 'history'} queue={queue} />
+        )}
       </div>
     </>
   );

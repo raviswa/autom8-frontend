@@ -209,6 +209,16 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/dashboard/packing"
+        element={
+          <ProtectedRoute allowedRoles={['kitchen_staff', 'owner', 'manager']}>
+            {hasAnyOf(FEATURES.DINE_IN, FEATURES.TAKEAWAY, FEATURES.DELIVERY)
+              ? <KDSScreen />
+              : <FeatureWall feature={FEATURES.DINE_IN} />}
+          </ProtectedRoute>
+        }
+      />
 
       <Route
         path="/dashboard/menu"

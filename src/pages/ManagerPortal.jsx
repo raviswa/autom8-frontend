@@ -2204,6 +2204,8 @@ const fetchRestaurantMeta = useCallback(async () => {
                 <p style={{ fontSize: 12, color: C.textMuted, margin: '4px 0 0' }}>Pre-booked takeaway and delivery — approvals, prep slots, and future dates.</p>
               </div>
               <Link to="/dashboard/kitchen" style={{ fontSize: 12, color: C.primaryDark, textDecoration: 'none' }}>Open kitchen display →</Link>
+              {' · '}
+              <Link to="/dashboard/packing" style={{ fontSize: 12, color: C.primaryDark, textDecoration: 'none' }}>Packing display →</Link>
             </div>
 
             {pendingScheduledApprTokens.length > 0 && (
@@ -2619,6 +2621,8 @@ const fetchRestaurantMeta = useCallback(async () => {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
               <h2 style={{ fontFamily: FONTS.heading, fontSize: 16, fontWeight: 500, color: C.text, margin: 0 }}>Active orders</h2>
               <Link to="/dashboard/kitchen" style={{ fontSize: 12, color: C.primaryDark, textDecoration: 'none' }}>Open kitchen display →</Link>
+              {' · '}
+              <Link to="/dashboard/packing" style={{ fontSize: 12, color: C.primaryDark, textDecoration: 'none' }}>Packing display →</Link>
             </div>
             <AlertBanner type="info">
               Dine-in table orders and live takeaway/delivery tokens appear here. Scheduled pre-bookings are on the <strong>Scheduled</strong> tab.

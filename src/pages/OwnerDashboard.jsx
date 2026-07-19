@@ -854,6 +854,7 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
 
             <Link to="/dashboard/manager" style={CHIP_PRIMARY}>Manager</Link>
             <Link to="/dashboard/kitchen" style={CHIP_PRIMARY}>Kitchen</Link>
+            <Link to="/dashboard/packing" style={CHIP_PRIMARY}>Packing</Link>
             <Link to="/dashboard/captain" style={CHIP_SECONDARY}>Captain</Link>
             <Link to="/dashboard/menu" style={CHIP_SECONDARY}>Menu</Link>
             <Link to="/settings?tab=kitchen#scheduled-ordering" style={CHIP_PRIMARY}>Kitchen hours</Link>
