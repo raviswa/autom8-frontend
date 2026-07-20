@@ -1185,9 +1185,9 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
             order_hours: false,
           }
         : {
-            order_hours: true,
-            order_start: form.order_start || '09:00',
-            order_end: form.order_end || '21:00',
+            // Always accept orders — no open/close window for packaged LOBs
+            order_hours: false,
+            always_open: true,
             breakfast: false,
             lunch: false,
             snacks: false,
@@ -2000,19 +2000,6 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
         </div>
       )}
       </>
-      )}
-
-      {!restaurantLob && (
-        <>
-          <SectionTitle>Order hours</SectionTitle>
-          <div style={{ fontSize: 12, color: C.textSub, marginBottom: 12, lineHeight: 1.55, padding: '10px 12px', background: C.primaryLight, borderRadius: 8, border: `0.5px solid ${C.primaryBorder}` }}>
-            When customers can place orders via WhatsApp / web cart. Outside these hours they can still browse and schedule for later if scheduled ordering is enabled.
-          </div>
-          <div style={{ ...grid2, margin: '10px 0 16px' }}>
-            <div><Label>Opens</Label><Input type="time" value={form.order_start || '09:00'} onChange={v => set('order_start', v)} /></div>
-            <div><Label>Closes</Label><Input type="time" value={form.order_end || '21:00'} onChange={v => set('order_end', v)} /></div>
-          </div>
-        </>
       )}
 
       <SaveBar onSave={save} loading={saving} saved={saved} />
