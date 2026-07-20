@@ -1056,8 +1056,9 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
         courier_name: d.courier_name ?? '',
         courier_rate_card: normalizeCourierRateCard(d.courier_rate_card),
         shiprocket_connected: !!d.shiprocket_connected,
+        shiprocket_email: d.shiprocket_email ?? '',
         shiprocket_api_key: '',
-        shiprocket_has_key: !!d.shiprocket_connected,
+        shiprocket_has_key: !!d.shiprocket_connected || !!d.shiprocket_email,
         intra_city_charge: d.intra_city_charge ?? '',
         outstation_charge: d.outstation_charge ?? '',
         free_delivery_above: d.free_delivery_above ?? '',
@@ -1142,11 +1143,12 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
         destinations,
         courier_name: form.courier_name || 'Your courier',
         courier_rate_card: serializeCourierRateCard(form.courier_rate_card),
+        ...(form.shiprocket_email?.trim() ? { shiprocket_email: form.shiprocket_email.trim() } : {}),
         ...(form.shiprocket_api_key?.trim() ? { shiprocket_api_key: form.shiprocket_api_key.trim() } : {}),
       });
       setCompareRows(res.data.rows || []);
       if (!res.data.shiprocket_available) {
-        setCompareError('Shiprocket token missing — showing your courier rates only. Paste a token above (or save one) to compare live prices.');
+        setCompareError('Shiprocket API User missing — add email + password from Shiprocket Settings → API (Create API User), then Compare again.');
       }
     } catch (e) {
       setCompareError(e.response?.data?.error || e.message || 'Compare failed');
@@ -1215,7 +1217,8 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
         shipping_provider: form.shipping_provider === 'custom' ? 'custom' : 'shiprocket',
         courier_name: (form.courier_name || '').trim() || null,
         courier_rate_card: serializeCourierRateCard(form.courier_rate_card),
-        shiprocket_connected: form.shipping_provider !== 'custom' && (!!form.shiprocket_connected || !!form.shiprocket_api_key?.trim() || !!form.shiprocket_has_key),
+        shiprocket_connected: form.shipping_provider !== 'custom' && (!!form.shiprocket_connected || !!form.shiprocket_api_key?.trim() || !!form.shiprocket_email?.trim() || !!form.shiprocket_has_key),
+        ...(form.shiprocket_email?.trim() ? { shiprocket_email: form.shiprocket_email.trim() } : {}),
         ...(form.shiprocket_api_key?.trim() ? { shiprocket_api_key: form.shiprocket_api_key.trim() } : {}),
         intra_city_charge: parseFloat(form.intra_city_charge) || 0,
         outstation_charge: parseFloat(form.outstation_charge) || 0,
@@ -1523,18 +1526,40 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
           </div>
 
           {form.shipping_provider !== 'custom' ? (
-            <div style={{ marginBottom: 12 }}>
-              <Label>Shiprocket API token</Label>
-              <Input
-                value={form.shiprocket_api_key}
-                onChange={v => set('shiprocket_api_key', v)}
-                type="password"
-                placeholder={form.shiprocket_has_key ? 'Saved — enter only to replace' : 'Paste Shiprocket API token'}
-              />
-              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
-                Same-city still uses the intra-city charge below. Outstation uses Shiprocket when a token is saved; otherwise the flat outstation charge.
+            <>
+            <div style={{
+              fontSize: 12, color: C.textSub, marginBottom: 12, lineHeight: 1.55,
+              padding: '10px 12px', background: C.warningLight, borderRadius: 8,
+              border: `0.5px solid ${C.warningBorder}`,
+            }}>
+              Shiprocket needs an <strong>API User</strong> (Settings → API → Create API User in the Shiprocket panel) —
+              email + password. A random token/password pasted alone returns <strong>401</strong>.
+              We log in to fetch a JWT automatically (valid ~10 days).
+            </div>
+            <div style={grid2}>
+              <div>
+                <Label>Shiprocket API email</Label>
+                <Input
+                  value={form.shiprocket_email}
+                  onChange={v => set('shiprocket_email', v)}
+                  type="email"
+                  placeholder="api-user@yourdomain.com"
+                />
+              </div>
+              <div>
+                <Label>Shiprocket API password</Label>
+                <Input
+                  value={form.shiprocket_api_key}
+                  onChange={v => set('shiprocket_api_key', v)}
+                  type="password"
+                  placeholder={form.shiprocket_has_key ? 'Saved — enter only to replace' : 'API User password'}
+                />
               </div>
             </div>
+            <div style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 12px' }}>
+              Same-city still uses the intra-city charge below. Outstation uses Shiprocket when credentials are saved; otherwise the flat outstation charge.
+            </div>
+            </>
           ) : (
             <>
               <div style={{ marginBottom: 12 }}>
