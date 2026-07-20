@@ -825,6 +825,34 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
 
   const dateStr = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 
+  // ── Nav tabs: which chips show depends on the tenant's line-of-business.
+  // "Packing" tracks packed-goods production (jars/pouches/labels) and matters
+  // for any tenant selling packaged items — packaged-food-only businesses AND
+  // restaurants that also run a sweets/savories packing department. "Kitchen"
+  // (live KDS) and "Captain" (dine-in table service) only make sense where
+  // there's a-la-minute cooking or seated tables, so they drop out entirely
+  // for a pure packaged-goods tenant.
+  const lobType = wabaInfo?.lob_type || "restaurant";
+  const isPackagedGoods = lobType === "food_products" || lobType === "psl" || lobType === "retail";
+
+  const navTabs = isPackagedGoods
+    ? [
+        { to: "/dashboard/manager", label: "Manager", chip: CHIP_PRIMARY },
+        { to: "/dashboard/packing", label: "Packing", chip: CHIP_PRIMARY },
+        { to: "/dashboard/menu",    label: "Menu",     chip: CHIP_SECONDARY },
+        { to: "/settings?tab=kitchen#scheduled-ordering", label: "Kitchen hours", chip: CHIP_PRIMARY },
+        { to: "/settings",          label: "Settings", chip: CHIP_SECONDARY },
+      ]
+    : [
+        { to: "/dashboard/manager", label: "Manager", chip: CHIP_PRIMARY },
+        { to: "/dashboard/kitchen", label: "Kitchen", chip: CHIP_PRIMARY },
+        { to: "/dashboard/packing", label: "Packing", chip: CHIP_PRIMARY },
+        { to: "/dashboard/captain", label: "Captain", chip: CHIP_SECONDARY },
+        { to: "/dashboard/menu",    label: "Menu",     chip: CHIP_SECONDARY },
+        { to: "/settings?tab=kitchen#scheduled-ordering", label: "Kitchen hours", chip: CHIP_PRIMARY },
+        { to: "/settings",          label: "Settings", chip: CHIP_SECONDARY },
+      ];
+
   return (
     <div style={{ minHeight: "100vh", background: C.pageBg }}>
       <BrandHeader
@@ -852,13 +880,9 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
               </>
             )}
 
-            <Link to="/dashboard/manager" style={CHIP_PRIMARY}>Manager</Link>
-            <Link to="/dashboard/kitchen" style={CHIP_PRIMARY}>Kitchen</Link>
-            <Link to="/dashboard/packing" style={CHIP_PRIMARY}>Packing</Link>
-            <Link to="/dashboard/captain" style={CHIP_SECONDARY}>Captain</Link>
-            <Link to="/dashboard/menu" style={CHIP_SECONDARY}>Menu</Link>
-            <Link to="/settings?tab=kitchen#scheduled-ordering" style={CHIP_PRIMARY}>Kitchen hours</Link>
-            <Link to="/settings" style={CHIP_SECONDARY}>Settings</Link>
+            {navTabs.map(t => (
+              <Link key={t.to} to={t.to} style={t.chip}>{t.label}</Link>
+            ))}
             <button
               onClick={onLogout}
               style={{
