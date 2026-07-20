@@ -52,6 +52,11 @@ const WORKFLOWS = [
 
 const SECTIONS = ['Main Hall', 'Terrace', 'Private Room', 'Counter', 'Outdoor'];
 
+/** Dine-in restaurant LOB vs packaged / retail / jewellery / B2B / PSL. */
+function isRestaurantLob(lobType) {
+  return !lobType || lobType === 'restaurant';
+}
+
 // ─── Primitives ───────────────────────────────────────────────────────────────
 function Spinner({ size = 18 }) {
   return (
@@ -429,7 +434,7 @@ function notifySaveResult(showToast, response, successMsg) {
   showToast(successMsg);
 }
 
-function TabRestaurant({ apiClient, showToast }) {
+function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saved,  setSaved]  = useState(false);
@@ -613,7 +618,9 @@ function TabRestaurant({ apiClient, showToast }) {
 
       <SectionTitle>Brand</SectionTitle>
       <div style={grid2}>
-        <div><Label>Cuisine type</Label><Input value={form.cuisine_type} onChange={v => set('cuisine_type', v)} placeholder="South Indian, North Indian…" /></div>
+        {isRestaurantLob(lobType || form.lob_type) && (
+          <div><Label>Cuisine type</Label><Input value={form.cuisine_type} onChange={v => set('cuisine_type', v)} placeholder="South Indian, North Indian…" /></div>
+        )}
         <div><Label>GSTIN</Label><Input value={form.gstin} onChange={v => set('gstin', v)} placeholder="22AAAAA0000A1Z5" /></div>
       </div>
       <div style={{ marginTop: 12 }}><Label>Logo URL</Label><Input value={form.logo_url} onChange={v => set('logo_url', v)} placeholder="https://…/logo.png" /></div>
@@ -621,6 +628,8 @@ function TabRestaurant({ apiClient, showToast }) {
         <img src={form.logo_url} alt="Logo preview" style={{ marginTop: 8, height: 48, borderRadius: 6, border: `0.5px solid ${C.border}` }} onError={e => e.target.style.display = 'none'} />
       )}
 
+      {isRestaurantLob(lobType || form.lob_type) && (
+      <>
       <SectionTitle>Outlet type</SectionTitle>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
         {[
@@ -641,6 +650,8 @@ function TabRestaurant({ apiClient, showToast }) {
           </button>
         ))}
       </div>
+      </>
+      )}
 
 <SectionTitle>Business type</SectionTitle>
 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
@@ -764,7 +775,7 @@ function TabRestaurant({ apiClient, showToast }) {
 // TAB 3 — SERVICES
 // Toggle which customer-facing services are active (within paid plan).
 // ═════════════════════════════════════════════════════════════════════════════
-function TabServices({ apiClient, showToast, refreshSubscription }) {
+function TabServices({ apiClient, showToast, refreshSubscription, lobType = 'restaurant' }) {
   const [paidFeatures,    setPaidFeatures]    = useState(null);
   const [enabledServices, setEnabledServices] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -807,8 +818,12 @@ function TabServices({ apiClient, showToast, refreshSubscription }) {
     return <div style={{ padding: 32, textAlign: 'center' }}><Spinner size={28} /></div>;
   }
 
-  const availableServices = SERVICES.filter(svc => paidFeatures.includes(svc.id));
-  const lockedServices    = SERVICES.filter(svc => !paidFeatures.includes(svc.id));
+  const restaurantLob = isRestaurantLob(lobType);
+  const visibleServices = restaurantLob
+    ? SERVICES
+    : SERVICES.filter(svc => svc.id === 'takeaway' || svc.id === 'delivery');
+  const availableServices = visibleServices.filter(svc => paidFeatures.includes(svc.id));
+  const lockedServices    = visibleServices.filter(svc => !paidFeatures.includes(svc.id));
 
   return (
     <div>
@@ -892,15 +907,16 @@ function TabServices({ apiClient, showToast, refreshSubscription }) {
 // TAB 4 — KITCHEN
 // Dining duration, payment mode, workflow, slot timings
 // ═════════════════════════════════════════════════════════════════════════════
-function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
+function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restaurant' }) {
   const SLOT_OPTIONS = MENU_SLOT_OPTIONS;
   const normalizeSlots = normalizeMenuSlots;
   const hasPaid = (f) => paidFeatures.includes(f);
   const hasAnyPaid = (...fs) => fs.some(f => paidFeatures.includes(f));
-  const showDineIn = hasPaid(FEATURES.DINE_IN);
+  const showDineIn = hasPaid(FEATURES.DINE_IN) && isRestaurantLob(lobType);
   const showTakeaway = hasPaid(FEATURES.TAKEAWAY);
   const showDelivery = hasPaid(FEATURES.DELIVERY);
   const showOrderModes = hasAnyPaid(FEATURES.TAKEAWAY, FEATURES.DELIVERY);
+  const restaurantLob = isRestaurantLob(lobType);
 
   const defaultTiers = [
     { max_km: 3, charge: 20 },
@@ -969,7 +985,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
   const [catSlots,  setCatSlots]  = useState({});    // { categoryName: ['tiffin',..] }
   const [menuCats,  setMenuCats]  = useState([]);    // distinct categories from menu_items
   const [newSecName, setNewSecName] = useState('');
-  
+
   const COMPARE_DEST_PRESETS = [
     { label: 'Chennai', pincode: '600001' },
     { label: 'Bengaluru', pincode: '560001' },
@@ -1028,6 +1044,13 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
         has_dinner:   d.opening_hours?.dinner !== false,
         dinner_start: d.opening_hours?.dinner_start ?? '19:00',
         dinner_end:   d.opening_hours?.dinner_end   ?? '23:00',
+        order_start:  d.opening_hours?.order_start
+          || d.opening_hours?.breakfast_start
+          || '09:00',
+        order_end:    d.opening_hours?.order_end
+          || d.opening_hours?.dinner_end
+          || d.opening_hours?.breakfast_end
+          || '21:00',
         lob_type: d.lob_type ?? 'restaurant',
         shipping_provider: d.shipping_provider === 'custom' ? 'custom' : 'shiprocket',
         courier_name: d.courier_name ?? '',
@@ -1149,11 +1172,31 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
   const save = async () => {
     setSaving(true);
     try {
+      const effectiveLob = form.lob_type || lobType;
+      const isRest = isRestaurantLob(effectiveLob);
+      const opening_hours = isRest
+        ? {
+            breakfast: form.has_breakfast, breakfast_start: form.breakfast_start, breakfast_end: form.breakfast_end,
+            lunch: form.has_lunch, lunch_start: form.lunch_start, lunch_end: form.lunch_end,
+            snacks: form.has_snacks, snacks_start: form.snacks_start, snacks_end: form.snacks_end,
+            dinner: form.has_dinner, dinner_start: form.dinner_start, dinner_end: form.dinner_end,
+            order_hours: false,
+          }
+        : {
+            order_hours: true,
+            order_start: form.order_start || '09:00',
+            order_end: form.order_end || '21:00',
+            breakfast: false,
+            lunch: false,
+            snacks: false,
+            dinner: false,
+          };
+
       const res = await apiClient.put('/api/restaurants/me', {
         dining_duration_minutes:    parseInt(form.dining_duration_minutes),
         payment_mode:               form.payment_mode,
         kitchen_workflow:           form.kitchen_workflow,
-        takeaway_fulfillment_mode:  form.takeaway_fulfillment_mode,
+        takeaway_fulfillment_mode:  isRest ? form.takeaway_fulfillment_mode : 'single_counter',
         parcel_charge_per_item:     parseFloat(form.parcel_charge_per_item) || 0,
         takeaway_ready_range:       (form.takeaway_ready_range || '').trim() || null,
         delivery_ready_range:       (form.delivery_ready_range || '').trim() || null,
@@ -1167,13 +1210,8 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
         scheduled_delivery_enabled: !!form.scheduled_delivery_enabled,
         scheduled_takeaway_enabled: !!form.scheduled_takeaway_enabled,
         max_delivery_radius_km:     parseFloat(form.max_delivery_radius_km) || 0,
-        fulfillment_sections:       sections,
-        opening_hours: {
-          breakfast: form.has_breakfast, breakfast_start: form.breakfast_start, breakfast_end: form.breakfast_end,
-          lunch: form.has_lunch, lunch_start: form.lunch_start, lunch_end: form.lunch_end,
-          snacks: form.has_snacks, snacks_start: form.snacks_start, snacks_end: form.snacks_end,
-          dinner: form.has_dinner, dinner_start: form.dinner_start, dinner_end: form.dinner_end,
-        },
+        fulfillment_sections:       isRest ? sections : [],
+        opening_hours,
         shipping_provider: form.shipping_provider === 'custom' ? 'custom' : 'shiprocket',
         courier_name: (form.courier_name || '').trim() || null,
         courier_rate_card: serializeCourierRateCard(form.courier_rate_card),
@@ -1186,7 +1224,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
         cod_enabled_outstation: !!form.cod_enabled_outstation,
       });
       // Bulk-update menu_items.fulfillment_section per category mapping
-      if (form.takeaway_fulfillment_mode === 'multi_counter' && Object.keys(catMap).length) {
+      if (isRest && form.takeaway_fulfillment_mode === 'multi_counter' && Object.keys(catMap).length) {
         for (const [cat, secId] of Object.entries(catMap)) {
           await apiClient.put('/api/menu-items/bulk-section', {
             category: cat, fulfillment_section: secId,
@@ -1195,10 +1233,12 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
       }
 
       // Persist category slot defaults for web menu "Available Now" logic
-      for (const [cat, slots] of Object.entries(catSlots)) {
-        await apiClient.put(`/api/catalog/menu-categories/${encodeURIComponent(cat)}/slots`, {
-          applicable_slots: normalizeSlots(slots),
-        }).catch(() => {});
+      if (isRest) {
+        for (const [cat, slots] of Object.entries(catSlots)) {
+          await apiClient.put(`/api/catalog/menu-categories/${encodeURIComponent(cat)}/slots`, {
+            applicable_slots: normalizeSlots(slots),
+          }).catch(() => {});
+        }
       }
 
       setSaved(true);
@@ -1442,9 +1482,10 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
         </>
       )}
 
-      {showDelivery && ['food_products', 'retail', 'psl', 'b2b'].includes(form.lob_type) && (
+      {showDelivery && !isRestaurantLob(form.lob_type || lobType) && (
         <>
           <SectionTitle>Shipping &amp; courier</SectionTitle>
+          {/* TODO(jewellery): high-value parcels need insured courier options — not modeled yet */}
           <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 12, lineHeight: 1.5 }}>
             Default is Shiprocket live rates by parcel weight. Switch to your own courier if you have a contracted rate card
             (by weight slab and zone: local, within state, metro, non-metro, special).
@@ -1762,7 +1803,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
         </>
       )}
 
-      {showTakeaway && (
+      {showTakeaway && restaurantLob && (
         <>
       <SectionTitle>Takeaway fulfillment</SectionTitle>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
@@ -1883,6 +1924,8 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
         </>
       )}
 
+      {restaurantLob && (
+      <>
       <SectionTitle>Kitchen workflow</SectionTitle>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
         {WORKFLOWS.map(w => (
@@ -1930,6 +1973,21 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
           <div><Label>Opens</Label><Input type="time" value={form.dinner_start} onChange={v => set('dinner_start', v)} /></div>
           <div><Label>Closes</Label><Input type="time" value={form.dinner_end} onChange={v => set('dinner_end', v)} /></div>
         </div>
+      )}
+      </>
+      )}
+
+      {!restaurantLob && (
+        <>
+          <SectionTitle>Order hours</SectionTitle>
+          <div style={{ fontSize: 12, color: C.textSub, marginBottom: 12, lineHeight: 1.55, padding: '10px 12px', background: C.primaryLight, borderRadius: 8, border: `0.5px solid ${C.primaryBorder}` }}>
+            When customers can place orders via WhatsApp / web cart. Outside these hours they can still browse and schedule for later if scheduled ordering is enabled.
+          </div>
+          <div style={{ ...grid2, margin: '10px 0 16px' }}>
+            <div><Label>Opens</Label><Input type="time" value={form.order_start || '09:00'} onChange={v => set('order_start', v)} /></div>
+            <div><Label>Closes</Label><Input type="time" value={form.order_end || '21:00'} onChange={v => set('order_end', v)} /></div>
+          </div>
+        </>
       )}
 
       <SaveBar onSave={save} loading={saving} saved={saved} />
@@ -2097,7 +2155,7 @@ function validateStaffWhatsApp(raw, role) {
   return null;
 }
 
-function TabStaff({ apiClient, showToast }) {
+function TabStaff({ apiClient, showToast, lobType = 'restaurant' }) {
   const [employees, setEmployees] = useState([]);
   const [roles,     setRoles]     = useState([]);
   const [managerPhone, setManagerPhone] = useState('');
@@ -2238,12 +2296,16 @@ function TabStaff({ apiClient, showToast }) {
     owner:         { bg: '#FEF3C7', color: '#92400E' },
     manager:       { bg: C.primaryLight, color: C.primaryDark },
     kitchen_staff: { bg: '#F0FDF4', color: '#166534' },
+    packing_staff: { bg: '#F0FDF4', color: '#166534' },
+    dispatch_staff:{ bg: '#ECFDF5', color: '#065F46' },
+    sales_staff:   { bg: '#EFF6FF', color: '#1E40AF' },
     captain:       { bg: '#EFF6FF', color: '#1E40AF' },
     waiter:        { bg: '#FDF4FF', color: '#7E22CE' },
     marketing:     { bg: '#FFF7ED', color: '#9A3412' },
   };
 
   const NOTIFY_ROLES = STAFF_NOTIFY_ROLES;
+  const restaurantLob = isRestaurantLob(lobType);
 
   const active     = employees.filter(e => e.is_active);
   const terminated = employees.filter(e => !e.is_active);
@@ -2260,7 +2322,9 @@ function TabStaff({ apiClient, showToast }) {
             {active.length} active · {terminated.length} removed
           </div>
           <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>
-            Captains get takeaway WhatsApp alerts. Managers/owners get ops alerts via Settings → Manager phone plus their Team WhatsApp. Kitchen and wait staff use the kitchen display only.
+            {restaurantLob
+              ? 'Captains get takeaway WhatsApp alerts. Managers/owners get ops alerts via Settings → Manager phone plus their Team WhatsApp. Kitchen and wait staff use the kitchen display only.'
+              : 'Managers/owners get ops alerts via Settings → Manager phone plus their Team WhatsApp. Packing and Dispatch staff use the packing display. Sales staff use the manager portal.'}
           </div>
         </div>
         <Btn onClick={() => setShowForm(s => !s)}>+ Add employee</Btn>
@@ -2306,6 +2370,9 @@ function TabStaff({ apiClient, showToast }) {
                 {{
                   manager:       'Receives ops alerts (with Settings → Manager phone and other active managers)',
                   kitchen_staff: 'Uses kitchen display only — no operational WhatsApp alerts',
+                  packing_staff: 'Uses packing display only — no operational WhatsApp alerts',
+                  dispatch_staff:'Uses packing / dispatch display — no operational WhatsApp alerts',
+                  sales_staff:   'Uses manager portal — no operational WhatsApp alerts',
                   captain:       'Receives: new takeaway assignment + ready-for-pickup alerts',
                   waiter:        'Uses kitchen display only — no operational WhatsApp alerts',
                   marketing:     'Campaigns only — not live operational alerts',
@@ -2443,6 +2510,9 @@ function TabStaff({ apiClient, showToast }) {
                             {{
                               manager:       'Receives ops alerts (Settings → Manager phone + active managers)',
                               kitchen_staff: 'Kitchen display only — no ops WhatsApp',
+                              packing_staff: 'Packing display only — no ops WhatsApp',
+                              dispatch_staff:'Packing / dispatch display — no ops WhatsApp',
+                              sales_staff:   'Manager portal — no ops WhatsApp',
                               captain:       'Receives: takeaway assignment + ready-for-pickup',
                               waiter:        'Kitchen display only — no ops WhatsApp',
                               marketing:     'Campaigns only',
@@ -2476,7 +2546,7 @@ const TABS = [
   { id: 'tables',     label: '🪑 Tables'      },
   { id: 'restaurant', label: '🍽️ Restaurant'  },
   { id: 'services',   label: '🚀 Services'    },
-  { id: 'kitchen',    label: '🍳 Kitchen'     },
+  { id: 'kitchen',    label: '🍳 Kitchen', ordersLabel: '📦 Orders' },
   { id: 'whatsapp',   label: '💬 WhatsApp'    },
   { id: 'staff',      label: '👥 Staff'       },
   // Brand tab — only visible when user is brand_owner (injected below via filteredTabs)
@@ -2674,9 +2744,19 @@ export default function SettingsPanel() {
   const isBrandOwner = user?.role === 'brand_owner';
   const isManagerOnly = user?.role === 'manager';
   const hasAnyPaid = (...fs) => fs.some(f => paidFeatures.includes(f));
-  const [activeTab, setActiveTab] = useState(isManagerOnly ? 'staff' : 'tables');
+  const [lobType, setLobType] = useState('restaurant');
+  const [activeTab, setActiveTab] = useState(isManagerOnly ? 'staff' : 'restaurant');
   const [toast, setToast] = useState({ msg: '', type: 'success' });
   const toastTimer = useRef(null);
+
+  useEffect(() => {
+    apiClient.get('/api/dashboard/waba')
+      .then((r) => {
+        const next = r.data?.restaurant?.lob_type ?? 'restaurant';
+        setLobType(next);
+      })
+      .catch(() => {});
+  }, [apiClient]);
 
   useEffect(() => {
     const tab = searchParams.get('tab');
@@ -2693,12 +2773,18 @@ export default function SettingsPanel() {
     return () => window.clearTimeout(t);
   }, [activeTab]);
 
+  const restaurantLob = isRestaurantLob(lobType);
+
   const filteredTabs = TABS.filter(t => {
     if (isManagerOnly) return t.id === 'staff';
     if (t.brandOnly && !isBrandOwner) return false;
-    if (t.id === 'tables' && !hasAnyPaid(FEATURES.DINE_IN, FEATURES.RESERVE_TABLE)) return false;
+    if (t.id === 'tables' && (!restaurantLob || !hasAnyPaid(FEATURES.DINE_IN, FEATURES.RESERVE_TABLE))) return false;
     return true;
-  });
+  }).map(t => (
+    t.id === 'kitchen' && !restaurantLob
+      ? { ...t, label: t.ordersLabel || '📦 Orders' }
+      : t
+  ));
 
   useEffect(() => {
     if (!isManagerOnly && !filteredTabs.some(t => t.id === activeTab)) {
@@ -2719,11 +2805,11 @@ export default function SettingsPanel() {
 
   const tabContent = {
     tables:     <TabTables     apiClient={apiClient} showToast={showToast} />,
-    restaurant: <TabRestaurant apiClient={apiClient} showToast={showToast} />,
-    services:   <TabServices   apiClient={apiClient} showToast={showToast} refreshSubscription={refreshSubscription} />,
-    kitchen:    <TabKitchen    apiClient={apiClient} showToast={showToast} paidFeatures={paidFeatures} />,
+    restaurant: <TabRestaurant apiClient={apiClient} showToast={showToast} lobType={lobType} />,
+    services:   <TabServices   apiClient={apiClient} showToast={showToast} refreshSubscription={refreshSubscription} lobType={lobType} />,
+    kitchen:    <TabKitchen    apiClient={apiClient} showToast={showToast} paidFeatures={paidFeatures} lobType={lobType} />,
     whatsapp:   <TabWhatsApp   apiClient={apiClient} showToast={showToast} />,
-    staff:      <TabStaff      apiClient={apiClient} showToast={showToast} />,
+    staff:      <TabStaff      apiClient={apiClient} showToast={showToast} lobType={lobType} />,
     brand:      <TabBrand      apiClient={apiClient} showToast={showToast} user={user} />,
   };
 
@@ -2741,7 +2827,7 @@ export default function SettingsPanel() {
         <p style={{ fontSize: 12, color: C.textMuted, margin: '2px 0 0' }}>
           {isManagerOnly
             ? 'Onboard staff and manage WhatsApp numbers for operational alerts'
-            : 'Manage your restaurant configuration'}
+            : 'Manage your business configuration'}
         </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>

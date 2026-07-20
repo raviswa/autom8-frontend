@@ -99,6 +99,9 @@ function AppRoutes() {
       owner: '/dashboard/owner',
       manager: '/dashboard/manager',
       kitchen_staff: '/dashboard/kitchen',
+      packing_staff: '/dashboard/packing',
+      dispatch_staff: '/dashboard/packing',
+      sales_staff: '/dashboard/manager',
       marketing: '/dashboard/marketing',
       captain: '/dashboard/captain',
       waiter: '/dashboard/kitchen',
@@ -193,7 +196,7 @@ function AppRoutes() {
       <Route
         path="/dashboard/manager"
         element={
-          <ProtectedRoute allowedRoles={['manager', 'owner']}>
+          <ProtectedRoute allowedRoles={['manager', 'owner', 'sales_staff']}>
             <ManagerPortal />
           </ProtectedRoute>
         }
@@ -212,7 +215,7 @@ function AppRoutes() {
       <Route
         path="/dashboard/packing"
         element={
-          <ProtectedRoute allowedRoles={['kitchen_staff', 'owner', 'manager']}>
+          <ProtectedRoute allowedRoles={['kitchen_staff', 'packing_staff', 'dispatch_staff', 'owner', 'manager']}>
             {hasAnyOf(FEATURES.DINE_IN, FEATURES.TAKEAWAY, FEATURES.DELIVERY)
               ? <KDSScreen />
               : <FeatureWall feature={FEATURES.DINE_IN} />}
