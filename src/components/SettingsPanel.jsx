@@ -36,6 +36,17 @@ const CARD = {
   padding: '24px',
 };
 
+function ToggleRow({ label, checked, onToggle }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: `0.5px solid ${C.border}` }}>
+      <span style={{ fontSize: 13, color: C.text }}>{label}</span>
+      <div onClick={onToggle} style={{ width: 40, height: 22, borderRadius: 11, cursor: 'pointer', position: 'relative', background: checked ? C.success : C.border, transition: 'background .2s' }}>
+        <div style={{ position: 'absolute', top: 3, left: checked ? 21 : 3, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left .2s' }} />
+      </div>
+    </div>
+  );
+}
+
 // ─── Service options ──────────────────────────────────────────────────────────
 const SERVICES = [
   { id: 'dine_in',        label: 'Dine-In',          icon: '🪑', desc: 'Walk-in table service via WhatsApp' },
@@ -459,6 +470,12 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
         website_url:   d.website_url   ?? d.website ?? '',
         cuisine_type:  d.cuisine_type  ?? '',
         gstin:         d.gstin         ?? '',
+        fssai_license: d.fssai_license ?? '',
+        sac_code:      d.sac_code      ?? '',
+        receipt_tagline: d.receipt_tagline ?? '',
+        daily_settlement_enabled: d.daily_settlement_enabled !== false,
+        weekly_promo_drafts_enabled: d.weekly_promo_drafts_enabled !== false,
+        instagram_handle: d.instagram_handle ?? '',
         logo_url:      d.logo_url      ?? '',
         restaurant_type:   d.restaurant_type ?? 'restaurant',
         lob_type:          d.lob_type ?? 'restaurant',   // ← add this line
@@ -623,6 +640,110 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
         )}
         <div><Label>GSTIN</Label><Input value={form.gstin} onChange={v => set('gstin', v)} placeholder="22AAAAA0000A1Z5" /></div>
       </div>
+      <SectionTitle>Compliance &amp; receipts</SectionTitle>
+      <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 12, lineHeight: 1.4 }}>
+        Printed on WhatsApp receipts{!isRestaurantLob(lobType || form.lob_type) ? ' and shown in the customer cart / packing queue' : ''}.
+        FSSAI is required for packaged food labels in India.
+      </div>
+      <div style={grid2}>
+        <div>
+          <Label>FSSAI licence number</Label>
+          <Input
+            value={form.fssai_license}
+            onChange={v => set('fssai_license', v)}
+            placeholder="12419002004097"
+          />
+        </div>
+        <div>
+          <Label>SAC code</Label>
+          <Input
+            value={form.sac_code}
+            onChange={v => set('sac_code', v)}
+            placeholder={isRestaurantLob(lobType || form.lob_type) ? '996331' : '996511'}
+          />
+        </div>
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <Label>Receipt tagline</Label>
+        <Input
+          value={form.receipt_tagline}
+          onChange={v => set('receipt_tagline', v)}
+          placeholder="Homemade with love · Amma’s Kitchen"
+        />
+      </div>
+
+      {!isRestaurantLob(lobType || form.lob_type) && (
+        <>
+          <SectionTitle>Storefront &amp; sharing</SectionTitle>
+          <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 12, lineHeight: 1.45 }}>
+            Your public shop link works in Instagram bio, WhatsApp Status, and printed QR — Instagram is optional.
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <Label>Storefront URL</Label>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <Input
+                value={(() => {
+                  const slug = String(form.display_name || '')
+                    .toLowerCase()
+                    .replace(/[^a-z0-9]+/g, '-')
+                    .replace(/^-|-$/g, '') || 'shop';
+                  const apiBase = (apiClient?.defaults?.baseURL || window.location.origin || '').replace(/\/$/, '');
+                  return `${apiBase}/shop?slug=${slug}`;
+                })()}
+                onChange={() => {}}
+              />
+              <Btn
+                onClick={() => {
+                  const slug = String(form.display_name || '')
+                    .toLowerCase()
+                    .replace(/[^a-z0-9]+/g, '-')
+                    .replace(/^-|-$/g, '') || 'shop';
+                  const apiBase = (apiClient?.defaults?.baseURL || window.location.origin || '').replace(/\/$/, '');
+                  const url = `${apiBase}/shop?slug=${slug}`;
+                  navigator.clipboard?.writeText(url);
+                  showToast('Storefront link copied');
+                }}
+              >
+                Copy
+              </Btn>
+            </div>
+            {(() => {
+              const slug = String(form.display_name || '')
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/^-|-$/g, '') || 'shop';
+              const apiBase = (apiClient?.defaults?.baseURL || window.location.origin || '').replace(/\/$/, '');
+              const url = `${apiBase}/shop?slug=${slug}`;
+              const qr = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(url)}`;
+              return (
+                <div style={{ marginTop: 12 }}>
+                  <Label>QR for print / Status</Label>
+                  <img src={qr} alt="Storefront QR" width={160} height={160} style={{ display: 'block', borderRadius: 8, border: `0.5px solid ${C.border}` }} />
+                </div>
+              );
+            })()}
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <Label>Instagram handle (optional)</Label>
+            <Input
+              value={form.instagram_handle}
+              onChange={v => set('instagram_handle', v)}
+              placeholder="@ammas.kitchen"
+            />
+          </div>
+          <ToggleRow
+            label="Daily settlement WhatsApp (evening summary)"
+            checked={!!form.daily_settlement_enabled}
+            onToggle={() => set('daily_settlement_enabled', !form.daily_settlement_enabled)}
+          />
+          <ToggleRow
+            label="Weekly promo drafts from top sellers"
+            checked={!!form.weekly_promo_drafts_enabled}
+            onToggle={() => set('weekly_promo_drafts_enabled', !form.weekly_promo_drafts_enabled)}
+          />
+        </>
+      )}
+
       <div style={{ marginTop: 12 }}><Label>Logo URL</Label><Input value={form.logo_url} onChange={v => set('logo_url', v)} placeholder="https://…/logo.png" /></div>
       {form.logo_url && (
         <img src={form.logo_url} alt="Logo preview" style={{ marginTop: 8, height: 48, borderRadius: 6, border: `0.5px solid ${C.border}` }} onError={e => e.target.style.display = 'none'} />
@@ -1062,6 +1183,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
         intra_city_charge: d.intra_city_charge ?? '',
         outstation_charge: d.outstation_charge ?? '',
         free_delivery_above: d.free_delivery_above ?? '',
+        packaging_weight_grams: d.packaging_weight_grams ?? 0,
         cod_enabled_city: !!d.cod_enabled_city,
         cod_enabled_outstation: !!d.cod_enabled_outstation,
       });
@@ -1223,6 +1345,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
         intra_city_charge: parseFloat(form.intra_city_charge) || 0,
         outstation_charge: parseFloat(form.outstation_charge) || 0,
         free_delivery_above: parseFloat(form.free_delivery_above) || 0,
+        packaging_weight_grams: Math.max(0, parseInt(form.packaging_weight_grams, 10) || 0),
         cod_enabled_city: !!form.cod_enabled_city,
         cod_enabled_outstation: !!form.cod_enabled_outstation,
       });
@@ -1253,14 +1376,6 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
   if (!form) return <div style={{ padding: 32, textAlign: 'center' }}><Spinner size={28} /></div>;
 
   const grid2 = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 };
-  const ToggleRow = ({ label, checked, onToggle }) => (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: `0.5px solid ${C.border}` }}>
-      <span style={{ fontSize: 13, color: C.text }}>{label}</span>
-      <div onClick={onToggle} style={{ width: 40, height: 22, borderRadius: 11, cursor: 'pointer', position: 'relative', background: checked ? C.success : C.border, transition: 'background .2s' }}>
-        <div style={{ position: 'absolute', top: 3, left: checked ? 21 : 3, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left .2s' }} />
-      </div>
-    </div>
-  );
 
   return (
     <div>
@@ -1652,6 +1767,18 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
           <div style={{ marginBottom: 12 }}>
             <Label>Free delivery above (₹ cart total, 0 = disabled)</Label>
             <Input value={form.free_delivery_above} onChange={v => set('free_delivery_above', v)} type="number" placeholder="999" />
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <Label>Packaging / tare weight (grams per parcel)</Label>
+            <Input
+              value={form.packaging_weight_grams}
+              onChange={v => set('packaging_weight_grams', v)}
+              type="number"
+              placeholder="50"
+            />
+            <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+              Added to catalog item weights for courier quotes (box, ice pack, padding). Leave 0 if jars already include pack weight.
+            </div>
           </div>
           <ToggleRow
             label="COD enabled — same city"

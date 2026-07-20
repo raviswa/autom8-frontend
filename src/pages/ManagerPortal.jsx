@@ -1172,6 +1172,42 @@ const fetchRestaurantMeta = useCallback(async () => {
     finally { setTogglingId(null); }
   };
 
+  const restockBatch = async (item) => {
+    const raw = window.prompt(
+      item.current_stock != null
+        ? `Add jars to batch for "${item.name}" (current: ${item.current_stock}). Enter number to add:`
+        : `Set batch size for "${item.name}" (enables auto sold-out at zero). Enter starting stock:`,
+      '50',
+    );
+    if (raw == null || raw === '') return;
+    const n = parseInt(raw, 10);
+    if (!Number.isFinite(n) || n <= 0) {
+      showToast('Enter a positive number', 'error');
+      return;
+    }
+    setTogglingId(item.id);
+    try {
+      const body = item.current_stock != null
+        ? { add_qty: n }
+        : { set_qty: n };
+      const res = await apiClient.post(`/api/menu-items/${item.id}/restock`, body);
+      const next = res.data?.current_stock;
+      const notified = res.data?.waitlist_notified || 0;
+      setMenuItems(prev => prev.map(m => m.id === item.id
+        ? { ...m, current_stock: next, is_stocked: next > 0, is_available: next > 0 }
+        : m));
+      showToast(
+        notified
+          ? `${item.name}: ${next} in stock · notified ${notified} waitlist`
+          : `${item.name}: ${next} in stock`,
+      );
+    } catch (err) {
+      showToast(err.response?.data?.error || `Failed to restock ${item.name}`);
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
   const toggleSpecialToday = async (item) => {
     setTogglingSpecialId(item.id);
     const newValue = !item.is_special_today;
@@ -3098,6 +3134,11 @@ const fetchRestaurantMeta = useCallback(async () => {
                             <td style={{ padding: "10px 14px" }}>
                               <span style={{ fontWeight: 500, color: C.text }}>{item.name}</span>
                               {!inStock && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 500, color: C.danger, background: C.dangerLight, padding: "1px 6px", borderRadius: 20 }}>Out of stock</span>}
+                              {item.current_stock != null && (
+                                <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 500, color: C.textSub, background: C.surfaceBg, padding: "1px 6px", borderRadius: 20 }}>
+                                  Batch {item.current_stock}
+                                </span>
+                              )}
                               {isSpecial && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 500, color: '#b45309', background: '#fef3c7', padding: "1px 6px", borderRadius: 20 }}>⭐ Special</span>}
                             </td>
                             <td style={{ padding: "10px 14px" }}>
@@ -3122,6 +3163,15 @@ const fetchRestaurantMeta = useCallback(async () => {
                                 : <span style={{ color: C.textMuted }}>—</span>}
                             </td>
                             <td style={{ padding: "10px 14px", textAlign: "right" }}>
+                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                              <button onClick={() => restockBatch(item)} disabled={isToggle}
+                                title="Add / set batch stock"
+                                style={{
+                                  fontSize: 10, fontWeight: 600, padding: '4px 8px', borderRadius: 8,
+                                  border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.textSub, cursor: 'pointer',
+                                }}>
+                                + Batch
+                              </button>
                               <button onClick={() => toggleAvailability(item)} disabled={isToggle}
                                 title={inStock ? 'In stock — tap to mark out of stock' : 'Out of stock — tap to mark in stock'}
                                 style={{
@@ -3133,6 +3183,7 @@ const fetchRestaurantMeta = useCallback(async () => {
                                   ? <Spinner size={12} />
                                   : <span style={{ position: "absolute", top: 3, left: inStock ? 19 : 3, width: 14, height: 14, borderRadius: "50%", background: "#fff", transition: "left .2s" }} />}
                               </button>
+                              </div>
                             </td>
                             <td style={{ padding: "10px 14px", textAlign: "right" }}>
                               <button onClick={() => toggleSpecialToday(item)} disabled={isSpecialToggle}

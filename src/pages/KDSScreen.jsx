@@ -468,6 +468,84 @@ function groupItemsByOrder(items) {
   }).sort((a, b) => new Date(toUTC(b.createdAt)) - new Date(toUTC(a.createdAt)));
 }
 
+function skuKeyFromItem(item) {
+  const mi = item.order_item?.menu_item;
+  const name = mi?.name || item.item_name || 'Item';
+  const pack = mi?.pack_size_label || mi?.size_label || '';
+  const rid = mi?.retailer_id || '';
+  return rid || `${name}::${pack}`;
+}
+
+function skuLabelFromItem(item) {
+  const mi = item.order_item?.menu_item;
+  const name = mi?.name || item.item_name || 'Item';
+  const pack = mi?.pack_size_label || mi?.size_label || '';
+  return pack ? `${name} · ${pack}` : name;
+}
+
+/** Aggregate open packing lines by SKU for batch jar/pack workflows. */
+function groupItemsBySku(items) {
+  const map = new Map();
+  for (const item of items) {
+    if (!['pending', 'in_progress', 'ready'].includes(item.status)) continue;
+    const key = skuKeyFromItem(item);
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        label: skuLabelFromItem(item),
+        retailerId: item.order_item?.menu_item?.retailer_id || null,
+        weightGrams: item.order_item?.menu_item?.weight_grams || null,
+        items: [],
+        totalQty: 0,
+      });
+    }
+    const row = map.get(key);
+    row.items.push(item);
+    row.totalQty += Number(item.order_item?.quantity ?? 1) || 1;
+  }
+  return [...map.values()].sort((a, b) => b.totalQty - a.totalQty || a.label.localeCompare(b.label));
+}
+
+function SkuPackCard({ group, onAdvanceAll }) {
+  const pending = group.items.filter((i) => i.status === 'pending');
+  const packing = group.items.filter((i) => i.status === 'in_progress');
+  const ready = group.items.filter((i) => i.status === 'ready');
+  const actionable = pending.length ? pending : packing;
+  const orderHints = [...new Set(
+    group.items.map((i) => formatTokenDisplay(i.token_number) || i.order_item?.order?.order_number?.slice(-6)).filter(Boolean),
+  )].slice(0, 8);
+
+  let actionLabel = 'All packed';
+  if (pending.length) actionLabel = `Pack all (${group.totalQty})`;
+  else if (packing.length) actionLabel = `Mark all packed (${packing.length})`;
+
+  return (
+    <div className={`kds-sku-card status-${pending.length ? 'pending' : packing.length ? 'in_progress' : 'ready'}`}>
+      <div className="kds-sku-head">
+        <div>
+          <p className="kds-sku-qty">{group.totalQty}×</p>
+          <p className="kds-sku-name">{group.label}</p>
+          {group.retailerId && <p className="kds-sku-meta">SKU {group.retailerId}</p>}
+          {group.weightGrams ? <p className="kds-sku-meta">{group.weightGrams} g each</p> : null}
+        </div>
+        <button
+          type="button"
+          className="kds-ticket-btn kds-ticket-btn-checkall"
+          disabled={!actionable.length}
+          onClick={() => onAdvanceAll(actionable)}
+        >
+          {actionLabel}
+        </button>
+      </div>
+      <div className="kds-sku-orders">
+        Across {group.items.length} line{group.items.length === 1 ? '' : 's'}
+        {orderHints.length ? ` · ${orderHints.join(', ')}${orderHints.length >= 8 ? '…' : ''}` : ''}
+        {ready.length ? ` · ${ready.length} already packed` : ''}
+      </div>
+    </div>
+  );
+}
+
 // ─── Order ticket (grouped by table / order) ─────────────────────────────────
 
 function OrderItemRow({ item, onAdvance, onVoid, packingMode = false }) {
@@ -850,6 +928,8 @@ export default function KDSScreen() {
   const [loading,  setLoading]    = useState(true);
   const [filter,   setFilter]     = useState('all');
   const [view,     setView]       = useState('live');
+  const [packingLayout, setPackingLayout] = useState('sku'); // orders | sku
+  const [compliance, setCompliance] = useState(null);
   const [sound,    setSound]      = useState(true);
   const [printMsg, setPrintMsg]   = useState('');   // transient "Printing KOT…" toast
 
@@ -898,7 +978,27 @@ const fetchFeed = useCallback(async () => {
     setLoading(true);
     setFilter('all');
     setView('live');
-  }, [queue]);
+    if (packingMode) setPackingLayout('sku');
+  }, [queue, packingMode]);
+
+  useEffect(() => {
+    if (!packingMode) return undefined;
+    let cancelled = false;
+    apiClient.get('/api/dashboard/waba')
+      .then((r) => {
+        if (cancelled) return;
+        const d = r.data?.restaurant || {};
+        setCompliance({
+          fssai: d.fssai_license || '',
+          gstin: d.gstin || '',
+          tagline: d.receipt_tagline || '',
+          name: d.display_name || d.name || '',
+          lobType: d.lob_type || 'restaurant',
+        });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [apiClient, packingMode]);
 
   useEffect(() => {
     fetchFeed();
@@ -1020,6 +1120,12 @@ const fetchFeed = useCallback(async () => {
     ? allActiveOrders
     : allOrders.filter((o) => o.items.some((i) => i.status === filter));
 
+  const skuGroups = groupItemsBySku(
+    filter === 'all'
+      ? liveItems.filter((i) => i.status !== 'ready')
+      : filterItems(filter),
+  );
+
   const counts = {
     all:         allActiveCount,
     pending:     filterItems('pending').length,
@@ -1101,10 +1207,42 @@ const fetchFeed = useCallback(async () => {
                   onClick={() => setView('history')}
                 >History</button>
               </div>
+              {packingMode && (
+                <a
+                  className="kds-ribbon-chip"
+                  href={`/api/dashboard/packing-slips/today`}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={(e) => {
+                    const token = localStorage.getItem('authToken');
+                    if (!token) return;
+                    e.preventDefault();
+                    fetch('/api/dashboard/packing-slips/today', {
+                      headers: { Authorization: `Bearer ${token}` },
+                    })
+                      .then(async (r) => {
+                        if (!r.ok) {
+                          const err = await r.json().catch(() => ({}));
+                          throw new Error(err.error || 'No slips today');
+                        }
+                        return r.blob();
+                      })
+                      .then((blob) => {
+                        const url = URL.createObjectURL(blob);
+                        window.open(url, '_blank');
+                      })
+                      .catch((err) => alert(err.message || 'Could not open packing slips'));
+                  }}
+                >
+                  Today’s slips
+                </a>
+              )}
               {packingMode ? (
-                <Link to="/dashboard/kitchen" className="kds-ribbon-chip">
-                  ← Kitchen
-                </Link>
+                !['food_products', 'retail', 'b2b', 'psl'].includes(String(compliance?.lobType || '').toLowerCase()) && (
+                  <Link to="/dashboard/kitchen" className="kds-ribbon-chip">
+                    ← Kitchen
+                  </Link>
+                )
               ) : (
                 <Link to="/dashboard/kitchen?station=packing" className="kds-ribbon-chip">
                   Packing →
@@ -1175,13 +1313,45 @@ const fetchFeed = useCallback(async () => {
                   <span className="pill-count">{counts[key]}</span>
                 </button>
               ))}
+              {packingMode && (
+                <div className="kds-layout-toggle">
+                  <button
+                    type="button"
+                    className={`kds-filter-pill ${packingLayout === 'sku' ? 'pill-active' : ''}`}
+                    onClick={() => setPackingLayout('sku')}
+                  >By SKU</button>
+                  <button
+                    type="button"
+                    className={`kds-filter-pill ${packingLayout === 'orders' ? 'pill-active' : ''}`}
+                    onClick={() => setPackingLayout('orders')}
+                  >By order</button>
+                </div>
+              )}
               <span className="kds-sort-hint">
-                {displayOrders.length} order{displayOrders.length === 1 ? '' : 's'} · newest first
+                {packingMode && packingLayout === 'sku'
+                  ? `${skuGroups.length} SKU${skuGroups.length === 1 ? '' : 's'} · batch pack`
+                  : `${displayOrders.length} order${displayOrders.length === 1 ? '' : 's'} · newest first`}
               </span>
             </div>
 
             <div className="kds-board">
-              {displayOrders.length === 0 ? (
+              {packingMode && packingLayout === 'sku' ? (
+                skuGroups.length === 0 ? (
+                  <div className="kds-empty">
+                    <p className="kds-empty-icon">😎</p>
+                    <p>{filter === 'all' ? 'No active packs right now' : `No ${filter.replace('_', ' ')} lines`}</p>
+                    <p className="kds-empty-sub">Packing counter is caught up</p>
+                  </div>
+                ) : (
+                  skuGroups.map((group) => (
+                    <SkuPackCard
+                      key={group.key}
+                      group={group}
+                      onAdvanceAll={advanceAllInOrder}
+                    />
+                  ))
+                )
+              ) : displayOrders.length === 0 ? (
                 <div className="kds-empty">
                   <p className="kds-empty-icon">😎</p>
                   <p>{filter === 'all' ? 'No active orders right now' : `No ${filter.replace('_', ' ')} orders`}</p>
@@ -1201,6 +1371,15 @@ const fetchFeed = useCallback(async () => {
                 ))
               )}
             </div>
+
+            {packingMode && compliance && (compliance.fssai || compliance.gstin || compliance.tagline) && (
+              <div className="kds-compliance-bar">
+                {compliance.name ? <strong>{compliance.name}</strong> : null}
+                {compliance.fssai ? <span>FSSAI {compliance.fssai}</span> : null}
+                {compliance.gstin ? <span>GSTIN {compliance.gstin}</span> : null}
+                {compliance.tagline ? <span>{compliance.tagline}</span> : null}
+              </div>
+            )}
           </div>
         )}
 
@@ -1365,6 +1544,43 @@ const KDS_CSS = `
   .kds-empty-icon { font-size: 44px; }
   .kds-empty p   { font-size: 16px; color: #555; }
   .kds-empty-sub { font-size: 13px; color: #383838; }
+
+  .kds-layout-toggle {
+    display: flex; gap: 4px; margin-left: 8px;
+    padding-left: 10px; border-left: 1px solid #333;
+  }
+  .kds-sku-card {
+    background: #111; border-radius: 12px; overflow: hidden;
+    border: 3px solid #2a2a2a; padding: 14px 16px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.45);
+  }
+  .kds-sku-card.status-pending     { border-color: #ef4444; }
+  .kds-sku-card.status-in_progress { border-color: #f97316; }
+  .kds-sku-card.status-ready       { border-color: #22c55e; }
+  .kds-sku-head {
+    display: flex; justify-content: space-between; gap: 12px; align-items: flex-start;
+  }
+  .kds-sku-qty {
+    margin: 0; font-size: 28px; font-weight: 800; color: #fbbf24; line-height: 1;
+  }
+  .kds-sku-name {
+    margin: 6px 0 0; font-size: 16px; font-weight: 700; color: #f3f4f6;
+  }
+  .kds-sku-meta {
+    margin: 4px 0 0; font-size: 11px; color: #9ca3af;
+  }
+  .kds-sku-orders {
+    margin-top: 12px; font-size: 12px; color: #9ca3af; line-height: 1.4;
+  }
+  .kds-compliance-bar {
+    flex-shrink: 0;
+    display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center;
+    padding: 8px 20px 12px;
+    border-top: 1px solid #2a2a2a;
+    background: #0a0a0a;
+    font-size: 11px; color: #9ca3af;
+  }
+  .kds-compliance-bar strong { color: #e5e7eb; font-weight: 600; }
 
   /* Order ticket — grouped by table / order (reference KDS layout) */
   .kds-ticket {
