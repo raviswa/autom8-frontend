@@ -909,6 +909,57 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
     { max_km: 12, charge: 50 },
     { max_km: '', charge: 60 },
   ];
+
+  const COURIER_ZONES = [
+    { id: 'local', label: 'Local' },
+    { id: 'within_state', label: 'Within state' },
+    { id: 'metro', label: 'Metro' },
+    { id: 'rest_of_india', label: 'Non-metro' },
+    { id: 'special', label: 'Special' },
+  ];
+  const DEFAULT_SLABS = [0.5, 1, 2, 5];
+
+  function normalizeCourierRateCard(raw) {
+    const rates = {};
+    const slabs = Array.isArray(raw?.weight_slabs_kg) && raw.weight_slabs_kg.length
+      ? raw.weight_slabs_kg.map(Number).filter((n) => n > 0)
+      : DEFAULT_SLABS;
+    for (const slab of slabs) {
+      const key = String(slab);
+      const src = raw?.rates?.[key] || raw?.rates?.[slab] || {};
+      rates[key] = {};
+      for (const z of COURIER_ZONES) {
+        const v = src[z.id];
+        rates[key][z.id] = v === 0 || v ? String(v) : '';
+      }
+    }
+    const additional_per_kg = {};
+    for (const z of COURIER_ZONES) {
+      const v = raw?.additional_per_kg?.[z.id];
+      additional_per_kg[z.id] = v === 0 || v ? String(v) : '';
+    }
+    return { weight_slabs_kg: slabs, rates, additional_per_kg };
+  }
+
+  function serializeCourierRateCard(card) {
+    const slabs = (card?.weight_slabs_kg || DEFAULT_SLABS).map(Number).filter((n) => n > 0);
+    const rates = {};
+    for (const slab of slabs) {
+      const key = String(slab);
+      rates[key] = {};
+      for (const z of COURIER_ZONES) {
+        const v = parseFloat(card?.rates?.[key]?.[z.id]);
+        rates[key][z.id] = Number.isFinite(v) && v >= 0 ? v : null;
+      }
+    }
+    const additional_per_kg = {};
+    for (const z of COURIER_ZONES) {
+      const v = parseFloat(card?.additional_per_kg?.[z.id]);
+      additional_per_kg[z.id] = Number.isFinite(v) && v >= 0 ? v : null;
+    }
+    return { weight_slabs_kg: slabs, rates, additional_per_kg };
+  }
+
   const [form,      setForm]      = useState(null);
   const [saving,    setSaving]    = useState(false);
   const [saved,     setSaved]     = useState(false);
@@ -918,6 +969,25 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
   const [catSlots,  setCatSlots]  = useState({});    // { categoryName: ['tiffin',..] }
   const [menuCats,  setMenuCats]  = useState([]);    // distinct categories from menu_items
   const [newSecName, setNewSecName] = useState('');
+  
+  const COMPARE_DEST_PRESETS = [
+    { label: 'Chennai', pincode: '600001' },
+    { label: 'Bengaluru', pincode: '560001' },
+    { label: 'Mumbai', pincode: '400001' },
+    { label: 'Delhi', pincode: '110001' },
+    { label: 'Hyderabad', pincode: '500001' },
+    { label: 'Kolkata', pincode: '700001' },
+    { label: 'Jaipur', pincode: '302001' },
+    { label: 'Guwahati', pincode: '781001' },
+  ];
+  const [compareWeights, setCompareWeights] = useState(['0.5', '1', '2']);
+  const [compareDestPins, setCompareDestPins] = useState(['560001', '110001', '302001']);
+  const [compareCustomPin, setCompareCustomPin] = useState('');
+  const [compareCustomLabel, setCompareCustomLabel] = useState('');
+  const [compareCustomLabels, setCompareCustomLabels] = useState({});
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [compareRows, setCompareRows] = useState(null);
+  const [compareError, setCompareError] = useState('');
 
   useEffect(() => {
     Promise.all([
@@ -959,6 +1029,9 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
         dinner_start: d.opening_hours?.dinner_start ?? '19:00',
         dinner_end:   d.opening_hours?.dinner_end   ?? '23:00',
         lob_type: d.lob_type ?? 'restaurant',
+        shipping_provider: d.shipping_provider === 'custom' ? 'custom' : 'shiprocket',
+        courier_name: d.courier_name ?? '',
+        courier_rate_card: normalizeCourierRateCard(d.courier_rate_card),
         shiprocket_connected: !!d.shiprocket_connected,
         shiprocket_api_key: '',
         shiprocket_has_key: !!d.shiprocket_connected,
@@ -996,6 +1069,68 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
   }, [apiClient, showToast]);
 
   const set = (k, v) => { setSaved(false); setForm(p => ({ ...p, [k]: v })); };
+
+  const toggleCompareDest = (pincode) => {
+    setCompareDestPins((prev) => (
+      prev.includes(pincode) ? prev.filter((p) => p !== pincode) : [...prev, pincode].slice(0, 8)
+    ));
+  };
+
+  const addCustomCompareDest = () => {
+    const pin = String(compareCustomPin || '').replace(/\D/g, '').slice(0, 6);
+    if (pin.length !== 6) {
+      showToast('Enter a valid 6-digit pincode', 'error');
+      return;
+    }
+    setCompareDestPins((prev) => (prev.includes(pin) ? prev : [...prev, pin].slice(0, 8)));
+    const label = compareCustomLabel.trim();
+    if (label) {
+      setCompareCustomLabels((prev) => ({ ...prev, [pin]: label }));
+    }
+    setCompareCustomPin('');
+    setCompareCustomLabel('');
+  };
+
+  const runShippingCompare = async () => {
+    setCompareLoading(true);
+    setCompareError('');
+    setCompareRows(null);
+    try {
+      const weights = compareWeights
+        .map((w) => parseFloat(w))
+        .filter((w) => Number.isFinite(w) && w > 0);
+      if (!weights.length) {
+        showToast('Add at least one weight (kg)', 'error');
+        return;
+      }
+      if (!compareDestPins.length) {
+        showToast('Pick at least one destination city / pincode', 'error');
+        return;
+      }
+      const destinations = compareDestPins.map((pin) => {
+        const preset = COMPARE_DEST_PRESETS.find((d) => d.pincode === pin);
+        return {
+          pincode: pin,
+          label: preset?.label || compareCustomLabels[pin] || pin,
+        };
+      });
+      const res = await apiClient.post('/api/restaurants/shipping-rate-compare', {
+        weights,
+        destinations,
+        courier_name: form.courier_name || 'Your courier',
+        courier_rate_card: serializeCourierRateCard(form.courier_rate_card),
+        ...(form.shiprocket_api_key?.trim() ? { shiprocket_api_key: form.shiprocket_api_key.trim() } : {}),
+      });
+      setCompareRows(res.data.rows || []);
+      if (!res.data.shiprocket_available) {
+        setCompareError('Shiprocket token missing — showing your courier rates only. Paste a token above (or save one) to compare live prices.');
+      }
+    } catch (e) {
+      setCompareError(e.response?.data?.error || e.message || 'Compare failed');
+    } finally {
+      setCompareLoading(false);
+    }
+  };
 
   const addSection = () => {
     const name = newSecName.trim();
@@ -1039,7 +1174,10 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
           snacks: form.has_snacks, snacks_start: form.snacks_start, snacks_end: form.snacks_end,
           dinner: form.has_dinner, dinner_start: form.dinner_start, dinner_end: form.dinner_end,
         },
-        shiprocket_connected: !!form.shiprocket_connected,
+        shipping_provider: form.shipping_provider === 'custom' ? 'custom' : 'shiprocket',
+        courier_name: (form.courier_name || '').trim() || null,
+        courier_rate_card: serializeCourierRateCard(form.courier_rate_card),
+        shiprocket_connected: form.shipping_provider !== 'custom' && (!!form.shiprocket_connected || !!form.shiprocket_api_key?.trim() || !!form.shiprocket_has_key),
         ...(form.shiprocket_api_key?.trim() ? { shiprocket_api_key: form.shiprocket_api_key.trim() } : {}),
         intra_city_charge: parseFloat(form.intra_city_charge) || 0,
         outstation_charge: parseFloat(form.outstation_charge) || 0,
@@ -1306,16 +1444,44 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
 
       {showDelivery && ['food_products', 'retail', 'psl', 'b2b'].includes(form.lob_type) && (
         <>
-          <SectionTitle>Outstation shipping</SectionTitle>
+          <SectionTitle>Shipping &amp; courier</SectionTitle>
           <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 12, lineHeight: 1.5 }}>
-            Pincode-based delivery: same-city uses intra-city charge; other pincodes use Shiprocket rates when connected, otherwise the flat outstation charge.
+            Default is Shiprocket live rates by parcel weight. Switch to your own courier if you have a contracted rate card
+            (by weight slab and zone: local, within state, metro, non-metro, special).
           </div>
-          <ToggleRow
-            label="Shiprocket connected (auto rates for outstation)"
-            checked={form.shiprocket_connected}
-            onToggle={() => set('shiprocket_connected', !form.shiprocket_connected)}
-          />
-          {form.shiprocket_connected && (
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+            {[
+              {
+                value: 'shiprocket',
+                label: 'Shiprocket (default)',
+                desc: 'Live courier rates from your Shiprocket account for outstation parcels.',
+              },
+              {
+                value: 'custom',
+                label: 'My courier rates',
+                desc: 'Enter your partner courier’s rate card by weight and zone.',
+              },
+            ].map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => set('shipping_provider', opt.value)}
+                style={{
+                  padding: 14, borderRadius: 10, cursor: 'pointer', textAlign: 'left',
+                  background: form.shipping_provider === opt.value ? C.primaryLight : C.cardBg,
+                  border: `0.5px solid ${form.shipping_provider === opt.value ? C.primary : C.border}`,
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 600, color: form.shipping_provider === opt.value ? C.primaryDark : C.text, marginBottom: 4 }}>
+                  {form.shipping_provider === opt.value ? '◉ ' : '○ '}{opt.label}
+                </div>
+                <div style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.45 }}>{opt.desc}</div>
+              </button>
+            ))}
+          </div>
+
+          {form.shipping_provider !== 'custom' ? (
             <div style={{ marginBottom: 12 }}>
               <Label>Shiprocket API token</Label>
               <Input
@@ -1324,16 +1490,97 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
                 type="password"
                 placeholder={form.shiprocket_has_key ? 'Saved — enter only to replace' : 'Paste Shiprocket API token'}
               />
+              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+                Same-city still uses the intra-city charge below. Outstation uses Shiprocket when a token is saved; otherwise the flat outstation charge.
+              </div>
             </div>
+          ) : (
+            <>
+              <div style={{ marginBottom: 12 }}>
+                <Label>Courier name</Label>
+                <Input
+                  value={form.courier_name}
+                  onChange={v => set('courier_name', v)}
+                  placeholder="e.g. XXX Couriers"
+                />
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', marginBottom: 8 }}>
+                Rate card (₹) — weight × zone
+              </div>
+              <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 10, lineHeight: 1.5 }}>
+                Local = same city · Within state · Metro = metro-to-metro · Non-metro = rest of India · Special = NE / J&amp;K / islands.
+                Above the heaviest slab, “extra per kg” is added.
+              </div>
+              <div style={{ overflowX: 'auto', marginBottom: 12 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 560 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: 'left', padding: '6px 4px', borderBottom: `0.5px solid ${C.border}`, color: C.textMuted }}>Up to (kg)</th>
+                      {COURIER_ZONES.map((z) => (
+                        <th key={z.id} style={{ textAlign: 'left', padding: '6px 4px', borderBottom: `0.5px solid ${C.border}`, color: C.textMuted }}>{z.label}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(form.courier_rate_card?.weight_slabs_kg || DEFAULT_SLABS).map((slab) => {
+                      const key = String(slab);
+                      return (
+                        <tr key={key}>
+                          <td style={{ padding: '6px 4px', borderBottom: `0.5px solid ${C.border}`, fontWeight: 600 }}>{slab}</td>
+                          {COURIER_ZONES.map((z) => (
+                            <td key={z.id} style={{ padding: '4px', borderBottom: `0.5px solid ${C.border}` }}>
+                              <Input
+                                value={form.courier_rate_card?.rates?.[key]?.[z.id] ?? ''}
+                                onChange={(v) => {
+                                  const card = normalizeCourierRateCard(form.courier_rate_card);
+                                  card.rates[key] = { ...(card.rates[key] || {}), [z.id]: v };
+                                  set('courier_rate_card', card);
+                                }}
+                                type="number"
+                                placeholder="—"
+                              />
+                            </td>
+                          ))}
+                        </tr>
+                      );
+                    })}
+                    <tr>
+                      <td style={{ padding: '6px 4px', fontWeight: 600 }}>Extra / kg</td>
+                      {COURIER_ZONES.map((z) => (
+                        <td key={z.id} style={{ padding: '4px' }}>
+                          <Input
+                            value={form.courier_rate_card?.additional_per_kg?.[z.id] ?? ''}
+                            onChange={(v) => {
+                              const card = normalizeCourierRateCard(form.courier_rate_card);
+                              card.additional_per_kg = { ...(card.additional_per_kg || {}), [z.id]: v };
+                              set('courier_rate_card', card);
+                            }}
+                            type="number"
+                            placeholder="—"
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
+
           <div style={grid2}>
             <div>
-              <Label>Intra-city charge (₹)</Label>
+              <Label>Intra-city fallback (₹)</Label>
               <Input value={form.intra_city_charge} onChange={v => set('intra_city_charge', v)} type="number" placeholder="49" />
+              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+                Used for same-city with Shiprocket, or if a Local rate is blank on a custom card.
+              </div>
             </div>
             <div>
-              <Label>Outstation flat charge (₹)</Label>
+              <Label>Outstation fallback (₹)</Label>
               <Input value={form.outstation_charge} onChange={v => set('outstation_charge', v)} type="number" placeholder="99" />
+              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+                Used when Shiprocket is unavailable or a zone rate is blank.
+              </div>
             </div>
           </div>
           <div style={{ marginBottom: 12 }}>
@@ -1350,6 +1597,168 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [] }) {
             checked={form.cod_enabled_outstation}
             onToggle={() => set('cod_enabled_outstation', !form.cod_enabled_outstation)}
           />
+
+          <SectionTitle>Rate compare tool</SectionTitle>
+          <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 12, lineHeight: 1.5 }}>
+            Compare live Shiprocket courier quotes with your rate card for the same weight and destination.
+            Uses your draft rates below (save when you are happy with the card).
+          </div>
+
+          <div style={{ marginBottom: 10 }}>
+            <Label>Parcel weights (kg)</Label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+              {['0.5', '1', '1.1', '2', '5'].map((w) => {
+                const on = compareWeights.includes(w);
+                return (
+                  <button
+                    key={w}
+                    type="button"
+                    onClick={() => setCompareWeights((prev) => (
+                      on ? prev.filter((x) => x !== w) : [...prev, w]
+                    ))}
+                    style={{
+                      padding: '6px 12px', borderRadius: 999, cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                      border: `0.5px solid ${on ? C.primary : C.border}`,
+                      background: on ? C.primaryLight : C.cardBg,
+                      color: on ? C.primaryDark : C.textSub,
+                    }}
+                  >
+                    {w} kg
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 10 }}>
+            <Label>Destination cities</Label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+              {COMPARE_DEST_PRESETS.map((d) => {
+                const on = compareDestPins.includes(d.pincode);
+                return (
+                  <button
+                    key={d.pincode}
+                    type="button"
+                    onClick={() => toggleCompareDest(d.pincode)}
+                    style={{
+                      padding: '6px 12px', borderRadius: 999, cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                      border: `0.5px solid ${on ? C.primary : C.border}`,
+                      background: on ? C.primaryLight : C.cardBg,
+                      color: on ? C.primaryDark : C.textSub,
+                    }}
+                  >
+                    {d.label}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ ...grid2, marginTop: 10, alignItems: 'end' }}>
+              <div>
+                <Label>Custom pincode</Label>
+                <Input value={compareCustomPin} onChange={setCompareCustomPin} placeholder="411001" />
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                <div style={{ flex: 1 }}>
+                  <Label>Label (optional)</Label>
+                  <Input value={compareCustomLabel} onChange={setCompareCustomLabel} placeholder="Pune" />
+                </div>
+                <button
+                  type="button"
+                  onClick={addCustomCompareDest}
+                  style={{
+                    padding: '10px 14px', marginBottom: 2, borderRadius: 8, cursor: 'pointer',
+                    border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.primary,
+                    fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
+                  }}
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+            {compareDestPins.some((p) => !COMPARE_DEST_PRESETS.find((d) => d.pincode === p)) && (
+              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 6 }}>
+                Custom: {compareDestPins.filter((p) => !COMPARE_DEST_PRESETS.find((d) => d.pincode === p)).join(', ')}
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={runShippingCompare}
+            disabled={compareLoading}
+            style={{
+              padding: '10px 16px', marginBottom: 12, borderRadius: 8, cursor: compareLoading ? 'wait' : 'pointer',
+              border: 'none', background: C.primary, color: '#fff',
+              fontSize: 13, fontWeight: 700, opacity: compareLoading ? 0.7 : 1,
+            }}
+          >
+            {compareLoading ? 'Comparing…' : 'Compare Shiprocket vs my courier'}
+          </button>
+
+          {compareError && (
+            <div style={{
+              fontSize: 12, color: C.warningDark, marginBottom: 10, lineHeight: 1.5,
+              padding: '10px 12px', background: C.warningLight, borderRadius: 8,
+              border: `0.5px solid ${C.warningBorder}`,
+            }}>
+              {compareError}
+            </div>
+          )}
+
+          {Array.isArray(compareRows) && compareRows.length > 0 && (
+            <div style={{ overflowX: 'auto', marginBottom: 8 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 720 }}>
+                <thead>
+                  <tr>
+                    {['Destination', 'Zone', 'Weight', 'Shiprocket best', 'Top Shiprocket couriers', form.courier_name?.trim() || 'Your courier', 'Diff'].map((h) => (
+                      <th key={h} style={{ textAlign: 'left', padding: '8px 6px', borderBottom: `0.5px solid ${C.border}`, color: C.textMuted, fontWeight: 600 }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {compareRows.map((row, i) => {
+                    const diffText = row.diff == null
+                      ? '—'
+                      : row.diff === 0
+                        ? 'Same'
+                        : row.diff < 0
+                          ? `Yours cheaper by ₹${Math.abs(row.diff)}`
+                          : `Shiprocket cheaper by ₹${row.diff}`;
+                    const diffColor = row.cheaper === 'yours' ? C.successDark
+                      : row.cheaper === 'shiprocket' ? C.dangerDark
+                        : C.textSub;
+                    return (
+                      <tr key={`${row.pincode}-${row.weight_kg}-${i}`}>
+                        <td style={{ padding: '8px 6px', borderBottom: `0.5px solid ${C.border}` }}>
+                          <div style={{ fontWeight: 600 }}>{row.destination}</div>
+                          <div style={{ fontSize: 11, color: C.textMuted }}>{row.pincode}</div>
+                        </td>
+                        <td style={{ padding: '8px 6px', borderBottom: `0.5px solid ${C.border}` }}>{row.zone_label}</td>
+                        <td style={{ padding: '8px 6px', borderBottom: `0.5px solid ${C.border}` }}>{row.weight_kg} kg</td>
+                        <td style={{ padding: '8px 6px', borderBottom: `0.5px solid ${C.border}`, fontWeight: 700 }}>
+                          {row.shiprocket_cheapest != null ? `₹${row.shiprocket_cheapest}` : '—'}
+                          {row.shiprocket_error && !row.shiprocket_cheapest && (
+                            <div style={{ fontSize: 10, color: C.textMuted, fontWeight: 400, maxWidth: 140 }}>{row.shiprocket_error}</div>
+                          )}
+                        </td>
+                        <td style={{ padding: '8px 6px', borderBottom: `0.5px solid ${C.border}`, color: C.textSub }}>
+                          {(row.shiprocket_couriers || []).length
+                            ? row.shiprocket_couriers.slice(0, 3).map((c) => `${c.name} ₹${c.rate}`).join(' · ')
+                            : '—'}
+                        </td>
+                        <td style={{ padding: '8px 6px', borderBottom: `0.5px solid ${C.border}`, fontWeight: 700 }}>
+                          {row.your_rate != null ? `₹${row.your_rate}` : '—'}
+                        </td>
+                        <td style={{ padding: '8px 6px', borderBottom: `0.5px solid ${C.border}`, color: diffColor, fontWeight: 600 }}>
+                          {diffText}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </>
       )}
 
