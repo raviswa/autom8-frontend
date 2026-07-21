@@ -713,6 +713,15 @@ const fetchRestaurantMeta = useCallback(async () => {
     return () => { clearInterval(full); clearInterval(quick); };
   }, [fetchData, fetchTokens, fetchTables, fetchOrders, fetchKdsFeed, fetchScheduledBoard]);
 
+  // Packaged LOBs should not land on the restaurant queue/floor tab.
+  useEffect(() => {
+    const packaged = ['food_products', 'retail', 'psl', 'b2b'].includes(String(lobType || '').toLowerCase());
+    if (!packaged) return;
+    if (activeTab === 'queue' || activeTab === 'tables') {
+      setActiveTab('orders');
+    }
+  }, [lobType, activeTab]);
+
   useEffect(() => {
     const latest = updates[0];
     if (!latest) return;
@@ -819,7 +828,7 @@ const fetchRestaurantMeta = useCallback(async () => {
   const normTokens         = tokens.map(normaliseToken);
   const waitingTokens      = normTokens.filter(t => t.status === 'waiting');
   const seatedTokens       = normTokens.filter(t => t.status === 'seated');
-  const takeawayTokens     = normTokens.filter(t => t.status === 'takeaway');
+  const takeawayTokens     = normTokens.filter(t => t.status === 'takeaway' || t.status === 'delivery');
   const pendingApprTokens  = normTokens.filter(t => t.status === 'pending_approval');
   const pendingScheduledApprTokens = pendingApprTokens.filter(t =>
     t.type === 'scheduled_delivery' || t.type === 'scheduled_takeaway'
@@ -837,6 +846,9 @@ const fetchRestaurantMeta = useCallback(async () => {
   const scheduledTabCount = pendingScheduledApprTokens.length + scheduledTakeawayTokens.length
     + scheduledDeliveryTokens.length + scheduledPrepOrders.length;
   const activeKdsItems = kdsItems.filter(i => ['pending', 'in_progress', 'ready'].includes(i.status));
+
+  const isPackagedLob = ['food_products', 'retail', 'psl', 'b2b'].includes(String(lobType || '').toLowerCase());
+  const openShipmentCount = liveTakeawayTokens.length + liveDeliveryTokens.length;
   const freeTablesCount    = tables.filter(t => getTableStatus(t).status === 'available').length;
 
   const showMenuSlotColumn = menuSlotsAreMeaningful(menuItems);
@@ -1808,7 +1820,9 @@ const fetchRestaurantMeta = useCallback(async () => {
       {/* ── Header ───────────────────────────────────────────────────────── */}
 <BrandHeader
   title="Manager portal"
-  subtitle="Manage tables, orders and kitchen operations"
+  subtitle={isPackagedLob
+    ? 'Manage catalog, packing and delivery orders'
+    : 'Manage tables, orders and kitchen operations'}
   right={
     <>
               {kitchenStatus && (
@@ -1817,8 +1831,12 @@ const fetchRestaurantMeta = useCallback(async () => {
                   disabled={kitchenToggling}
                   title={
                     kitchenStatus.is_open
-                      ? 'Kitchen is open — WhatsApp customers can order. Tap to close.'
-                      : `Kitchen is closed${kitchenStatus.schedule_open ? '' : ` · schedule resumes ${kitchenStatus.next_open_label}`}. Tap to open.`
+                      ? (isPackagedLob
+                        ? 'Ordering is open — WhatsApp customers can order. Tap to close.'
+                        : 'Kitchen is open — WhatsApp customers can order. Tap to close.')
+                      : (isPackagedLob
+                        ? `Ordering is closed${kitchenStatus.schedule_open ? '' : ` · schedule resumes ${kitchenStatus.next_open_label}`}. Tap to open.`
+                        : `Kitchen is closed${kitchenStatus.schedule_open ? '' : ` · schedule resumes ${kitchenStatus.next_open_label}`}. Tap to open.`)
                   }
                   style={{
                     display: 'flex', alignItems: 'center', gap: 8,
@@ -1835,10 +1853,10 @@ const fetchRestaurantMeta = useCallback(async () => {
                     background: kitchenStatus.is_open ? C.success : C.danger,
                     display: 'inline-block',
                   }} />
-                  Kitchen: {kitchenToggling ? 'Updating…' : kitchenStatus.is_open ? 'Open' : 'Closed'}
+                  {isPackagedLob ? 'Ordering' : 'Kitchen'}: {kitchenToggling ? 'Updating…' : kitchenStatus.is_open ? 'Open' : 'Closed'}
                 </button>
               )}
-              {kitchenStatus && (
+              {kitchenStatus && !isPackagedLob && (
                 <button
                   onClick={toggleKitchenBusy}
                   disabled={kitchenBusyToggling}
@@ -1885,7 +1903,7 @@ const fetchRestaurantMeta = useCallback(async () => {
                   background: C.primaryLight,
                 }}
               >
-                Kitchen hours →
+                {isPackagedLob ? 'Order hours →' : 'Kitchen hours →'}
               </Link>
               <span style={{ fontSize: 12, color: C.textSub }}>👤 {user?.full_name || user?.email}</span>
               <Link
@@ -1898,7 +1916,7 @@ const fetchRestaurantMeta = useCallback(async () => {
               >
                 👥 Team
               </Link>
-              <Btn onClick={() => openNewOrderModal(null)}>+ New order</Btn>
+              {!isPackagedLob && <Btn onClick={() => openNewOrderModal(null)}>+ New order</Btn>}
               <Btn variant="danger" onClick={logout}>Logout</Btn>
               </>
   }
@@ -1906,58 +1924,107 @@ const fetchRestaurantMeta = useCallback(async () => {
       <div style={{ maxWidth: 1280, margin: "0 auto", padding: "24px" }}>
 
         {/* ── Stats strip ───────────────────────────────────────────────── */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 10, marginBottom: 20 }}>
-          {[
-            {
-              label: "Kitchen",
-              value: kitchenStatus ? (kitchenStatus.is_open ? 'Open' : 'Closed') : '—',
-              colorStyle: kitchenStatus?.is_open
-                ? { bg: C.successLight, border: C.successBorder, color: C.successDark }
-                : { bg: C.dangerLight,  border: C.dangerBorder,  color: C.dangerDark  },
-              hint: kitchenStatus
-                ? (kitchenStatus.is_open
-                    ? [
-                        kitchenStatus.current_slot_label ? `${kitchenStatus.current_slot_label} menu live` : 'Manual override active',
-                        kitchenStatus.takeaway_ready_range ? `Takeaway ${kitchenStatus.takeaway_ready_range}` : null,
-                        kitchenStatus.delivery_ready_range ? `Delivery ${kitchenStatus.delivery_ready_range}` : null,
-                      ].filter(Boolean).join(' · ')
-                    : `WhatsApp ordering paused${kitchenStatus.schedule_open ? '' : ` · opens ${kitchenStatus.next_open_label}`}`)
-                : null,
-            },
-            {
-              label: "Approval needed",
-              value: pendingApprTokens.length,
-              colorStyle: { bg: C.accentLight,  border: C.accentBorder,  color: C.accentDark  },
-              hint: pendingApprTokens.length === 0
-                ? 'Scheduled orders and large parties (8+) appear under Scheduled / Queue'
-                : pendingScheduledApprTokens.length > 0
-                  ? `${pendingScheduledApprTokens.length} scheduled · see Scheduled tab`
-                  : 'Large parties waiting for your table split decision',
-            },
-            { label: "Waiting",         value: waitingTokens.length,       colorStyle: { bg: C.warningLight, border: C.warningBorder, color: C.warningDark } },
-            { label: "Seated",          value: seatedTokens.length,        colorStyle: { bg: C.successLight, border: C.successBorder, color: C.successDark } },
-            { label: "Takeaway",        value: takeawayTokens.length,      colorStyle: { bg: C.primaryLight, border: C.primaryBorder, color: C.primaryDark } },
-            { label: "Tables free",     value: freeTablesCount,            colorStyle: { bg: "#F5F5F3",      border: C.border,        color: "#444441"     } },
-          ].map(s => <StatCard key={s.label} {...s} />)}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: isPackagedLob ? 'repeat(4,1fr)' : 'repeat(6,1fr)',
+          gap: 10,
+          marginBottom: 20,
+        }}>
+          {(isPackagedLob
+            ? [
+                {
+                  label: 'Ordering',
+                  value: kitchenStatus ? (kitchenStatus.is_open ? 'Open' : 'Closed') : '—',
+                  colorStyle: kitchenStatus?.is_open
+                    ? { bg: C.successLight, border: C.successBorder, color: C.successDark }
+                    : { bg: C.dangerLight, border: C.dangerBorder, color: C.dangerDark },
+                  hint: kitchenStatus
+                    ? (kitchenStatus.is_open
+                      ? 'WhatsApp / storefront ordering is live'
+                      : `Ordering paused${kitchenStatus.schedule_open ? '' : ` · opens ${kitchenStatus.next_open_label}`}`)
+                    : null,
+                },
+                {
+                  label: 'Needs approval',
+                  value: pendingScheduledApprTokens.length,
+                  colorStyle: { bg: C.accentLight, border: C.accentBorder, color: C.accentDark },
+                  hint: pendingScheduledApprTokens.length === 0
+                    ? 'Scheduled deliveries awaiting approval appear under Scheduled'
+                    : `${pendingScheduledApprTokens.length} scheduled · see Scheduled tab`,
+                },
+                {
+                  label: 'Open shipments',
+                  value: openShipmentCount,
+                  colorStyle: { bg: C.primaryLight, border: C.primaryBorder, color: C.primaryDark },
+                  hint: `${liveDeliveryTokens.length} delivery · ${liveTakeawayTokens.length} pickup`,
+                },
+                {
+                  label: 'Scheduled',
+                  value: scheduledTabCount,
+                  colorStyle: { bg: C.warningLight, border: C.warningBorder, color: C.warningDark },
+                  hint: 'Approved / future packing slots',
+                },
+              ]
+            : [
+                {
+                  label: 'Kitchen',
+                  value: kitchenStatus ? (kitchenStatus.is_open ? 'Open' : 'Closed') : '—',
+                  colorStyle: kitchenStatus?.is_open
+                    ? { bg: C.successLight, border: C.successBorder, color: C.successDark }
+                    : { bg: C.dangerLight, border: C.dangerBorder, color: C.dangerDark },
+                  hint: kitchenStatus
+                    ? (kitchenStatus.is_open
+                      ? [
+                          kitchenStatus.current_slot_label ? `${kitchenStatus.current_slot_label} menu live` : 'Manual override active',
+                          kitchenStatus.takeaway_ready_range ? `Takeaway ${kitchenStatus.takeaway_ready_range}` : null,
+                          kitchenStatus.delivery_ready_range ? `Delivery ${kitchenStatus.delivery_ready_range}` : null,
+                        ].filter(Boolean).join(' · ')
+                      : `WhatsApp ordering paused${kitchenStatus.schedule_open ? '' : ` · opens ${kitchenStatus.next_open_label}`}`)
+                    : null,
+                },
+                {
+                  label: 'Approval needed',
+                  value: pendingApprTokens.length,
+                  colorStyle: { bg: C.accentLight, border: C.accentBorder, color: C.accentDark },
+                  hint: pendingApprTokens.length === 0
+                    ? 'Scheduled orders and large parties (8+) appear under Scheduled / Queue'
+                    : pendingScheduledApprTokens.length > 0
+                      ? `${pendingScheduledApprTokens.length} scheduled · see Scheduled tab`
+                      : 'Large parties waiting for your table split decision',
+                },
+                { label: 'Waiting', value: waitingTokens.length, colorStyle: { bg: C.warningLight, border: C.warningBorder, color: C.warningDark } },
+                { label: 'Seated', value: seatedTokens.length, colorStyle: { bg: C.successLight, border: C.successBorder, color: C.successDark } },
+                { label: 'Takeaway', value: takeawayTokens.length, colorStyle: { bg: C.primaryLight, border: C.primaryBorder, color: C.primaryDark } },
+                { label: 'Tables free', value: freeTablesCount, colorStyle: { bg: '#F5F5F3', border: C.border, color: '#444441' } },
+              ]
+          ).map(s => <StatCard key={s.label} {...s} />)}
         </div>
 
         {/* ── Tab bar ───────────────────────────────────────────────────── */}
-        <div style={{ display: "flex", gap: 3, marginBottom: 20, background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 10, padding: 4, width: "fit-content" }}>
-          {[
-            { key: 'queue',  label: `Queue${(waitingTokens.length + pendingLargePartyTokens.length) ? ` (${waitingTokens.length + pendingLargePartyTokens.length})` : ''}` },
-            { key: 'scheduled', label: `Scheduled${scheduledTabCount ? ` (${scheduledTabCount})` : ''}` },
-            { key: 'tables', label: 'Tables' },
-            { key: 'orders', label: `Active orders${(activeDineInOrders.length + liveTakeawayTokens.length + liveDeliveryTokens.length) ? ` (${activeDineInOrders.length + liveTakeawayTokens.length + liveDeliveryTokens.length})` : ''}` },
-            { key: 'reports', label: 'Reports' },
-            { key: 'menu',   label: 'Menu'   },
-          ].map(tab => (
+        <div style={{ display: 'flex', gap: 3, marginBottom: 20, background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 10, padding: 4, width: 'fit-content', flexWrap: 'wrap' }}>
+          {(isPackagedLob
+            ? [
+                { key: 'scheduled', label: `Scheduled${scheduledTabCount ? ` (${scheduledTabCount})` : ''}` },
+                { key: 'orders', label: `Active orders${openShipmentCount ? ` (${openShipmentCount})` : ''}` },
+                { key: 'reports', label: 'Reports' },
+                { key: 'menu', label: 'Catalog' },
+              ]
+            : [
+                { key: 'queue', label: `Queue${(waitingTokens.length + pendingLargePartyTokens.length) ? ` (${waitingTokens.length + pendingLargePartyTokens.length})` : ''}` },
+                { key: 'scheduled', label: `Scheduled${scheduledTabCount ? ` (${scheduledTabCount})` : ''}` },
+                { key: 'tables', label: 'Tables' },
+                { key: 'orders', label: `Active orders${(activeDineInOrders.length + liveTakeawayTokens.length + liveDeliveryTokens.length) ? ` (${activeDineInOrders.length + liveTakeawayTokens.length + liveDeliveryTokens.length})` : ''}` },
+                { key: 'reports', label: 'Reports' },
+                { key: 'menu', label: 'Menu' },
+              ]
+          ).map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)} style={{
-              padding: "6px 16px", borderRadius: 7, fontSize: 12,
+              padding: '6px 16px', borderRadius: 7, fontSize: 12,
               fontWeight: activeTab === tab.key ? 500 : 400,
-              cursor: "pointer", transition: "all .15s",
-              background:   activeTab === tab.key ? C.primary     : "transparent",
-              color:        activeTab === tab.key ? "#fff"        : C.textMuted,
-              border:       activeTab === tab.key ? `0.5px solid ${C.primaryDark}` : "0.5px solid transparent",
+              cursor: 'pointer', transition: 'all .15s',
+              background: activeTab === tab.key ? C.primary : 'transparent',
+              color: activeTab === tab.key ? '#fff' : C.textMuted,
+              border: activeTab === tab.key ? `0.5px solid ${C.primaryDark}` : '0.5px solid transparent',
             }}>
               {tab.label}
             </button>
@@ -2712,15 +2779,27 @@ const fetchRestaurantMeta = useCallback(async () => {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
               <h2 style={{ fontFamily: FONTS.heading, fontSize: 16, fontWeight: 500, color: C.text, margin: 0 }}>Active orders</h2>
-              <Link to="/dashboard/kitchen" style={{ fontSize: 12, color: C.primaryDark, textDecoration: 'none' }}>Open kitchen display →</Link>
-              {' · '}
-              <Link to="/dashboard/packing" style={{ fontSize: 12, color: C.primaryDark, textDecoration: 'none' }}>Packing display →</Link>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                {!isPackagedLob && (
+                  <Link to="/dashboard/kitchen" style={{ fontSize: 12, color: C.primaryDark, textDecoration: 'none' }}>Open kitchen display →</Link>
+                )}
+                <Link to="/dashboard/packing" style={{ fontSize: 12, color: C.primaryDark, textDecoration: 'none' }}>Packing display →</Link>
+              </div>
             </div>
             <AlertBanner type="info">
-              Dine-in table orders and live takeaway/delivery tokens appear here. Scheduled pre-bookings are on the <strong>Scheduled</strong> tab.
+              {isPackagedLob
+                ? <>Live delivery / pickup tokens appear here. Scheduled pre-bookings are on the <strong>Scheduled</strong> tab.</>
+                : <>Dine-in table orders and live takeaway/delivery tokens appear here. Scheduled pre-bookings are on the <strong>Scheduled</strong> tab.</>}
             </AlertBanner>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
-              {FULFILLMENT_FILTERS.map(f => (
+              {(isPackagedLob
+                ? [
+                    { key: 'all', label: 'All' },
+                    { key: 'live_delivery', label: 'Delivery' },
+                    { key: 'live_takeaway', label: 'Pickup' },
+                  ]
+                : FULFILLMENT_FILTERS
+              ).map(f => (
                 <button key={f.key} onClick={() => setOrdersFilter(f.key)} style={{
                   padding: '5px 12px', borderRadius: 20, fontSize: 11, cursor: 'pointer',
                   border: `0.5px solid ${ordersFilter === f.key ? C.primary : C.border}`,
@@ -2830,7 +2909,9 @@ const fetchRestaurantMeta = useCallback(async () => {
             <div>
               <h2 style={{ fontFamily: FONTS.heading, fontSize: 16, fontWeight: 500, color: C.text, margin: 0 }}>Sales reports</h2>
               <p style={{ fontSize: 12, color: C.textMuted, margin: '4px 0 0' }}>
-                Completed dine-in POS orders plus paid WhatsApp prepay bookings for the selected date range (IST).
+                {isPackagedLob
+                  ? 'Paid WhatsApp / storefront orders for the selected date range (IST).'
+                  : 'Completed dine-in POS orders plus paid WhatsApp prepay bookings for the selected date range (IST).'}
               </p>
             </div>
             <div style={{ ...CARD }}>
@@ -2857,8 +2938,12 @@ const fetchRestaurantMeta = useCallback(async () => {
                       { label: 'Total revenue', value: formatINR(salesReport.totalRevenue) },
                       { label: 'Orders', value: salesReport.totalOrders },
                       { label: 'Avg order value', value: formatINR(salesReport.avgOrderValue) },
-                      { label: 'Dine-in (POS)', value: formatINR(salesReport.dineInRevenue) },
-                      { label: 'WhatsApp prepay', value: formatINR(salesReport.prepayRevenue) },
+                      ...(isPackagedLob
+                        ? [{ label: 'Storefront / WhatsApp', value: formatINR(salesReport.prepayRevenue) }]
+                        : [
+                            { label: 'Dine-in (POS)', value: formatINR(salesReport.dineInRevenue) },
+                            { label: 'WhatsApp prepay', value: formatINR(salesReport.prepayRevenue) },
+                          ]),
                     ].map(s => (
                       <div key={s.label} style={{ background: C.surfaceBg, borderRadius: 8, padding: '12px 14px', border: `0.5px solid ${C.border}` }}>
                         <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 4 }}>{s.label}</div>

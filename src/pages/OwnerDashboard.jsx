@@ -834,6 +834,11 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
   // for a pure packaged-goods tenant.
   const lobType = wabaInfo?.lob_type || "restaurant";
   const isPackagedGoods = lobType === "food_products" || lobType === "psl" || lobType === "retail";
+  const businessName =
+    wabaInfo?.display_name ||
+    wabaInfo?.name ||
+    restaurantName ||
+    "Your business";
 
   const navTabs = isPackagedGoods
     ? [
@@ -857,7 +862,7 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
     <div style={{ minHeight: "100vh", background: C.pageBg }}>
       <BrandHeader
         title="Owner dashboard"
-        subtitle={`${restaurantName || "Outlet"} · ${dateStr}`}
+        subtitle={`${businessName} · ${dateStr}`}
         right={
           <>
             <div style={{ display: "flex", gap: 2, background: "rgba(255,255,255,0.12)", borderRadius: 10, padding: 3 }}>

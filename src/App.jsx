@@ -89,7 +89,9 @@ function AppRoutes() {
   if (loading || subLoading) return <Spinner />;
 
   const restaurantId = user?.restaurant_id ?? user?.restaurantId ?? '46fb9b9e-431a-43c9-9edb-d316b0fef216';
-  const restaurantName = user?.restaurant_name ?? user?.restaurantName ?? 'Hotel Munafe';
+  // The dashboard replaces this generic fallback with the canonical tenant
+  // name returned by /api/dashboard/waba once it loads.
+  const restaurantName = user?.restaurant_name ?? user?.restaurantName ?? 'Your business';
 
   const defaultRoute = () => {
     if (!user) return '/login';
