@@ -350,7 +350,14 @@ async function downloadCatalogTemplate(apiClient, showToast, currentMenuItems = 
     showToast(`Template downloaded — ${count} item${count !== 1 ? 's' : ''} (${source})`);
   };
 
-  // Only restaurant schema can infer from existing menu shape.
+  const daysLeftForExport = (endsAt) => {
+    if (!endsAt) return '';
+    const ms = new Date(endsAt).getTime() - Date.now();
+    if (ms <= 0) return '';
+    return Math.max(1, Math.ceil(ms / (24 * 60 * 60 * 1000)));
+  };
+
+  // Restaurant schema can infer from existing menu shape.
   if (schema.id === 'restaurant') {
     const fromApiItems = (items) =>
       items.map(item => [
@@ -410,6 +417,50 @@ async function downloadCatalogTemplate(apiClient, showToast, currentMenuItems = 
     }
   }
 
+  // Packaged / retail: export live rows into the LOB schema columns when possible.
+  if (['food_products', 'retail', 'psl', 'b2b'].includes(schema.id) && (currentMenuItems || []).length > 0) {
+    const headers = schema.templateHeaders;
+    const rows = currentMenuItems.map((item) => {
+      const map = {
+        id: item.retailer_id || item.id || '',
+        title: item.name || '',
+        description: item.description || '',
+        price: Number(item.price) || 0,
+        category: exportCategoryForTemplate(item.category),
+        image_link: item.image_url || '',
+        is_available: (item.is_stocked ?? item.is_available ?? true) ? 'TRUE' : 'FALSE',
+        item_type: item.item_type || 'PRODUCT',
+        variant_group_id: item.variant_group_id || '',
+        pack_size_label: item.pack_size_label || item.size_label || '',
+        weight_grams: item.weight_grams ?? '',
+        current_stock: item.current_stock ?? '',
+        availability_status: item.availability_status || '',
+        launch_at: item.launch_at || '',
+        deposit_amount: item.deposit_amount ?? '',
+        shelf_life_days: item.shelf_life_days ?? '',
+        made_on_date: item.made_on_date || '',
+        ingredients: item.ingredients || '',
+        allergens: item.allergens || '',
+        bundle_components: Array.isArray(item.meta?.bundle_components)
+          ? item.meta.bundle_components.map(c => `${c.retailer_id}:${c.qty || 1}`).join(',')
+          : '',
+        image_url_2: item.image_url_2 || '',
+        image_url_3: item.image_url_3 || '',
+        image_url_4: item.image_url_4 || '',
+        image_url_5: item.image_url_5 || '',
+        discount_percent: item.discount_percent || '',
+        discount_days: daysLeftForExport(item.discount_ends_at),
+        condition: item.condition || '',
+        original_mrp: item.original_mrp ?? '',
+        warranty_days: item.warranty_days ?? '',
+        colour: item.colour || '',
+      };
+      return headers.map(h => (map[h] != null ? map[h] : ''));
+    });
+    writeAndDownload(rows, rows.length, 'live catalog');
+    return;
+  }
+
   writeAndDownload(schema.templateExamples, schema.templateExamples.length, 'example template — fill in your items');
 }
 
@@ -464,6 +515,25 @@ function todayDateStr() {
 function formatINR(amount) {
   const n = Number(amount) || 0;
   return `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+}
+
+function daysLeftDiscount(endsAt) {
+  if (!endsAt) return null;
+  const ms = new Date(endsAt).getTime() - Date.now();
+  if (ms <= 0) return 0;
+  return Math.max(1, Math.ceil(ms / (24 * 60 * 60 * 1000)));
+}
+
+function isDiscountActive(item) {
+  const pct = Number(item?.discount_percent);
+  if (!(pct > 0 && pct <= 100) || !item?.discount_ends_at) return false;
+  return new Date(item.discount_ends_at).getTime() > Date.now();
+}
+
+function effectivePrice(item) {
+  const base = Number(item?.price || 0);
+  if (!isDiscountActive(item)) return base;
+  return Math.max(0, Math.round(base * (1 - Number(item.discount_percent) / 100)));
 }
 
 const SERVICE_LABELS = {
@@ -527,7 +597,17 @@ export default function ManagerPortal() {
   const [lobType,        setLobType]        = useState('restaurant');
   const [allowManagerUpload, setAllowManagerUpload] = useState(false);
   const [instagramHandle, setInstagramHandle] = useState('');
+  const [instagramUserId, setInstagramUserId] = useState('');
+  const [igCanPublish, setIgCanPublish] = useState(false);
   const [generatingStoryId, setGeneratingStoryId] = useState(null);
+  const [discountDraft, setDiscountDraft] = useState({});
+  const [discountSaving, setDiscountSaving] = useState(null);
+  const [promoModal, setPromoModal] = useState(null); // draft payload
+  const [promoLoading, setPromoLoading] = useState(false);
+  const [promoPublishing, setPromoPublishing] = useState(false);
+  const [promoCaption, setPromoCaption] = useState('');
+  const [promoPublishFeed, setPromoPublishFeed] = useState(true);
+  const [promoPublishStory, setPromoPublishStory] = useState(true);
   const [activeTab,      setActiveTab]      = useState('queue');
   const [toastMsg,       setToastMsg]       = useState('');
 
@@ -668,6 +748,7 @@ const fetchRestaurantMeta = useCallback(async () => {
       setLobType(rest.lob_type || 'restaurant');
       setAllowManagerUpload(!!rest.allow_manager_menu_upload);
       setInstagramHandle(rest.instagram_handle || '');
+      setInstagramUserId(rest.instagram_user_id || '');
     }
   } catch (e) { /* non-fatal — falls back to restaurant schema */ }
 }, [apiClient]);
@@ -713,11 +794,11 @@ const fetchRestaurantMeta = useCallback(async () => {
     return () => { clearInterval(full); clearInterval(quick); };
   }, [fetchData, fetchTokens, fetchTables, fetchOrders, fetchKdsFeed, fetchScheduledBoard]);
 
-  // Packaged LOBs should not land on the restaurant queue/floor tab.
+  // Packaged LOBs: no queue / tables / scheduled — default to active orders.
   useEffect(() => {
     const packaged = ['food_products', 'retail', 'psl', 'b2b'].includes(String(lobType || '').toLowerCase());
     if (!packaged) return;
-    if (activeTab === 'queue' || activeTab === 'tables') {
+    if (activeTab === 'queue' || activeTab === 'tables' || activeTab === 'scheduled') {
       setActiveTab('orders');
     }
   }, [lobType, activeTab]);
@@ -851,7 +932,7 @@ const fetchRestaurantMeta = useCallback(async () => {
   const openShipmentCount = liveTakeawayTokens.length + liveDeliveryTokens.length;
   const freeTablesCount    = tables.filter(t => getTableStatus(t).status === 'available').length;
 
-  const showMenuSlotColumn = menuSlotsAreMeaningful(menuItems);
+  const showMenuSlotColumn = !isPackagedLob && menuSlotsAreMeaningful(menuItems);
   const menuCategories = [...new Set(menuItems.map(i => formatMenuCategory(i.category)).filter(Boolean))].sort();
   const filteredMenuItems = [...menuItems]
     .filter(item => {
@@ -1243,7 +1324,7 @@ const fetchRestaurantMeta = useCallback(async () => {
 
   const generateStory = async (item) => {
     if (!instagramHandle) {
-      showToast('Add your Instagram handle in Settings first, then generate stories.', 'error');
+      showToast('Add your Instagram handle in Settings first, then generate stories.');
       return;
     }
     setGeneratingStoryId(item.id);
@@ -1257,6 +1338,7 @@ const fetchRestaurantMeta = useCallback(async () => {
       a.click();
       a.remove();
       window.URL.revokeObjectURL(url);
+      showToast('Story SVG downloaded');
     } catch (err) {
       showToast(err.response?.data?.error || `Could not generate story for ${item.name}`);
     } finally {
@@ -1264,13 +1346,165 @@ const fetchRestaurantMeta = useCallback(async () => {
     }
   };
 
+  const setDiscountField = (itemId, field, value) => {
+    setDiscountDraft(prev => ({
+      ...prev,
+      [itemId]: {
+        percent: prev[itemId]?.percent ?? '',
+        days: prev[itemId]?.days ?? '',
+        [field]: value,
+      },
+    }));
+  };
+
+  const ensureDiscountDraft = (item) => {
+    if (discountDraft[item.id]) return discountDraft[item.id];
+    const active = isDiscountActive(item);
+    return {
+      percent: active ? String(Math.round(Number(item.discount_percent))) : '',
+      days: active ? String(daysLeftDiscount(item.discount_ends_at) || '') : '',
+    };
+  };
+
+  const saveDiscount = async (item, { clear = false, offerPromo = true } = {}) => {
+    const draft = ensureDiscountDraft(item);
+    setDiscountSaving(item.id);
+    try {
+      let body;
+      if (clear) {
+        body = { clear: true };
+      } else {
+        const pct = Math.round(Number(draft.percent));
+        const days = Math.floor(Number(draft.days));
+        if (!Number.isFinite(pct) || pct < 1 || pct > 100) {
+          showToast('Enter a discount % between 1 and 100');
+          return;
+        }
+        if (!Number.isFinite(days) || days < 1 || days > 365) {
+          showToast('Enter duration in days (1–365)');
+          return;
+        }
+        body = { discount_percent: pct, duration_days: days };
+      }
+      const res = await apiClient.put(`/api/menu-items/${item.id}/discount`, body);
+      const d = res.data || {};
+      const nextItem = {
+        ...item,
+        discount_percent: d.discount_percent,
+        discount_ends_at: d.discount_ends_at,
+      };
+      setMenuItems(prev => prev.map(row =>
+        row.id === item.id
+          ? { ...row, discount_percent: d.discount_percent, discount_ends_at: d.discount_ends_at }
+          : row
+      ));
+      setDiscountDraft(prev => {
+        const next = { ...prev };
+        delete next[item.id];
+        return next;
+      });
+      showToast(clear
+        ? 'Discount cleared'
+        : `${d.discount_percent}% off for next ${body.duration_days} days`);
+      if (!clear && offerPromo && isPackagedLob) {
+        const go = window.confirm('Discount saved. Prepare an Instagram promo now?');
+        if (go) openPromoDraft(nextItem);
+      }
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to save discount');
+    } finally {
+      setDiscountSaving(null);
+    }
+  };
+
+  const openPromoDraft = async (item) => {
+    setPromoLoading(true);
+    try {
+      const [draftRes, statusRes] = await Promise.all([
+        apiClient.post('/api/instagram/drafts', { item_id: item.id }),
+        apiClient.get('/api/instagram/status').catch(() => ({ data: {} })),
+      ]);
+      const draft = draftRes.data?.draft;
+      if (!draft) throw new Error('No draft returned');
+      setIgCanPublish(!!(statusRes.data?.can_publish || draft.publish?.connected));
+      setPromoCaption(draft.feed_caption || '');
+      setPromoPublishFeed(true);
+      setPromoPublishStory(true);
+      setPromoModal({ ...draft, item });
+    } catch (err) {
+      showToast(err.response?.data?.error || err.message || 'Could not prepare Instagram promo');
+    } finally {
+      setPromoLoading(false);
+    }
+  };
+
+  const publishPromo = async () => {
+    if (!promoModal?.item_id && !promoModal?.item?.id) return;
+    setPromoPublishing(true);
+    try {
+      const itemId = promoModal.item_id || promoModal.item.id;
+      const res = await apiClient.post('/api/instagram/publish', {
+        item_id: itemId,
+        feed_caption: promoCaption,
+        publish_feed: promoPublishFeed,
+        publish_story: promoPublishStory,
+        image_urls: promoModal.product?.image_urls || [],
+        confirm: true,
+      });
+      const feedId = res.data?.results?.feed?.id;
+      const storyId = res.data?.results?.story?.id;
+      showToast(`Published${feedId ? ` · feed ${feedId}` : ''}${storyId ? ` · story ${storyId}` : ''}`);
+      setPromoModal(null);
+    } catch (err) {
+      showToast(err.response?.data?.error || err.message || 'Instagram publish failed');
+    } finally {
+      setPromoPublishing(false);
+    }
+  };
+
+  const downloadPromoStorySvg = () => {
+    if (!promoModal?.story_svg) {
+      if (promoModal?.item) generateStory(promoModal.item);
+      return;
+    }
+    const blob = new Blob([promoModal.story_svg], { type: 'image/svg+xml' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(promoModal.product?.name || 'story').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-story.svg`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+    showToast('Story SVG downloaded');
+  };
+
   const toggleSpecialToday = async (item) => {
     setTogglingSpecialId(item.id);
     const newValue = !item.is_special_today;
     try {
-      await apiClient.put(`/api/menu-items/${item.id}/special-today`, { is_special_today: newValue });
-      setMenuItems(prev => prev.map(m => m.id === item.id ? { ...m, is_special_today: newValue } : m));
+      let specialNote = item.special_note || '';
+      if (newValue) {
+        const raw = window.prompt('Optional special note (used in Instagram sales pitch):', specialNote);
+        if (raw == null) { setTogglingSpecialId(null); return; }
+        specialNote = raw;
+      }
+      await apiClient.put(`/api/menu-items/${item.id}/special-today`, {
+        is_special_today: newValue,
+        special_note: (specialNote || '').trim() || null,
+      });
+      const nextItem = {
+        ...item,
+        is_special_today: newValue,
+        is_todays_special: newValue,
+        special_note: (specialNote || '').trim() || null,
+      };
+      setMenuItems(prev => prev.map(m => m.id === item.id ? nextItem : m));
       showToast(newValue ? `${item.name} marked as today's special` : `${item.name} removed from today's specials`);
+      if (newValue && isPackagedLob) {
+        const go = window.confirm('Special saved. Prepare an Instagram promo now?');
+        if (go) openPromoDraft(nextItem);
+      }
     } catch (err) { showToast(err.response?.data?.error || `Failed to update ${item.name}`); }
     finally { setTogglingSpecialId(null); }
   };
@@ -1923,49 +2157,15 @@ const fetchRestaurantMeta = useCallback(async () => {
    />
       <div style={{ maxWidth: 1280, margin: "0 auto", padding: "24px" }}>
 
-        {/* ── Stats strip ───────────────────────────────────────────────── */}
+        {/* ── Stats strip (restaurant only) ─────────────────────────────── */}
+        {!isPackagedLob && (
         <div style={{
           display: 'grid',
-          gridTemplateColumns: isPackagedLob ? 'repeat(4,1fr)' : 'repeat(6,1fr)',
+          gridTemplateColumns: 'repeat(6,1fr)',
           gap: 10,
           marginBottom: 20,
         }}>
-          {(isPackagedLob
-            ? [
-                {
-                  label: 'Ordering',
-                  value: kitchenStatus ? (kitchenStatus.is_open ? 'Open' : 'Closed') : '—',
-                  colorStyle: kitchenStatus?.is_open
-                    ? { bg: C.successLight, border: C.successBorder, color: C.successDark }
-                    : { bg: C.dangerLight, border: C.dangerBorder, color: C.dangerDark },
-                  hint: kitchenStatus
-                    ? (kitchenStatus.is_open
-                      ? 'WhatsApp / storefront ordering is live'
-                      : `Ordering paused${kitchenStatus.schedule_open ? '' : ` · opens ${kitchenStatus.next_open_label}`}`)
-                    : null,
-                },
-                {
-                  label: 'Needs approval',
-                  value: pendingScheduledApprTokens.length,
-                  colorStyle: { bg: C.accentLight, border: C.accentBorder, color: C.accentDark },
-                  hint: pendingScheduledApprTokens.length === 0
-                    ? 'Scheduled deliveries awaiting approval appear under Scheduled'
-                    : `${pendingScheduledApprTokens.length} scheduled · see Scheduled tab`,
-                },
-                {
-                  label: 'Open shipments',
-                  value: openShipmentCount,
-                  colorStyle: { bg: C.primaryLight, border: C.primaryBorder, color: C.primaryDark },
-                  hint: `${liveDeliveryTokens.length} delivery · ${liveTakeawayTokens.length} pickup`,
-                },
-                {
-                  label: 'Scheduled',
-                  value: scheduledTabCount,
-                  colorStyle: { bg: C.warningLight, border: C.warningBorder, color: C.warningDark },
-                  hint: 'Approved / future packing slots',
-                },
-              ]
-            : [
+          {[
                 {
                   label: 'Kitchen',
                   value: kitchenStatus ? (kitchenStatus.is_open ? 'Open' : 'Closed') : '—',
@@ -1996,15 +2196,14 @@ const fetchRestaurantMeta = useCallback(async () => {
                 { label: 'Seated', value: seatedTokens.length, colorStyle: { bg: C.successLight, border: C.successBorder, color: C.successDark } },
                 { label: 'Takeaway', value: takeawayTokens.length, colorStyle: { bg: C.primaryLight, border: C.primaryBorder, color: C.primaryDark } },
                 { label: 'Tables free', value: freeTablesCount, colorStyle: { bg: '#F5F5F3', border: C.border, color: '#444441' } },
-              ]
-          ).map(s => <StatCard key={s.label} {...s} />)}
+          ].map(s => <StatCard key={s.label} {...s} />)}
         </div>
+        )}
 
         {/* ── Tab bar ───────────────────────────────────────────────────── */}
         <div style={{ display: 'flex', gap: 3, marginBottom: 20, background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 10, padding: 4, width: 'fit-content', flexWrap: 'wrap' }}>
           {(isPackagedLob
             ? [
-                { key: 'scheduled', label: `Scheduled${scheduledTabCount ? ` (${scheduledTabCount})` : ''}` },
                 { key: 'orders', label: `Active orders${openShipmentCount ? ` (${openShipmentCount})` : ''}` },
                 { key: 'reports', label: 'Reports' },
                 { key: 'menu', label: 'Catalog' },
@@ -2355,7 +2554,7 @@ const fetchRestaurantMeta = useCallback(async () => {
         {/* ════════════════════════════════════════════════════════════════
             TAB: SCHEDULED
         ════════════════════════════════════════════════════════════════ */}
-        {activeTab === 'scheduled' && (
+        {activeTab === 'scheduled' && !isPackagedLob && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
               <div>
@@ -2788,7 +2987,7 @@ const fetchRestaurantMeta = useCallback(async () => {
             </div>
             <AlertBanner type="info">
               {isPackagedLob
-                ? <>Live delivery / pickup tokens appear here. Scheduled pre-bookings are on the <strong>Scheduled</strong> tab.</>
+                ? <>Live delivery and pickup orders appear here. Use <strong>Packing display</strong> for the packing queue.</>
                 : <>Dine-in table orders and live takeaway/delivery tokens appear here. Scheduled pre-bookings are on the <strong>Scheduled</strong> tab.</>}
             </AlertBanner>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
@@ -3006,19 +3205,25 @@ const fetchRestaurantMeta = useCallback(async () => {
           <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
               <div>
-                <h2 style={{ fontFamily: FONTS.heading, fontSize: 16, fontWeight: 500, color: C.text, margin: 0 }}>Menu management</h2>
+                <h2 style={{ fontFamily: FONTS.heading, fontSize: 16, fontWeight: 500, color: C.text, margin: 0 }}>
+                  {isPackagedLob ? 'Catalog' : 'Menu management'}
+                </h2>
 
                 <p style={{ fontSize: 12, color: C.textMuted, margin: "4px 0 0" }}>
-                  Pull from Meta to upsert WhatsApp catalog items, toggle stock, or upload Excel to <strong>fully replace</strong> the menu. See the <strong>Column guide</strong> sheet for scheduling columns.
+                  {isPackagedLob
+                    ? <>Toggle stock, set time-bound discounts or Specials, and upload Excel to <strong>fully replace</strong> the catalog. Template includes pack, trust, gallery and discount columns.</>
+                    : <>Pull from Meta to upsert WhatsApp catalog items, toggle stock, or upload Excel to <strong>fully replace</strong> the menu. See the <strong>Column guide</strong> sheet for scheduling columns.</>}
                 </p>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                <button
-                  onClick={syncMetaCatalog}
-                  disabled={metaSyncing}
-                  style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 500, padding: "7px 14px", borderRadius: 8, border: `0.5px solid ${C.primaryBorder}`, background: C.primaryLight, color: C.primaryDark, cursor: metaSyncing ? 'wait' : 'pointer' }}>
-                  {metaSyncing ? <Spinner size={14} /> : '↻'} Pull from Meta
-                </button>
+                {!isPackagedLob && (
+                  <button
+                    onClick={syncMetaCatalog}
+                    disabled={metaSyncing}
+                    style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 500, padding: "7px 14px", borderRadius: 8, border: `0.5px solid ${C.primaryBorder}`, background: C.primaryLight, color: C.primaryDark, cursor: metaSyncing ? 'wait' : 'pointer' }}>
+                    {metaSyncing ? <Spinner size={14} /> : '↻'} Pull from Meta
+                  </button>
+                )}
                 <button
                   onClick={async () => { setDownloadingTpl(true); await downloadCatalogTemplate(apiClient, showToast, menuItems, schema); setDownloadingTpl(false); }}
                   disabled={downloadingTpl}
@@ -3028,6 +3233,7 @@ const fetchRestaurantMeta = useCallback(async () => {
               </div>
             </div>
 
+            {!isPackagedLob && (
             <div style={{ ...CARD, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, padding: '12px 16px' }}>
               <div style={{ fontSize: 12, color: C.textSub }}>
                 <strong>Meta catalog:</strong>{' '}
@@ -3035,6 +3241,7 @@ const fetchRestaurantMeta = useCallback(async () => {
               </div>
               <span style={{ fontSize: 11, color: C.textMuted }}>Excel upload replaces all items · Meta pull updates by product ID</span>
             </div>
+            )}
 
 {user?.role === 'manager' && !allowManagerUpload ? (
   <div style={{ ...CARD, textAlign: 'center', padding: '32px 20px', color: C.textMuted, fontSize: 13 }}>
@@ -3144,7 +3351,9 @@ const fetchRestaurantMeta = useCallback(async () => {
       <div style={{ ...CARD, textAlign: "center", padding: "40px 20px" }}>
         <Spinner size={32} />
         <p style={{ fontSize: 13, fontWeight: 500, color: C.text, marginTop: 12 }}>Saving to database…</p>
-        <p style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>Updating Meta catalog in the background</p>
+        <p style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+          {isPackagedLob ? 'Replacing catalog items' : 'Updating Meta catalog in the background'}
+        </p>
       </div>
     )}
 
@@ -3215,9 +3424,11 @@ const fetchRestaurantMeta = useCallback(async () => {
                       <tr style={{ borderBottom: `0.5px solid ${C.border}`, background: C.surfaceBg }}>
                         {(showMenuSlotColumn
                           ? ["Name", "Category", "Slot", "Price", "Image", "In stock", "Special today"]
-                          : ["Name", "Category", "Price", "Image", "In stock", "Special today"]
+                          : isPackagedLob
+                            ? ["Name", "Category", "Price", "Discount", "Image", "In stock", "Special / Promo"]
+                            : ["Name", "Category", "Price", "Image", "In stock", "Special today"]
                         ).map((h, i) => (
-                          <th key={h} style={{ padding: "10px 14px", textAlign: i >= (showMenuSlotColumn ? 3 : 2) ? "right" : "left", fontSize: 11, fontWeight: 500, color: C.textMuted }}>{h}</th>
+                          <th key={h} style={{ padding: "10px 14px", textAlign: i >= 2 ? "right" : "left", fontSize: 11, fontWeight: 500, color: C.textMuted }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -3226,12 +3437,12 @@ const fetchRestaurantMeta = useCallback(async () => {
                         <React.Fragment key={cat}>
                           <tr style={{ background: C.surfaceBg }}>
                             <td
-                              colSpan={showMenuSlotColumn ? 7 : 6}
+                              colSpan={showMenuSlotColumn || isPackagedLob ? 7 : 6}
                               style={{ padding: "8px 14px", fontSize: 11, fontWeight: 600, color: C.textSub, letterSpacing: '0.04em', textTransform: 'uppercase' }}
                             >
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
                                 <span>{cat} ({groupedMenuItems[cat].length})</span>
-                                {cat !== 'Uncategorized' && (
+                                {!isPackagedLob && cat !== 'Uncategorized' && (
                                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                                   <span style={{ fontSize: 10, color: C.textMuted, textTransform: 'none', letterSpacing: 0 }}>Category slots:</span>
                                   {WEB_SLOT_OPTIONS.map(slot => {
@@ -3270,6 +3481,10 @@ const fetchRestaurantMeta = useCallback(async () => {
                         const isSpecialToggle = togglingSpecialId === item.id;
                         const isSpecial = !!item.is_special_today;
                         const slotLabel = formatMenuSlot(item.time_slot);
+                        const activeDiscount = isDiscountActive(item);
+                        const draft = ensureDiscountDraft(item);
+                        const sale = effectivePrice(item);
+                        const left = daysLeftDiscount(item.discount_ends_at);
                         return (
                           <tr key={item.id} style={{ borderBottom: `0.5px solid ${C.border}`, opacity: inStock ? 1 : 0.55 }}>
                             <td style={{ padding: "10px 14px" }}>
@@ -3281,6 +3496,11 @@ const fetchRestaurantMeta = useCallback(async () => {
                                 </span>
                               )}
                               {isSpecial && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 500, color: '#b45309', background: '#fef3c7', padding: "1px 6px", borderRadius: 20 }}>⭐ Special</span>}
+                              {activeDiscount && (
+                                <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 500, color: C.successDark, background: C.successLight, padding: "1px 6px", borderRadius: 20 }}>
+                                  {Math.round(Number(item.discount_percent))}% off · {left}d
+                                </span>
+                              )}
                             </td>
                             <td style={{ padding: "10px 14px" }}>
                               <span style={{ fontSize: 10, background: C.primaryLight, color: C.primaryDark, padding: "2px 8px", borderRadius: 20, fontWeight: 500 }}>
@@ -3294,7 +3514,53 @@ const fetchRestaurantMeta = useCallback(async () => {
                                   : <span style={{ color: C.textMuted }}>—</span>}
                               </td>
                             )}
-                            <td style={{ padding: "10px 14px", textAlign: "right", fontWeight: 500, color: C.text }}>₹{Number(item.price).toFixed(2)}</td>
+                            <td style={{ padding: "10px 14px", textAlign: "right", fontWeight: 500, color: C.text }}>
+                              {activeDiscount ? (
+                                <>
+                                  <div style={{ color: C.primary }}>₹{sale}</div>
+                                  <div style={{ fontSize: 10, color: C.textMuted, textDecoration: 'line-through', fontWeight: 400 }}>₹{Number(item.price).toFixed(0)}</div>
+                                </>
+                              ) : (
+                                <>₹{Number(item.price).toFixed(2)}</>
+                              )}
+                            </td>
+                            {isPackagedLob && (
+                              <td style={{ padding: "10px 14px", textAlign: "right", minWidth: 200 }}>
+                                <div style={{ display: 'inline-flex', gap: 4, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                  <input
+                                    type="number" min={1} max={100} placeholder="%"
+                                    value={draft.percent}
+                                    onChange={(e) => setDiscountField(item.id, 'percent', e.target.value)}
+                                    style={{ width: 52, padding: '4px 6px', borderRadius: 6, fontSize: 11, border: `0.5px solid ${C.border}` }}
+                                  />
+                                  <span style={{ fontSize: 10, color: C.textMuted }}>×</span>
+                                  <input
+                                    type="number" min={1} max={365} placeholder="days"
+                                    value={draft.days}
+                                    onChange={(e) => setDiscountField(item.id, 'days', e.target.value)}
+                                    style={{ width: 58, padding: '4px 6px', borderRadius: 6, fontSize: 11, border: `0.5px solid ${C.border}` }}
+                                  />
+                                  <button
+                                    type="button"
+                                    disabled={discountSaving === item.id}
+                                    onClick={() => saveDiscount(item)}
+                                    style={{ fontSize: 10, fontWeight: 600, padding: '4px 8px', borderRadius: 6, border: 'none', background: C.primary, color: '#fff', cursor: 'pointer' }}
+                                  >
+                                    {discountSaving === item.id ? '…' : 'Apply'}
+                                  </button>
+                                  {(activeDiscount || Number(item.discount_percent) > 0) && (
+                                    <button
+                                      type="button"
+                                      disabled={discountSaving === item.id}
+                                      onClick={() => saveDiscount(item, { clear: true })}
+                                      style={{ fontSize: 10, fontWeight: 600, padding: '4px 8px', borderRadius: 6, border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.textSub, cursor: 'pointer' }}
+                                    >
+                                      Clear
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            )}
                             <td style={{ padding: "10px 14px", textAlign: "right" }}>
                               {item.image_url
                                 ? <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
@@ -3323,7 +3589,8 @@ const fetchRestaurantMeta = useCallback(async () => {
                                   {launchingId === item.id ? '…' : '🚀 Launch now'}
                                 </button>
                               )}
-                              <button onClick={() => generateStory(item)} disabled={generatingStoryId === item.id}
+                              {!isPackagedLob && (
+                              <button onClick={() => generateStory(item)} disabled={generatingStoryId === item.id || !instagramHandle}
                                 title={instagramHandle
                                   ? 'Download an Instagram story template for this item'
                                   : 'Add your Instagram handle in Settings to enable story templates'}
@@ -3336,6 +3603,7 @@ const fetchRestaurantMeta = useCallback(async () => {
                                 }}>
                                 {generatingStoryId === item.id ? '…' : '📸 Story'}
                               </button>
+                              )}
                               <button onClick={() => toggleAvailability(item)} disabled={isToggle}
                                 title={inStock ? 'In stock — tap to mark out of stock' : 'Out of stock — tap to mark in stock'}
                                 style={{
@@ -3350,6 +3618,7 @@ const fetchRestaurantMeta = useCallback(async () => {
                               </div>
                             </td>
                             <td style={{ padding: "10px 14px", textAlign: "right" }}>
+                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
                               <button onClick={() => toggleSpecialToday(item)} disabled={isSpecialToggle}
                                 title={isSpecial ? "Remove from today's specials" : "Mark as today's special"}
                                 style={{
@@ -3361,6 +3630,20 @@ const fetchRestaurantMeta = useCallback(async () => {
                                   ? <Spinner size={12} />
                                   : <span style={{ position: "absolute", top: 3, left: isSpecial ? 19 : 3, width: 14, height: 14, borderRadius: "50%", background: "#fff", transition: "left .2s" }} />}
                               </button>
+                              {isPackagedLob && (
+                                <button
+                                  onClick={() => openPromoDraft(item)}
+                                  disabled={promoLoading}
+                                  title="Generate sales pitch + preview Instagram Feed/Story"
+                                  style={{
+                                    fontSize: 10, fontWeight: 600, padding: '4px 8px', borderRadius: 8,
+                                    border: `0.5px solid ${C.primaryBorder}`, background: C.primaryLight, color: C.primaryDark, cursor: 'pointer',
+                                  }}
+                                >
+                                  {promoLoading ? '…' : '📣 Promo'}
+                                </button>
+                              )}
+                              </div>
                             </td>
                           </tr>
                         );
@@ -3371,6 +3654,76 @@ const fetchRestaurantMeta = useCallback(async () => {
                   </table>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {promoModal && (
+          <div style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 80,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+          }}>
+            <div style={{ ...CARD, width: 'min(640px, 100%)', maxHeight: '90vh', overflow: 'auto', padding: 20 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+                <div>
+                  <h3 style={{ margin: 0, fontFamily: FONTS.heading, fontSize: 16 }}>Instagram promo</h3>
+                  <p style={{ margin: '4px 0 0', fontSize: 12, color: C.textMuted }}>
+                    {promoModal.product?.name}
+                    {promoModal.offer?.discount_active
+                      ? ` · ${Math.round(promoModal.offer.discount_percent)}% off`
+                      : (promoModal.offer?.is_special ? ' · Special' : '')}
+                    {' · '}copy by {promoModal.generated_by}
+                  </p>
+                </div>
+                <button type="button" onClick={() => setPromoModal(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 18, color: C.textMuted }}>✕</button>
+              </div>
+
+              {(promoModal.product?.image_urls || []).length > 0 && (
+                <div style={{ display: 'flex', gap: 8, overflowX: 'auto', marginBottom: 12 }}>
+                  {promoModal.product.image_urls.map((url) => (
+                    <img key={url} src={url} alt="" style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 8, border: `0.5px solid ${C.border}` }} />
+                  ))}
+                </div>
+              )}
+
+              <label style={{ fontSize: 11, fontWeight: 600, color: C.textMuted, display: 'block', marginBottom: 4 }}>Feed caption (editable)</label>
+              <textarea
+                value={promoCaption}
+                onChange={(e) => setPromoCaption(e.target.value)}
+                rows={5}
+                style={{ width: '100%', fontSize: 13, padding: 10, borderRadius: 8, border: `0.5px solid ${C.border}`, resize: 'vertical', boxSizing: 'border-box' }}
+              />
+
+              <div style={{ display: 'flex', gap: 16, margin: '12px 0', flexWrap: 'wrap' }}>
+                <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input type="checkbox" checked={promoPublishFeed} onChange={(e) => setPromoPublishFeed(e.target.checked)} />
+                  Publish Feed / Carousel
+                </label>
+                <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input type="checkbox" checked={promoPublishStory} onChange={(e) => setPromoPublishStory(e.target.checked)} />
+                  Publish Story
+                </label>
+              </div>
+
+              <AlertBanner type={igCanPublish ? 'good' : 'warn'}>
+                {igCanPublish
+                  ? `Instagram publishing is connected${instagramUserId ? ` (IG ${instagramUserId})` : ''}. Confirm to push Feed and/or Story.`
+                  : (promoModal.publish?.setup_hint
+                    || 'Handle alone is not enough — set Instagram user ID + Meta publish token in Settings. You can still download the Story SVG.')}
+                {(promoModal.publish_readiness?.note) ? ` ${promoModal.publish_readiness.note}` : ''}
+              </AlertBanner>
+
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap', marginTop: 12 }}>
+                <Btn variant="ghost" onClick={downloadPromoStorySvg}>↓ Story SVG</Btn>
+                <Btn variant="secondary" onClick={() => setPromoModal(null)}>Cancel</Btn>
+                <Btn
+                  onClick={publishPromo}
+                  disabled={promoPublishing || !igCanPublish || (!promoPublishFeed && !promoPublishStory)}
+                  title={!igCanPublish ? 'Connect Instagram user ID + publish token first' : 'Confirm publish'}
+                >
+                  {promoPublishing ? 'Publishing…' : 'Confirm & publish'}
+                </Btn>
+              </div>
             </div>
           </div>
         )}

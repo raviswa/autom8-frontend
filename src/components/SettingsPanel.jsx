@@ -472,6 +472,7 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
         daily_settlement_enabled: d.daily_settlement_enabled !== false,
         weekly_promo_drafts_enabled: d.weekly_promo_drafts_enabled !== false,
         instagram_handle: d.instagram_handle ?? '',
+        instagram_user_id: d.instagram_user_id ?? '',
         logo_url:      d.logo_url      ?? '',
         restaurant_type:   d.restaurant_type ?? 'restaurant',
         lob_type:          d.lob_type ?? 'restaurant',   // ← add this line
@@ -777,6 +778,17 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
               onChange={v => set('instagram_handle', v)}
               placeholder="@ammas.kitchen"
             />
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <Label>Instagram user ID (for direct publish)</Label>
+            <Input
+              value={form.instagram_user_id}
+              onChange={v => set('instagram_user_id', v)}
+              placeholder="17841…"
+            />
+            <p style={{ fontSize: 11, color: C.textMuted, margin: '6px 0 0' }}>
+              Professional (Business/Creator) account ID linked to your Facebook Page. Required for Confirm &amp; publish — handle alone is not enough. Use a Meta token with instagram_content_publish (WhatsApp Meta token may work if the same app has that permission).
+            </p>
           </div>
           <ToggleRow
             label="Daily settlement WhatsApp (evening summary)"
