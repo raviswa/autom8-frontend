@@ -18,16 +18,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useSubscription, FEATURES } from '../contexts/SubscriptionContext';
 import { MENU_SLOT_OPTIONS, normalizeMenuSlots, toggleMenuSlot } from '../helpers/menuSlots';
 
-// ─── Design tokens (matches ManagerPortal) ────────────────────────────────────
-const C = {
-  primary:       '#378ADD', primaryDark:  '#185FA5', primaryLight: '#E6F1FB', primaryBorder:'#B5D4F4',
-  success:       '#1D9E75', successLight: '#E1F5EE', successBorder:'#9FE1CB', successDark:  '#085041',
-  warning:       '#BA7517', warningLight: '#FAEEDA', warningBorder:'#FAC775', warningDark:  '#633806',
-  danger:        '#A32D2D', dangerLight:  '#FCEBEB', dangerBorder: '#F7C1C1', dangerDark:   '#791F1F',
-  pageBg:        '#F5F5F3', cardBg:       '#ffffff', surfaceBg:    '#F5F5F3',
-  border:        '#E8E8E5', borderStrong: '#D0D0CC',
-  text:          '#111111', textSub:      '#555555', textMuted:    '#999999',
-};
+// ─── Design tokens (shared brand theme — same as ManagerPortal / owner portal) ─
+import { C } from '../theme/brand';
 
 const CARD = {
   background: C.cardBg,
