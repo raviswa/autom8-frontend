@@ -526,6 +526,8 @@ export default function ManagerPortal() {
   const [assignTableSel, setAssignTableSel] = useState({});
   const [lobType,        setLobType]        = useState('restaurant');
   const [allowManagerUpload, setAllowManagerUpload] = useState(false);
+  const [instagramHandle, setInstagramHandle] = useState('');
+  const [generatingStoryId, setGeneratingStoryId] = useState(null);
   const [activeTab,      setActiveTab]      = useState('queue');
   const [toastMsg,       setToastMsg]       = useState('');
 
@@ -665,6 +667,7 @@ const fetchRestaurantMeta = useCallback(async () => {
     if (rest) {
       setLobType(rest.lob_type || 'restaurant');
       setAllowManagerUpload(!!rest.allow_manager_menu_upload);
+      setInstagramHandle(rest.instagram_handle || '');
     }
   } catch (e) { /* non-fatal — falls back to restaurant schema */ }
 }, [apiClient]);
@@ -1205,6 +1208,47 @@ const fetchRestaurantMeta = useCallback(async () => {
       showToast(err.response?.data?.error || `Failed to restock ${item.name}`);
     } finally {
       setTogglingId(null);
+    }
+  };
+
+  const [launchingId, setLaunchingId] = useState(null);
+  const launchNow = async (item) => {
+    if (!window.confirm(`Launch "${item.name}" now? This makes it purchasable immediately and notifies anyone on its waitlist.`)) return;
+    setLaunchingId(item.id);
+    try {
+      const res = await apiClient.post(`/api/menu-items/${item.id}/launch`);
+      const notified = res.data?.waitlist_notified || 0;
+      setMenuItems(prev => prev.map(m => m.id === item.id
+        ? { ...m, availability_status: 'in_stock', is_stocked: true, is_available: true, launch_at: null }
+        : m));
+      showToast(notified ? `${item.name} is live · notified ${notified} waitlist` : `${item.name} is live`);
+    } catch (err) {
+      showToast(err.response?.data?.error || `Failed to launch ${item.name}`);
+    } finally {
+      setLaunchingId(null);
+    }
+  };
+
+  const generateStory = async (item) => {
+    if (!instagramHandle) {
+      showToast('Add your Instagram handle in Settings first, then generate stories.', 'error');
+      return;
+    }
+    setGeneratingStoryId(item.id);
+    try {
+      const res = await apiClient.get(`/api/dashboard/sku-story/${item.id}`, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'image/svg+xml' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${(item.name || 'story').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-story.svg`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      showToast(err.response?.data?.error || `Could not generate story for ${item.name}`);
+    } finally {
+      setGeneratingStoryId(null);
     }
   };
 
@@ -3171,6 +3215,29 @@ const fetchRestaurantMeta = useCallback(async () => {
                                   border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.textSub, cursor: 'pointer',
                                 }}>
                                 + Batch
+                              </button>
+                              {['coming_soon', 'preorder'].includes(String(item.availability_status || '').toLowerCase()) && (
+                                <button onClick={() => launchNow(item)} disabled={launchingId === item.id}
+                                  title="Make this item live now and notify its waitlist"
+                                  style={{
+                                    fontSize: 10, fontWeight: 600, padding: '4px 8px', borderRadius: 8,
+                                    border: `0.5px solid ${C.success}`, background: C.successLight, color: C.successDark, cursor: 'pointer',
+                                  }}>
+                                  {launchingId === item.id ? '…' : '🚀 Launch now'}
+                                </button>
+                              )}
+                              <button onClick={() => generateStory(item)} disabled={generatingStoryId === item.id}
+                                title={instagramHandle
+                                  ? 'Download an Instagram story template for this item'
+                                  : 'Add your Instagram handle in Settings to enable story templates'}
+                                style={{
+                                  fontSize: 10, fontWeight: 600, padding: '4px 8px', borderRadius: 8,
+                                  border: `0.5px solid ${C.border}`,
+                                  background: instagramHandle ? C.cardBg : C.surfaceBg,
+                                  color: instagramHandle ? C.textSub : C.textMuted,
+                                  cursor: instagramHandle ? 'pointer' : 'not-allowed',
+                                }}>
+                                {generatingStoryId === item.id ? '…' : '📸 Story'}
                               </button>
                               <button onClick={() => toggleAvailability(item)} disabled={isToggle}
                                 title={inStock ? 'In stock — tap to mark out of stock' : 'Out of stock — tap to mark in stock'}

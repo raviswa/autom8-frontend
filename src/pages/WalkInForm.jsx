@@ -22,7 +22,7 @@ export default function WalkInForm() {
   const [step,          setStep]         = useState('form');   // 'form' | 'token'
   const [name,          setName]         = useState('');
   const [phone,         setPhone]        = useState('');
-  const [type,          setType]         = useState('');        // 'dinein' | 'takeaway'
+  const [type,          setType]         = useState('');        // 'dinein' | 'takeaway' | 'queue'
   const [pax,           setPax]          = useState(2);
   const [loading,       setLoading]      = useState(false);
   const [error,         setError]        = useState('');
@@ -66,8 +66,8 @@ export default function WalkInForm() {
   // ─── Submit ────────────────────────────────────────────────────────────────
   const submit = async () => {
     if (!name.trim()) { setError('Please enter your name');              return; }
-    if (!type)        { setError('Please choose dine-in or takeaway');   return; }
-    if (type === 'dinein' && (pax < 1 || pax > 20)) {
+    if (!type)        { setError('Please choose Token / Queue, Dine-in, or Takeaway'); return; }
+    if ((type === 'dinein' || type === 'queue') && (pax < 1 || pax > 20)) {
       setError('Please enter a valid number of people (1–20)');
       return;
     }
@@ -87,7 +87,7 @@ export default function WalkInForm() {
           name:          name.trim(),
           phone:         phone.trim(),
           type,
-          pax:           type === 'takeaway' ? 1 : pax,
+          pax:           type === 'takeaway' ? 1 : Math.max(1, parseInt(pax, 10) || 1),
           restaurant_id: restaurantId,
         }),
       });
@@ -132,7 +132,13 @@ export default function WalkInForm() {
           </div>
 
           <h1 className="text-2xl font-bold text-gray-900 mb-1">You're checked in!</h1>
-          <p className="text-gray-500 text-sm mb-6">Please wait while we prepare your table.</p>
+          <p className="text-gray-500 text-sm mb-6">
+            {token.type === 'queue'
+              ? 'Our team will assist you shortly.'
+              : token.type === 'dinein'
+                ? 'Please wait while we prepare your table.'
+                : 'Please wait near the counter.'}
+          </p>
 
           <div className="bg-blue-50 border-2 border-blue-200 rounded-2xl p-6 mb-6">
             <p className="text-xs font-semibold text-blue-400 uppercase tracking-widest mb-2">Your Token</p>
@@ -146,14 +152,20 @@ export default function WalkInForm() {
             </div>
             <div className="flex justify-between">
               <span className="text-gray-400">Type</span>
-              <span className="font-medium capitalize">{token.type === 'dinein' ? 'Dine-in' : 'Takeaway'}</span>
+              <span className="font-medium">
+                {token.type === 'dinein' ? 'Dine-in'
+                  : token.type === 'queue' ? 'Token / Queue'
+                  : token.type === 'takeaway' ? 'Takeaway'
+                  : (token.type || '—')}
+              </span>
             </div>
-            {token.type === 'dinein' && (
+            {(token.type === 'dinein' || token.type === 'queue') && (
               <div className="flex justify-between">
                 <span className="text-gray-400">Party size</span>
                 <span className="font-medium">{token.pax} {token.pax === 1 ? 'person' : 'people'}</span>
               </div>
             )}
+            {/* wait_estimate only populates estimate_display for dinein tokens */}
             {token.type === 'dinein' && token.estimate_display && (
               <div className="flex justify-between">
                 <span className="text-gray-400">Est. wait</span>
@@ -162,7 +174,11 @@ export default function WalkInForm() {
             )}
           </div>
 
-          {token.type === 'dinein' ? (
+          {token.type === 'queue' ? (
+            <p className="text-sm text-gray-500">
+              The manager has been notified — please wait, our team will assist you shortly.
+            </p>
+          ) : token.type === 'dinein' ? (
             <p className="text-sm text-gray-500">
               The manager has been notified. You'll receive a WhatsApp message when your table is ready.
             </p>
@@ -206,7 +222,7 @@ export default function WalkInForm() {
 
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">
-              WhatsApp number <span className="font-normal text-gray-400">(for table notification)</span>
+              WhatsApp number <span className="font-normal text-gray-400">(optional)</span>
             </label>
             <input
               type="tel"
@@ -218,16 +234,17 @@ export default function WalkInForm() {
           </div>
 
           <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">How would you like to order?</label>
-            <div className="grid grid-cols-2 gap-3">
+            <label className="block text-sm font-semibold text-gray-700 mb-2">How can we help you today?</label>
+            <div className="grid grid-cols-3 gap-2">
               {[
-                { value: 'dinein',   label: 'Dine-in',  icon: '🪑' },
-                { value: 'takeaway', label: 'Takeaway', icon: '🛍️' },
+                { value: 'queue',    label: 'Token / Queue', icon: '🎫' },
+                { value: 'dinein',   label: 'Dine-in',       icon: '🪑' },
+                { value: 'takeaway', label: 'Takeaway',      icon: '🛍️' },
               ].map(opt => (
                 <button
                   key={opt.value}
                   onClick={() => setType(opt.value)}
-                  className={`rounded-xl border-2 py-4 text-sm font-semibold transition flex flex-col items-center gap-1 ${
+                  className={`rounded-xl border-2 py-3 px-1 text-xs font-semibold transition flex flex-col items-center gap-1 ${
                     type === opt.value
                       ? 'border-blue-600 bg-blue-50 text-blue-700'
                       : 'border-gray-200 hover:border-blue-300 text-gray-600'
@@ -240,7 +257,7 @@ export default function WalkInForm() {
             </div>
           </div>
 
-          {type === 'dinein' && (
+          {(type === 'dinein' || type === 'queue') && (
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-2">
                 How many people? <span className="font-bold text-blue-600">{pax}</span>

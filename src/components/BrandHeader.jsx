@@ -1,7 +1,7 @@
 import React from 'react';
 import { C, FONTS } from '../theme/brand';
 
-export default function BrandHeader({ title, subtitle, right }) {
+export default function BrandHeader({ title, subtitle, right, logoUrl, logoAlt }) {
   return (
     <div style={{
       background: C.emeraldDark,
@@ -13,10 +13,24 @@ export default function BrandHeader({ title, subtitle, right }) {
       gap: 12,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        {/* Logo mark */}
+        {/* Business logo, with the Autom8 mark as fallback */}
+        {logoUrl ? (
+          <img
+            src={logoUrl}
+            alt={logoAlt || title || 'Business logo'}
+            style={{
+              width: 34, height: 34, borderRadius: 8, objectFit: 'cover',
+              background: '#fff', border: `1px solid ${C.goldBorder}`, flexShrink: 0,
+            }}
+            onError={(event) => {
+              event.currentTarget.style.display = 'none';
+              event.currentTarget.nextElementSibling.style.display = 'flex';
+            }}
+          />
+        ) : null}
         <div style={{
           width: 34, height: 34, borderRadius: 8, background: C.gold,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          display: logoUrl ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center',
           fontFamily: FONTS.heading, fontWeight: 600, fontSize: 15,
           color: C.emeraldDark, flexShrink: 0,
         }}>M</div>

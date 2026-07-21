@@ -17,6 +17,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useSubscription, FEATURES } from '../contexts/SubscriptionContext';
 import { MENU_SLOT_OPTIONS, normalizeMenuSlots, toggleMenuSlot } from '../helpers/menuSlots';
+import BrandHeader from './BrandHeader';
 
 // ─── Design tokens (shared brand theme — same as ManagerPortal / owner portal) ─
 import { C } from '../theme/brand';
@@ -442,6 +443,8 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
   const [saving, setSaving] = useState(false);
   const [saved,  setSaved]  = useState(false);
   const [resolvingPickup, setResolvingPickup] = useState(false);
+  const [invoiceRange, setInvoiceRange] = useState({ from: '', to: '' });
+  const [exportingInvoices, setExportingInvoices] = useState(false);
 
   useEffect(() => {
     apiClient.get('/api/dashboard/waba').then(r => {
@@ -478,7 +481,7 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
         pickup_longitude:  lng ?? '',
         pickup_coords_source: lat && lng ? 'saved' : '',
       });
-    }).catch(() => showToast('Failed to load restaurant info', 'error'));
+    }).catch(() => showToast('Failed to load business info', 'error'));
   }, [apiClient, showToast]);
 
   const set = (k, v) => { setSaved(false); setForm(p => ({ ...p, [k]: v })); };
@@ -560,6 +563,33 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
     }
   };
 
+  const downloadInvoices = async () => {
+    if (!invoiceRange.from || !invoiceRange.to) {
+      showToast?.('Pick a start and end date first');
+      return;
+    }
+    setExportingInvoices(true);
+    try {
+      const res = await apiClient.get('/api/invoices/export', {
+        params: { from: invoiceRange.from, to: invoiceRange.to },
+        responseType: 'blob',
+      });
+      const blobUrl = window.URL.createObjectURL(new Blob([res.data], { type: 'application/zip' }));
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `invoices-${invoiceRange.from}-to-${invoiceRange.to}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (_err) {
+      // responseType: 'blob' means axios can't parse a JSON error body here.
+      showToast?.('No invoices found for that date range, or export failed.');
+    } finally {
+      setExportingInvoices(false);
+    }
+  };
+
   const save = async () => {
     setSaving(true);
     try {
@@ -586,7 +616,7 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
       if (coordsWarning) {
         showToast('Saved. Pickup coordinates are not set yet — use Resolve location or a pin link for accurate delivery distance.', 'warning');
       } else {
-        notifySaveResult(showToast, res, 'Restaurant details saved');
+        notifySaveResult(showToast, res, isRestaurantLob(lobType || form.lob_type) ? 'Restaurant details saved' : 'Business details saved');
       }
     } catch (e) { showToast(e.response?.data?.error ?? 'Save failed', 'error'); }
     finally { setSaving(false); }
@@ -599,7 +629,7 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
-        <Btn onClick={save} loading={saving}>{saved ? '✓ Saved' : 'Save restaurant details'}</Btn>
+        <Btn onClick={save} loading={saving}>{saved ? '✓ Saved' : (isRestaurantLob(lobType || form.lob_type) ? 'Save restaurant details' : 'Save business details')}</Btn>
       </div>
       <div style={grid2}>
         <div><Label required>Display name</Label><Input value={form.display_name} onChange={v => set('display_name', v)} placeholder="Murugan Idli Shop" /></div>
@@ -621,7 +651,7 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
       <SectionTitle>Contact</SectionTitle>
       <div style={grid2}>
         <div><Label>Contact phone</Label><Input value={form.contact_phone} onChange={v => set('contact_phone', v)} placeholder="044-2345XXXX" /></div>
-        <div><Label>Contact email</Label><Input value={form.contact_email} onChange={v => set('contact_email', v)} type="email" placeholder="hello@restaurant.com" /></div>
+        <div><Label>Contact email</Label><Input value={form.contact_email} onChange={v => set('contact_email', v)} type="email" placeholder="hello@yourbrand.com" /></div>
       </div>
       <div style={{ marginTop: 12 }}><Label>Website URL</Label><Input value={form.website_url} onChange={v => set('website_url', v)} placeholder="https://yoursite.com" /></div>
 
@@ -707,10 +737,34 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
               const apiBase = (apiClient?.defaults?.baseURL || window.location.origin || '').replace(/\/$/, '');
               const url = `${apiBase}/shop?slug=${slug}`;
               const qr = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(url)}`;
+              const downloadQr = async () => {
+                try {
+                  const resp = await fetch(qr);
+                  const blob = await resp.blob();
+                  const blobUrl = window.URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = blobUrl;
+                  a.download = `${slug}-storefront-qr.png`;
+                  document.body.appendChild(a);
+                  a.click();
+                  a.remove();
+                  window.URL.revokeObjectURL(blobUrl);
+                } catch (_err) {
+                  // Cross-origin fetch blocked — fall back to opening the image directly.
+                  window.open(qr, '_blank', 'noopener');
+                }
+              };
               return (
                 <div style={{ marginTop: 12 }}>
                   <Label>QR for print / Status</Label>
                   <img src={qr} alt="Storefront QR" width={160} height={160} style={{ display: 'block', borderRadius: 8, border: `0.5px solid ${C.border}` }} />
+                  <button
+                    type="button"
+                    onClick={downloadQr}
+                    style={{ display: 'inline-block', marginTop: 8, fontSize: 12, color: C.gold, background: 'none', border: 'none', textDecoration: 'underline', cursor: 'pointer', fontWeight: 500, padding: 0 }}
+                  >
+                    Download QR
+                  </button>
                 </div>
               );
             })()}
@@ -733,6 +787,27 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
             checked={!!form.weekly_promo_drafts_enabled}
             onToggle={() => set('weekly_promo_drafts_enabled', !form.weekly_promo_drafts_enabled)}
           />
+          <div style={{ marginTop: 16 }}>
+            <Label>Download invoices (bookkeeping)</Label>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input
+                type="date"
+                value={invoiceRange.from}
+                onChange={e => setInvoiceRange(r => ({ ...r, from: e.target.value }))}
+                style={{ padding: '6px 8px', borderRadius: 6, border: `0.5px solid ${C.border}`, fontSize: 12 }}
+              />
+              <span style={{ fontSize: 12, color: C.textSub }}>to</span>
+              <input
+                type="date"
+                value={invoiceRange.to}
+                onChange={e => setInvoiceRange(r => ({ ...r, to: e.target.value }))}
+                style={{ padding: '6px 8px', borderRadius: 6, border: `0.5px solid ${C.border}`, fontSize: 12 }}
+              />
+              <Btn onClick={downloadInvoices} disabled={exportingInvoices}>
+                {exportingInvoices ? 'Preparing…' : 'Download ZIP'}
+              </Btn>
+            </div>
+          </div>
         </>
       )}
 
@@ -1171,7 +1246,8 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
         shiprocket_connected: !!d.shiprocket_connected,
         shiprocket_email: d.shiprocket_email ?? '',
         shiprocket_api_key: '',
-        shiprocket_has_key: !!d.shiprocket_connected || !!d.shiprocket_email,
+        // Prefer server flag (password never returned). Fall back to connected/email for older APIs.
+        shiprocket_has_key: !!(d.shiprocket_has_password ?? d.shiprocket_connected ?? d.shiprocket_email),
         intra_city_charge: d.intra_city_charge ?? '',
         outstation_charge: d.outstation_charge ?? '',
         free_delivery_above: d.free_delivery_above ?? '',
@@ -1203,7 +1279,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
         if (!slotMap[cat]) slotMap[cat] = ['anytime'];
       });
       setCatSlots(slotMap);
-    }).catch(() => showToast('Failed to load kitchen config', 'error'));
+    }).catch(() => showToast(restaurantLob ? 'Failed to load kitchen config' : 'Failed to load order settings', 'error'));
   }, [apiClient, showToast]);
 
   const set = (k, v) => { setSaved(false); setForm(p => ({ ...p, [k]: v })); };
@@ -1262,7 +1338,10 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
       });
       setCompareRows(res.data.rows || []);
       if (!res.data.shiprocket_available) {
-        setCompareError('Shiprocket API User missing — add email + password from Shiprocket Settings → API (Create API User), then Compare again.');
+        setCompareError(
+          'Shiprocket API User missing — enter email + password in the Shiprocket fields above '
+          + '(from Shiprocket panel → Settings → API → Create API User), Save changes, then Compare again.',
+        );
       }
     } catch (e) {
       setCompareError(e.response?.data?.error || e.message || 'Compare failed');
@@ -1331,7 +1410,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
         shipping_provider: form.shipping_provider === 'custom' ? 'custom' : 'shiprocket',
         courier_name: (form.courier_name || '').trim() || null,
         courier_rate_card: serializeCourierRateCard(form.courier_rate_card),
-        shiprocket_connected: form.shipping_provider !== 'custom' && (!!form.shiprocket_connected || !!form.shiprocket_api_key?.trim() || !!form.shiprocket_email?.trim() || !!form.shiprocket_has_key),
+        // Backend derives shiprocket_connected from whether email+password exist.
         ...(form.shiprocket_email?.trim() ? { shiprocket_email: form.shiprocket_email.trim() } : {}),
         ...(form.shiprocket_api_key?.trim() ? { shiprocket_api_key: form.shiprocket_api_key.trim() } : {}),
         intra_city_charge: parseFloat(form.intra_city_charge) || 0,
@@ -1341,6 +1420,16 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
         cod_enabled_city: !!form.cod_enabled_city,
         cod_enabled_outstation: !!form.cod_enabled_outstation,
       });
+      if (res.data?.restaurant) {
+        const r = res.data.restaurant;
+        setForm((prev) => ({
+          ...prev,
+          shiprocket_api_key: '',
+          shiprocket_email: r.shiprocket_email ?? prev.shiprocket_email,
+          shiprocket_connected: !!r.shiprocket_connected,
+          shiprocket_has_key: !!(r.shiprocket_has_password ?? r.shiprocket_connected),
+        }));
+      }
       // Bulk-update menu_items.fulfillment_section per category mapping
       if (isRest && form.takeaway_fulfillment_mode === 'multi_counter' && Object.keys(catMap).length) {
         for (const [cat, secId] of Object.entries(catMap)) {
@@ -1360,7 +1449,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
       }
 
       setSaved(true);
-      notifySaveResult(showToast, res, 'Kitchen settings saved');
+      notifySaveResult(showToast, res, restaurantLob ? 'Kitchen settings saved' : 'Order settings saved');
     } catch (e) { showToast(e.response?.data?.error ?? 'Save failed', 'error'); }
     finally { setSaving(false); }
   };
@@ -1440,7 +1529,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
             placeholder="25-35"
           />
           <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
-            Kitchen prep time only. Drive time from Google Maps (with traffic) is added automatically when the customer shares their location.
+            {restaurantLob ? 'Kitchen prep time only.' : 'Preparation / packing time only.'} Drive time from Google Maps (with traffic) is added automatically when the customer shares their location.
           </div>
         </div>
         )}
@@ -1473,7 +1562,9 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
                 onToggle={() => set('scheduled_takeaway_enabled', !form.scheduled_takeaway_enabled)}
               />
               <div style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 16px' }}>
-                Pickup date and time via WhatsApp calendar before the menu. Works when the kitchen is closed too.
+                {restaurantLob
+                  ? 'Pickup date and time via WhatsApp calendar before the menu. Works when the kitchen is closed too.'
+                  : 'Pickup date and time via WhatsApp calendar before the catalog. Works outside business hours too.'}
               </div>
             </>
           )}
@@ -1493,7 +1584,9 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
             border: `0.5px solid ${C.warningBorder}`,
           }}>
             <strong>Tip:</strong> Ask customers to tap <strong>Share location</strong> on WhatsApp (not just type an address) so delivery charge and radius checks are accurate.
-            Set your kitchen pin under <strong>Restaurant → Cloud kitchen</strong> using a full Google Maps link.
+            {restaurantLob
+              ? <> Set your kitchen pin under <strong>Restaurant → Cloud kitchen</strong> using a full Google Maps link.</>
+              : <> Keep your pickup address up to date in the <strong>Business</strong> tab for accurate distances.</>}
           </div>
           <div style={{ marginBottom: 12 }}>
             <Label>Default charge when distance unknown (₹)</Label>
@@ -1573,7 +1666,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
             <div>
               <Label>Minimum order — delivery (₹)</Label>
               <Input value={form.min_delivery_order_amount} onChange={v => set('min_delivery_order_amount', v)} type="number" placeholder="150" />
-              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>Items subtotal before charges. e.g. ₹150 for cloud kitchens.</div>
+              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>Items subtotal before charges{restaurantLob ? '. e.g. ₹150 for cloud kitchens' : ''}.</div>
             </div>
             {showTakeaway && (
             <div>
@@ -1632,42 +1725,44 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
             ))}
           </div>
 
-          {form.shipping_provider !== 'custom' ? (
-            <>
-            <div style={{
-              fontSize: 12, color: C.textSub, marginBottom: 12, lineHeight: 1.55,
-              padding: '10px 12px', background: C.warningLight, borderRadius: 8,
-              border: `0.5px solid ${C.warningBorder}`,
-            }}>
-              Shiprocket needs an <strong>API User</strong> (Settings → API → Create API User in the Shiprocket panel) —
-              email + password. A random token/password pasted alone returns <strong>401</strong>.
-              We log in to fetch a JWT automatically (valid ~10 days).
+          {/* Always visible — Rate Compare needs these even when "My courier" is selected. */}
+          <div style={{
+            fontSize: 12, color: C.textSub, marginBottom: 12, lineHeight: 1.55,
+            padding: '10px 12px', background: C.warningLight, borderRadius: 8,
+            border: `0.5px solid ${C.warningBorder}`,
+          }}>
+            Shiprocket needs an <strong>API User</strong> (Shiprocket panel → Settings → API → Create API User) —
+            email + password. Do <strong>not</strong> paste a bearer/JWT token; we log in and cache a JWT automatically (~10 days).
+            Required for live Shiprocket quotes <em>and</em> the Rate Compare tool below.
+          </div>
+          <div style={grid2}>
+            <div>
+              <Label>Shiprocket API email</Label>
+              <Input
+                value={form.shiprocket_email}
+                onChange={v => set('shiprocket_email', v)}
+                type="email"
+                placeholder="api-user@yourdomain.com"
+              />
             </div>
-            <div style={grid2}>
-              <div>
-                <Label>Shiprocket API email</Label>
-                <Input
-                  value={form.shiprocket_email}
-                  onChange={v => set('shiprocket_email', v)}
-                  type="email"
-                  placeholder="api-user@yourdomain.com"
-                />
-              </div>
-              <div>
-                <Label>Shiprocket API password</Label>
-                <Input
-                  value={form.shiprocket_api_key}
-                  onChange={v => set('shiprocket_api_key', v)}
-                  type="password"
-                  placeholder={form.shiprocket_has_key ? 'Saved — enter only to replace' : 'API User password'}
-                />
-              </div>
+            <div>
+              <Label>Shiprocket API password</Label>
+              <Input
+                value={form.shiprocket_api_key}
+                onChange={v => set('shiprocket_api_key', v)}
+                type="password"
+                placeholder={form.shiprocket_has_key ? 'Saved — enter only to replace' : 'API User password'}
+                autoComplete="new-password"
+              />
             </div>
-            <div style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 12px' }}>
-              Same-city still uses the intra-city charge below. Outstation uses Shiprocket when credentials are saved; otherwise the flat outstation charge.
-            </div>
-            </>
-          ) : (
+          </div>
+          <div style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 16px' }}>
+            {form.shipping_provider !== 'custom'
+              ? 'Same-city still uses the intra-city charge below. Outstation uses Shiprocket when credentials are saved; otherwise the flat outstation charge.'
+              : 'Saved for Rate Compare (and if you switch back to Shiprocket later). Your custom rate card below still drives checkout prices.'}
+          </div>
+
+          {form.shipping_provider === 'custom' && (
             <>
               <div style={{ marginBottom: 12 }}>
                 <Label>Courier name</Label>
@@ -1786,7 +1881,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
           <SectionTitle>Rate compare tool</SectionTitle>
           <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 12, lineHeight: 1.5 }}>
             Compare live Shiprocket courier quotes with your rate card for the same weight and destination.
-            Uses your draft rates below (save when you are happy with the card).
+            Uses Shiprocket credentials from the fields above (save if you just entered them) and your draft custom rates when present.
           </div>
 
           <div style={{ marginBottom: 10 }}>
@@ -2480,7 +2575,7 @@ function TabStaff({ apiClient, showToast, lobType = 'restaurant' }) {
                 </div>
               )}
             </div>
-            <div><Label required>Login email</Label><Input value={form.email} onChange={v => setF('email', v)} type="email" placeholder="senthil@restaurant.com" /></div>
+            <div><Label required>Login email</Label><Input value={form.email} onChange={v => setF('email', v)} type="email" placeholder="senthil@yourbrand.com" /></div>
             <div><Label>Phone</Label><Input value={form.phone} onChange={v => setF('phone', v)} placeholder="9876543210" /></div>
           </div>
           <div style={{ marginBottom: 14 }}>
@@ -2675,7 +2770,7 @@ function TabStaff({ apiClient, showToast, lobType = 'restaurant' }) {
 // ═════════════════════════════════════════════════════════════════════════════
 const TABS = [
   { id: 'tables',     label: '🪑 Tables'      },
-  { id: 'restaurant', label: '🍽️ Restaurant'  },
+  { id: 'restaurant', label: '🍽️ Restaurant', genericLabel: '🏪 Business' },
   { id: 'services',   label: '🚀 Services'    },
   { id: 'kitchen',    label: '🍳 Kitchen', ordersLabel: '📦 Orders' },
   { id: 'whatsapp',   label: '💬 WhatsApp'    },
@@ -2876,6 +2971,7 @@ export default function SettingsPanel() {
   const isManagerOnly = user?.role === 'manager';
   const hasAnyPaid = (...fs) => fs.some(f => paidFeatures.includes(f));
   const [lobType, setLobType] = useState('restaurant');
+  const [businessIdentity, setBusinessIdentity] = useState({ name: '', logoUrl: '' });
   const [activeTab, setActiveTab] = useState(isManagerOnly ? 'staff' : 'restaurant');
   const [toast, setToast] = useState({ msg: '', type: 'success' });
   const toastTimer = useRef(null);
@@ -2883,8 +2979,13 @@ export default function SettingsPanel() {
   useEffect(() => {
     apiClient.get('/api/dashboard/waba')
       .then((r) => {
-        const next = r.data?.restaurant?.lob_type ?? 'restaurant';
+        const restaurant = r.data?.restaurant || {};
+        const next = restaurant.lob_type ?? 'restaurant';
         setLobType(next);
+        setBusinessIdentity({
+          name: restaurant.display_name || restaurant.name || '',
+          logoUrl: restaurant.logo_url || '',
+        });
       })
       .catch(() => {});
   }, [apiClient]);
@@ -2911,11 +3012,12 @@ export default function SettingsPanel() {
     if (t.brandOnly && !isBrandOwner) return false;
     if (t.id === 'tables' && (!restaurantLob || !hasAnyPaid(FEATURES.DINE_IN, FEATURES.RESERVE_TABLE))) return false;
     return true;
-  }).map(t => (
-    t.id === 'kitchen' && !restaurantLob
-      ? { ...t, label: t.ordersLabel || '📦 Orders' }
-      : t
-  ));
+  }).map(t => {
+    if (restaurantLob) return t;
+    if (t.id === 'kitchen') return { ...t, label: t.ordersLabel || '📦 Orders' };
+    if (t.genericLabel) return { ...t, label: t.genericLabel };
+    return t;
+  });
 
   useEffect(() => {
     if (!isManagerOnly && !filteredTabs.some(t => t.id === activeTab)) {
@@ -2949,23 +3051,21 @@ export default function SettingsPanel() {
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <Toast msg={toast.msg} type={toast.type} />
 
-      {/* Header */}
-      <div style={{ background: C.cardBg, borderBottom: `0.5px solid ${C.border}`, padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-        <div>
-        <h1 style={{ fontSize: 18, fontWeight: 500, color: C.text, margin: 0 }}>
-          {isManagerOnly ? 'Team' : 'Settings'}
-        </h1>
-        <p style={{ fontSize: 12, color: C.textMuted, margin: '2px 0 0' }}>
-          {isManagerOnly
-            ? 'Onboard staff and manage WhatsApp numbers for operational alerts'
+      <BrandHeader
+        title={isManagerOnly ? 'Team' : 'Settings'}
+        subtitle={isManagerOnly
+          ? 'Onboard staff and manage WhatsApp numbers for operational alerts'
+          : businessIdentity.name
+            ? `Manage ${businessIdentity.name}`
             : 'Manage your business configuration'}
-        </p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        logoUrl={businessIdentity.logoUrl}
+        logoAlt={businessIdentity.name ? `${businessIdentity.name} logo` : 'Business logo'}
+        right={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           {!isManagerOnly && (
             <Link
               to={dashboardPath}
-              style={{ fontSize: 12, color: C.primaryDark, textDecoration: 'none', fontWeight: 500 }}
+              style={{ fontSize: 12, color: '#fff', textDecoration: 'none', fontWeight: 500 }}
             >
               ← Back to dashboard
             </Link>
@@ -2973,13 +3073,14 @@ export default function SettingsPanel() {
           {isManagerOnly && (
             <Link
               to="/dashboard/manager"
-              style={{ fontSize: 12, color: C.primaryDark, textDecoration: 'none', fontWeight: 500 }}
+              style={{ fontSize: 12, color: '#fff', textDecoration: 'none', fontWeight: 500 }}
             >
               ← Back to manager portal
             </Link>
           )}
-        </div>
-      </div>
+          </div>
+        }
+      />
 
       <div style={{ maxWidth: 860, margin: '0 auto', padding: '24px 16px' }}>
         {!isManagerOnly && (
