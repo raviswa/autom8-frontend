@@ -449,6 +449,118 @@ function useMenuItems(insightsPack) {
   return insightsPack?.topMenuItems ?? [];
 }
 
+function useItemPerformance(apiClient, startISO, endISO, preset) {
+  const [rows, setRows] = useState(null);
+  useEffect(() => {
+    if (!apiClient || !startISO || !endISO) return;
+    setRows(null);
+    let cancelled = false;
+    const range = preset === "7d" ? "7d" : (preset === "30d" ? "30d" : "custom");
+    (async () => {
+      try {
+        const res = await apiClient.get("/api/dashboard/item-performance", {
+          params: { start: startISO, end: endISO, range, sort: "revenue", limit: 25 },
+        });
+        if (!cancelled) setRows(res.data?.items || []);
+      } catch (err) {
+        console.error("[useItemPerformance]", err?.response?.data || err.message);
+        if (!cancelled) setRows([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [apiClient, startISO, endISO, preset]);
+  return rows;
+}
+
+function useCustomerCohorts(apiClient) {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    if (!apiClient) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiClient.get("/api/dashboard/customer-cohorts");
+        if (!cancelled) setData(res.data);
+      } catch (err) {
+        console.error("[useCustomerCohorts]", err?.response?.data || err.message);
+        if (!cancelled) setData(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [apiClient]);
+  return data;
+}
+
+function ItemPerformanceTable({ rows, rangeLabel }) {
+  return (
+    <StatCard title="Item performance" sub={rangeLabel || "Selected period"}>
+      {!rows ? (
+        <div style={{ fontSize: 12, color: "#aaa" }}>Loading…</div>
+      ) : !rows.length ? (
+        <div style={{ fontSize: 12, color: "#aaa" }}>No item sales in this period</div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr style={{ textAlign: "left", color: "#888", borderBottom: "1px solid #eee" }}>
+                <th style={{ padding: "6px 4px" }}>Item</th>
+                <th style={{ padding: "6px 4px" }}>Orders</th>
+                <th style={{ padding: "6px 4px" }}>Revenue</th>
+                <th style={{ padding: "6px 4px" }}>Cancel %</th>
+                <th style={{ padding: "6px 4px" }}>Avg ready</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={`${r.menu_item_id || r.name}`} style={{ borderBottom: "1px solid #f3f3f3" }}>
+                  <td style={{ padding: "7px 4px", fontWeight: 600 }}>{r.name}</td>
+                  <td style={{ padding: "7px 4px" }}>{r.order_count}</td>
+                  <td style={{ padding: "7px 4px" }}>{fmtINR(r.revenue)}</td>
+                  <td style={{ padding: "7px 4px", color: r.cancellation_rate > 10 ? "#A32D2D" : undefined }}>
+                    {r.cancellation_rate}%
+                  </td>
+                  <td style={{ padding: "7px 4px" }}>
+                    {r.avg_ready_minutes != null ? `${r.avg_ready_minutes}m` : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </StatCard>
+  );
+}
+
+function CustomerCohortsPanel({ data }) {
+  const segs = data?.segments || {};
+  return (
+    <StatCard title="Customer cohorts" sub="Same segments used for marketing broadcasts">
+      {!data ? (
+        <div style={{ fontSize: 12, color: "#aaa" }}>Loading…</div>
+      ) : (
+        <>
+          <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+            <MiniStat label="Repeat rate" value={`${data.repeat_rate ?? 0}%`} />
+            <MiniStat label="New" value={data.new_customers ?? 0} />
+            <MiniStat label="Returning" value={data.returning_customers ?? 0} />
+            <MiniStat label="Total" value={data.total_customers ?? 0} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(140px,1fr))", gap: 8 }}>
+            {Object.entries(segs).map(([key, val]) => (
+              <div key={key} style={{ background: "#fafafa", borderRadius: 8, padding: "8px 10px", border: "1px solid #eee" }}>
+                <div style={{ fontSize: 11, color: "#888", textTransform: "capitalize" }}>{key.replace(/_/g, " ")}</div>
+                <div style={{ fontSize: 16, fontWeight: 700 }}>{val.count}</div>
+                <div style={{ fontSize: 11, color: "#aaa" }}>{val.percent}%</div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </StatCard>
+  );
+}
+
 function useTables(restaurantId) {
   const [snapshot, setSnapshot] = useState({ tables: [], takeawayActive: 0, queueWaiting: 0 });
   const ACTIVE_ORDER_STATUSES = ['pending', 'confirmed', 'in_progress'];
@@ -782,6 +894,8 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
   const kpi           = useKpiData(insightsPack);
   const chartData     = useChartData(insightsPack);
   const menuItems     = useMenuItems(insightsPack);
+  const itemPerf      = useItemPerformance(apiClient, startISO, endISO, preset);
+  const cohorts       = useCustomerCohorts(apiClient);
   const cancelStats   = useCancelStats(apiClient, restaurantId, startISO, endISO);
   const wabaInfo      = useWABAInfo(apiClient);
   const waOrders      = useWAOrders(apiClient, startISO, endISO);
@@ -968,6 +1082,11 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12, marginBottom: 12 }}>
               <CancellationVoids stats={cancelStats} />
               <KotStatus stats={kotStats} />
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12, marginBottom: 12 }}>
+              <ItemPerformanceTable rows={itemPerf} rangeLabel={rangeLabel} />
+              <CustomerCohortsPanel data={cohorts} />
             </div>
 
             {/* Deep insights */}

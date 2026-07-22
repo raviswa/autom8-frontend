@@ -83,6 +83,7 @@ export default function SupplyCatalog({ onLogout }) {
   const [saving,       setSaving]       = useState(false);
   const [error,        setError]        = useState('');
   const [toast,        setToast]        = useState(null);   // { msg, type }
+  const [stockBySku,   setStockBySku]   = useState({});    // skuId → best estimate
 
   // Panel / selection state
   const [panelOpen,    setPanelOpen]    = useState(false);
@@ -105,6 +106,28 @@ export default function SupplyCatalog({ onLogout }) {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Failed to load catalog');
       setItems(json.items || []);
+
+      // Opt-in POS bridge estimates (ignore failures — feature may be unmapped).
+      try {
+        const estRes = await fetch(`${API}/api/supply/catalog/stock-estimates`, {
+          headers: { Authorization: `Bearer ${supplyToken()}` },
+        });
+        if (estRes.ok) {
+          const estJson = await estRes.json();
+          const bySku = {};
+          for (const e of estJson.estimates || []) {
+            const prev = bySku[e.supply_sku_id];
+            if (
+              !prev
+              || (e.days_of_stock_est != null
+                && (prev.days_of_stock_est == null || e.days_of_stock_est < prev.days_of_stock_est))
+            ) {
+              bySku[e.supply_sku_id] = e;
+            }
+          }
+          setStockBySku(bySku);
+        }
+      } catch (_) { /* optional */ }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -391,6 +414,7 @@ export default function SupplyCatalog({ onLogout }) {
                   <ItemRow
                     key={item.id}
                     item={item}
+                    stockEst={stockBySku[item.id]}
                     isLast={idx === catItems.length - 1}
                     bulkMode={bulkMode}
                     checked={!!bulkSelected[item.id]}
@@ -567,7 +591,7 @@ export default function SupplyCatalog({ onLogout }) {
 
 // ── ItemRow ───────────────────────────────────────────────────────────────────
 
-function ItemRow({ item, isLast, bulkMode, checked, onCheck, onEdit, onDelete, onToggleAvail }) {
+function ItemRow({ item, stockEst, isLast, bulkMode, checked, onCheck, onEdit, onDelete, onToggleAvail }) {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 12,
@@ -601,12 +625,22 @@ function ItemRow({ item, isLast, bulkMode, checked, onCheck, onEdit, onDelete, o
           {item.unit}
           {item.min_order_qty > 0 ? ` · Min ${item.min_order_qty}` : ''}
           {item.hsn_code ? ` · HSN ${item.hsn_code}` : ''}
+          {stockEst?.days_of_stock_est != null
+            ? ` · ~${stockEst.days_of_stock_est}d stock (${stockEst.client_name || 'client'})`
+            : ''}
         </div>
       </div>
 
       {/* GST pill */}
       {item.gst_rate > 0 && (
         <Pill label={`GST ${item.gst_rate}%`} color="amber" />
+      )}
+
+      {stockEst?.days_of_stock_est != null && (
+        <Pill
+          label={`~${stockEst.days_of_stock_est}d`}
+          color={stockEst.days_of_stock_est < 2 ? 'red' : stockEst.days_of_stock_est < 5 ? 'amber' : 'green'}
+        />
       )}
 
       {/* Price */}
