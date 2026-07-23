@@ -3,6 +3,7 @@
 // Mount: see main.jsx  |  Styles: injected inline via useEffect
 
 import React, { useState, useEffect, useRef, useCallback, Fragment } from 'react';
+import { loadFacebookSdk, launchWhatsAppEmbeddedSignup } from '../src/helpers/metaEmbeddedSignup';
 const h = React.createElement; // keeps all existing h() calls working unchanged
 
 // ── Configuration ─────────────────────────────────────────────────────────────
@@ -11,6 +12,7 @@ const API_BASE   = (() => {
   const el = document.getElementById(ROOT_ID);
   return (el && el.dataset.api) || "https://autom8-backend-production.up.railway.app";
 })();
+const APP_LOGIN  = "https://app.autom8.works/login";
 
 // ── Static data ───────────────────────────────────────────────────────────────
 const STEPS = [
@@ -65,14 +67,17 @@ const makeDefault = () => ({
   name: "", display_name: "", slug: "", city: "",
   country_code: "IN", currency_code: "INR",
   cuisines: [], kitchen_workflow: "KOT_only",
+  owner_name: "", email: "", owner_password: "",
 
   // Step 2
   dine_in: false, takeaway: false, door_delivery: false,
   table_reservation: false, table_count: 0,
 
-  // Step 3
+  // Step 3 — WhatsApp via Embedded Signup (no Meta Developer Console)
   whatsapp_number: "", waba_id: "", phone_number_id: "",
-  meta_access_token: "", timezone: "Asia/Kolkata",
+  embedded_signup_code: "", display_phone_number: "",
+  es_connected: false,
+  timezone: "Asia/Kolkata",
   payment_mode: "prepay",
   has_lunch: true,  lunch_start: "12:00", lunch_end: "15:00",
   has_dinner: true, dinner_start: "19:00", dinner_end: "23:00",
@@ -87,9 +92,9 @@ const makeDefault = () => ({
 
 // ── Validation rules per step ─────────────────────────────────────────────────
 const REQUIRED = {
-  0: ["name", "display_name", "slug", "city", "country_code"],
+  0: ["name", "display_name", "slug", "city", "country_code", "owner_name", "email", "owner_password"],
   1: [],
-  2: ["whatsapp_number", "phone_number_id", "meta_access_token"],
+  2: ["embedded_signup_code", "waba_id", "phone_number_id"],
   3: [],
   4: [],
 };
@@ -455,6 +460,21 @@ function Step1({ f, set, errors }) {
       ),
     ),
 
+    h("div", { className: "mn-section" },
+      h("p", { className: "mn-section-title" }, "Owner login (for app.autom8.works)"),
+      h("div", { className: "mn-grid" },
+        h(Field, { label: "Owner name *", error: e("owner_name") ? "required" : "" },
+          h(Input, { value: f.owner_name, onChange: (v) => set("owner_name", v), placeholder: "Your full name", hasError: e("owner_name") })
+        ),
+        h(Field, { label: "Login email *", error: e("email") ? "required" : "" },
+          h(Input, { value: f.email, onChange: (v) => set("email", v), placeholder: "you@business.com", hasError: e("email") })
+        ),
+        h(Field, { label: "Password *", error: e("owner_password") ? "required" : "", full: true },
+          h(Input, { type: "password", value: f.owner_password, onChange: (v) => set("owner_password", v), placeholder: "Min 8 characters", hasError: e("owner_password") })
+        ),
+      )
+    ),
+
     // Cuisines
     h("div", { className: "mn-field mn-field-full", style: { marginTop: 4 } },
       h("label", { className: "mn-label" }, "Cuisine Types"),
@@ -516,34 +536,102 @@ function Step2({ f, set }) {
   );
 }
 
-// ── Step 3: WhatsApp & Automation Config ──────────────────────────────────────
+// ── Step 3: WhatsApp via Embedded Signup (no Meta Developer Console) ─────────
 
 function Step3({ f, set, errors }) {
   const e = (k) => errors.includes(k);
+  const [esConfig, setEsConfig] = useState(null);
+  const [connecting, setConnecting] = useState(false);
+  const [connectErr, setConnectErr] = useState("");
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/whatsapp/embedded-signup/config`)
+      .then((r) => r.json())
+      .then((data) => setEsConfig(data))
+      .catch(() => setEsConfig({ enabled: false }));
+  }, []);
+
+  const connectWhatsApp = async () => {
+    setConnectErr("");
+    if (!esConfig?.enabled) {
+      setConnectErr("WhatsApp connect is not enabled yet. Contact Autom8 support.");
+      return;
+    }
+    setConnecting(true);
+    try {
+      await loadFacebookSdk(esConfig.appId, esConfig.graphVersion);
+      const session = await launchWhatsAppEmbeddedSignup({
+        configId: esConfig.configId,
+        solutionId: esConfig.solutionId || undefined,
+      });
+      if (!session.code || !session.waba_id || !session.phone_number_id) {
+        throw new Error("Signup finished but WhatsApp account details were incomplete. Please try again.");
+      }
+      const digits = (session.display_phone_number || "").replace(/\D/g, "");
+      set("embedded_signup_code", session.code);
+      set("waba_id", session.waba_id);
+      set("phone_number_id", session.phone_number_id);
+      set("display_phone_number", session.display_phone_number || "");
+      if (digits) set("whatsapp_number", digits);
+      set("es_connected", true);
+    } catch (err) {
+      setConnectErr(err.message || "Could not connect WhatsApp");
+      set("es_connected", false);
+    } finally {
+      setConnecting(false);
+    }
+  };
+
   return h(Fragment, null,
     h("div", { style: { marginBottom: 16, padding: "10px 14px", background: "#EAF3DE", borderRadius: 8, fontSize: 12, color: "#3B6D11", lineHeight: 1.7 } },
-      "📖 All values below come from ",
-      h("a", { href: "https://developers.facebook.com/apps/", target: "_blank", rel: "noreferrer", style: { color: "#1D9E75", fontWeight: 600 } }, "Meta for Developers"),
-      " and ",
-      h("a", { href: "https://business.facebook.com/", target: "_blank", rel: "noreferrer", style: { color: "#1D9E75", fontWeight: 600 } }, "Meta Business Manager"),
-      ". Set up once, never touched again."
+      "Connect WhatsApp in one click — ",
+      h("strong", null, "no Meta Developer Console"),
+      ". Have your business documents ready and a phone number that is ",
+      h("strong", null, "not"),
+      " already on personal WhatsApp."
     ),
+
+    h("div", {
+      style: {
+        marginBottom: 20, padding: 16, borderRadius: 10,
+        border: "1px solid var(--mn-border)", background: "var(--mn-white)",
+        display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between",
+      },
+    },
+      h("div", { style: { flex: "1 1 220px" } },
+        h("div", { style: { fontSize: 14, fontWeight: 600, color: "var(--mn-text)" } },
+          f.es_connected ? "WhatsApp connected" : "Connect your WhatsApp Business number"
+        ),
+        h("div", { style: { fontSize: 12, color: "var(--mn-muted)", marginTop: 4, lineHeight: 1.5 } },
+          f.es_connected
+            ? `WABA ${f.waba_id} · Phone ID ${f.phone_number_id}${f.whatsapp_number ? ` · +${f.whatsapp_number}` : ""}`
+            : "Opens a secure Meta window to create or link your WhatsApp Business Account."
+        )
+      ),
+      h("button", {
+        type: "button",
+        className: "mn-btn mn-btn-primary",
+        disabled: connecting || esConfig?.enabled === false,
+        onClick: connectWhatsApp,
+        style: { whiteSpace: "nowrap" },
+      }, connecting ? "Connecting…" : (f.es_connected ? "Reconnect WhatsApp" : "Connect WhatsApp"))
+    ),
+
+    (e("embedded_signup_code") || e("waba_id") || e("phone_number_id")) && h("div", { className: "mn-alert err" },
+      "Please click Connect WhatsApp before continuing."
+    ),
+    connectErr && h("div", { className: "mn-alert err" }, connectErr),
+    esConfig && esConfig.enabled === false && h("div", { className: "mn-alert err" },
+      "Embedded Signup is not configured on the server yet. Autom8 must set META_EMBEDDED_SIGNUP_CONFIG_ID."
+    ),
+
     h("div", { className: "mn-grid" },
-      h(Field, { label: "WhatsApp Number *", hint: "Bot sends/receives from this number", error: e("whatsapp_number") ? "required" : "" },
-        h(Input, { value: f.whatsapp_number, onChange: (v) => set("whatsapp_number", v), placeholder: "919444000000", hasError: e("whatsapp_number") }),
-        h("div", { style: { fontSize: 11, color: "#666", marginTop: 4 } }, "Country code + number, no + or spaces. Find in: Meta Business Manager → Accounts → WhatsApp Accounts.")
-      ),
-      h(Field, { label: "WABA ID", hint: "WhatsApp Business Account ID" },
-        h(Input, { value: f.waba_id, onChange: (v) => set("waba_id", v), placeholder: "1234567890" }),
-        h("div", { style: { fontSize: 11, color: "#666", marginTop: 4 } }, "Meta Business Manager → Accounts → WhatsApp Accounts → click your account → ID shown at top.")
-      ),
-      h(Field, { label: "Phone Number ID *", error: e("phone_number_id") ? "required" : "", hint: "Different from your phone number" },
-        h(Input, { value: f.phone_number_id, onChange: (v) => set("phone_number_id", v), placeholder: "1234567890", hasError: e("phone_number_id") }),
-        h("div", { style: { fontSize: 11, color: "#666", marginTop: 4 } }, "developers.facebook.com/apps → Your App → WhatsApp → API Setup → Phone Number ID (numeric string).")
-      ),
-      h(Field, { label: "Meta System Access Token *", error: e("meta_access_token") ? "required" : "", hint: "Permanent token — never expires" },
-        h(Input, { value: f.meta_access_token, onChange: (v) => set("meta_access_token", v), placeholder: "EAAxxxxxx…", hasError: e("meta_access_token") }),
-        h("div", { style: { fontSize: 11, color: "#666", marginTop: 4 } }, "Meta Business Manager → Settings → System Users → Add System User (Admin) → Generate Token → tick whatsapp_business_messaging + whatsapp_business_management → Generate. Copy immediately.")
+      h(Field, { label: "WhatsApp number (auto-filled)", hint: "Editable if needed — digits only, with country code" },
+        h(Input, {
+          value: f.whatsapp_number,
+          onChange: (v) => set("whatsapp_number", v),
+          placeholder: "919444000000",
+        })
       ),
       h(Field, { label: "Timezone" },
         h(SelectField, { value: f.timezone, onChange: (v) => set("timezone", v), options: TIMEZONES })
@@ -679,7 +767,8 @@ function Step5({ form, onRedirect }) {
     ["Cuisines",        (form.cuisines || []).join(", ") || "—"],
     ["Kitchen flow",    form.kitchen_workflow],
     ["Services",        FULFILLMENT_OPTIONS.filter((o) => form[o.id]).map((o) => o.label).join(", ") || "—"],
-    ["WhatsApp",        form.whatsapp_number || "—"],
+    ["Owner email",     form.email || "—"],
+    ["WhatsApp",        form.es_connected ? (form.whatsapp_number || "Connected") : (form.whatsapp_number || "—")],
     ["Timezone",        form.timezone],
     ["Payment mode",    form.payment_mode],
     ["Menu file",       form.menu_file?.name || (form.menu_catalog?.length ? `${form.menu_catalog.length} items` : "Not uploaded")],
@@ -710,15 +799,15 @@ function Step5({ form, onRedirect }) {
       const res  = await fetch(fetchUrl, fetchOptions);
       const data = await res.json();
       if (res.ok) {
-        // Redirect to MoR checkout
-        window.location.href = data.checkout_url;
+        const dest = data.checkout_url || data.login_url || APP_LOGIN;
+        window.location.href = dest;
       } else {
         setStatus("error");
-        setErrMsg(data.detail || "Registration failed. Please try again.");
+        setErrMsg(data.error || data.detail || "Registration failed. Please try again.");
       }
     } catch {
       setStatus("error");
-      setErrMsg("Could not reach the Munafe server. Please check your connection.");
+      setErrMsg("Could not reach the Autom8 server. Please check your connection.");
     }
   };
 
@@ -733,14 +822,14 @@ function Step5({ form, onRedirect }) {
     ),
     status === "error" && h("div", { className: "mn-alert err" }, errMsg),
     h("div", { className: "mn-alert info" },
-      "After clicking Submit, you'll be redirected to complete your subscription payment."
+      "After submit, your account is created and WhatsApp is linked. You'll go to the app login to start your trial."
     ),
     h("div", { style: { marginTop: 12 } },
       h("button", {
         className: "mn-btn mn-btn-primary",
         disabled: status === "loading",
         onClick: handleSubmit,
-      }, status === "loading" ? "Processing…" : "Submit & Subscribe →")
+      }, status === "loading" ? "Processing…" : "Create account & continue →")
     )
   );
 }
@@ -761,10 +850,15 @@ function buildPayload(form) {
     door_delivery:    form.door_delivery,
     table_reservation:form.table_reservation,
     table_count:      form.table_count,
+    owner_name:       form.owner_name,
+    email:            form.email,
+    owner_password:   form.owner_password,
+    phone:            form.contact_phone || null,
     whatsapp_number:  form.whatsapp_number,
     waba_id:          form.waba_id,
     phone_number_id:  form.phone_number_id,
-    meta_access_token:form.meta_access_token,
+    embedded_signup_code: form.embedded_signup_code || null,
+    display_phone_number: form.display_phone_number || form.whatsapp_number || null,
     timezone:         form.timezone,
     payment_mode:     form.payment_mode,
     lunch_start:      form.has_lunch  ? form.lunch_start  : null,
@@ -773,7 +867,7 @@ function buildPayload(form) {
     dinner_end:       form.has_dinner ? form.dinner_end   : null,
     menu_catalog:     form.menu_catalog || [],
     contact_phone:    form.contact_phone,
-    manager_phone:    form.manager_phone,
+    manager_phone:    form.manager_phone || form.contact_phone,
     address_line1:    form.address_line1,
   };
 }
@@ -850,11 +944,11 @@ function MunafeRegistrationForm() {
     h("div", { className: "mn-card" },
       h("h2", { className: "mn-card-title" }, STEPS[step].icon + " " + STEPS[step].label),
       h("p", { className: "mn-card-sub" }, [
-        "Tell us about your restaurant — Munafe will set up your sovereign regional database.",
+        "Tell us about your business and create your owner login.",
         "Select the fulfillment modes your team manages.",
-        "Connect your Meta WhatsApp Business account and configure service hours.",
+        "Connect WhatsApp with one click — no Meta Developer Console.",
         "Upload your daily menu catalog in Excel or CSV format.",
-        "Review your details, then proceed to activate your subscription.",
+        "Review your details, then create your account and start the trial.",
       ][step]),
       stepComponents[step]
     ),

@@ -17,6 +17,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useSubscription, FEATURES } from '../contexts/SubscriptionContext';
 import { MENU_SLOT_OPTIONS, normalizeMenuSlots, toggleMenuSlot } from '../helpers/menuSlots';
+import { loadFacebookSdk, launchWhatsAppEmbeddedSignup } from '../helpers/metaEmbeddedSignup';
 import BrandHeader from './BrandHeader';
 
 // ─── Design tokens (shared brand theme — same as ManagerPortal / owner portal) ─
@@ -2243,9 +2244,12 @@ function TabWhatsApp({ apiClient, showToast }) {
   const [saving, setSaving] = useState(false);
   const [saved,  setSaved]  = useState(false);
   const [showToken, setShowToken] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [esConfig, setEsConfig] = useState(null);
+  const [connecting, setConnecting] = useState(false);
 
-  useEffect(() => {
-    Promise.all([
+  const loadForm = useCallback(() => {
+    return Promise.all([
       apiClient.get('/api/dashboard/waba'),
       apiClient.get('/api/restaurants/integration').catch(() => ({ data: {} })),
     ]).then(([wabaRes, intRes]) => {
@@ -2260,10 +2264,52 @@ function TabWhatsApp({ apiClient, showToast }) {
         access_token:     int.access_token   ?? '',
         webhook_secret:   int.webhook_secret ?? '',
       });
-    }).catch(() => showToast('Failed to load WhatsApp config', 'error'));
-  }, [apiClient, showToast]);
+      if (int.phone_number_id && int.access_token) setShowAdvanced(false);
+    });
+  }, [apiClient]);
+
+  useEffect(() => {
+    loadForm().catch(() => showToast('Failed to load WhatsApp config', 'error'));
+  }, [loadForm, showToast]);
+
+  useEffect(() => {
+    apiClient.get('/api/whatsapp/embedded-signup/config')
+      .then((r) => setEsConfig(r.data))
+      .catch(() => setEsConfig({ enabled: false }));
+  }, [apiClient]);
 
   const set = (k, v) => { setSaved(false); setForm(p => ({ ...p, [k]: v })); };
+
+  const connectEmbeddedSignup = async () => {
+    if (!esConfig?.enabled || !esConfig.appId || !esConfig.configId) {
+      return showToast('Embedded Signup is not enabled on this server', 'error');
+    }
+    setConnecting(true);
+    try {
+      await loadFacebookSdk(esConfig.appId, esConfig.graphVersion);
+      const session = await launchWhatsAppEmbeddedSignup({
+        configId: esConfig.configId,
+        solutionId: esConfig.solutionId || undefined,
+      });
+      if (!session.waba_id || !session.phone_number_id) {
+        throw new Error('Signup finished but WABA / Phone Number ID was missing. Try again or use Advanced fields.');
+      }
+      const r = await apiClient.post('/api/whatsapp/embedded-signup/complete', {
+        code: session.code,
+        waba_id: session.waba_id,
+        phone_number_id: session.phone_number_id,
+        display_phone_number: session.display_phone_number || null,
+      });
+      await loadForm();
+      setSaved(true);
+      showToast(r.data?.next_step || 'WhatsApp connected successfully');
+    } catch (e) {
+      const msg = e.response?.data?.error || e.message || 'Connect WhatsApp failed';
+      showToast(msg, 'error');
+    } finally {
+      setConnecting(false);
+    }
+  };
 
   const save = async () => {
     if (!form.whatsapp_number) return showToast('WhatsApp number is required', 'error');
@@ -2295,13 +2341,61 @@ function TabWhatsApp({ apiClient, showToast }) {
   if (!form) return <div style={{ padding: 32, textAlign: 'center' }}><Spinner size={28} /></div>;
 
   const hint = (text) => <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4, lineHeight: 1.5 }}>{text}</div>;
+  const isConnected = Boolean(form.waba_id && form.phone_number_id && form.access_token);
 
   return (
     <div>
       <div style={{ background: '#EAF3DE', border: '0.5px solid #A7E3C0', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#3B6D11', marginBottom: 20, lineHeight: 1.7 }}>
-        📖 All values come from <strong>Meta for Developers</strong> and <strong>Meta Business Manager</strong>.
-        Changes here take effect on the next incoming message — no restart needed.
+        {esConfig?.enabled
+          ? <>Connect WhatsApp with one click — no Meta Developer Console. Have your business documents and a phone number that is <strong>not</strong> on personal WhatsApp ready.</>
+          : <>WhatsApp credentials can be entered manually below. Ask Autom8 to enable Embedded Signup for one-click connect.</>}
+        {' '}Changes take effect on the next incoming message — no restart needed.
       </div>
+
+      {esConfig?.enabled && (
+        <div style={{
+          ...CARD,
+          marginBottom: 20,
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 16,
+        }}>
+          <div style={{ flex: '1 1 220px' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 4 }}>
+              {isConnected ? 'WhatsApp connected' : 'Connect WhatsApp'}
+            </div>
+            <div style={{ fontSize: 12, color: C.textMuted, lineHeight: 1.6 }}>
+              {isConnected
+                ? 'You can reconnect if you need to link a different number or refresh access.'
+                : 'Opens Meta Embedded Signup. Creates or links your WhatsApp Business Account inside Autom8.'}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={connectEmbeddedSignup}
+            disabled={connecting}
+            style={{
+              background: C.primary,
+              color: '#fff',
+              border: 'none',
+              borderRadius: 8,
+              padding: '10px 18px',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: connecting ? 'wait' : 'pointer',
+              opacity: connecting ? 0.7 : 1,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+            }}
+          >
+            {connecting ? <Spinner size={16} /> : null}
+            {connecting ? 'Connecting…' : (isConnected ? 'Reconnect WhatsApp' : 'Connect WhatsApp')}
+          </button>
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <div>
@@ -2319,40 +2413,72 @@ function TabWhatsApp({ apiClient, showToast }) {
           <Input value={form.sweets_counter_phone || ''} onChange={v => set('sweets_counter_phone', v)} placeholder="919876543210" />
           {hint('Packing-ticket WhatsApp alerts. If blank, falls back to Manager phone.')}
         </div>
-        <div>
-          <Label>WABA ID</Label>
-          <Input value={form.waba_id} onChange={v => set('waba_id', v)} placeholder="1234567890" />
-          {hint('Business Manager → Accounts → WhatsApp Accounts → ID.')}
-        </div>
-        <div>
-          <Label>Phone Number ID</Label>
-          <Input value={form.phone_number_id} onChange={v => set('phone_number_id', v)} placeholder="1234567890" />
-          {hint('developers.facebook.com → Your App → WhatsApp → API Setup.')}
-        </div>
       </div>
 
-      <SectionTitle>API credentials</SectionTitle>
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
-          <Label>Meta System Access Token</Label>
-          <button onClick={() => setShowToken(p => !p)} style={{ fontSize: 11, color: C.primary, background: 'none', border: 'none', cursor: 'pointer' }}>
-            {showToken ? 'Hide' : 'Show'}
-          </button>
+      <button
+        type="button"
+        onClick={() => setShowAdvanced(p => !p)}
+        style={{
+          marginTop: 20,
+          marginBottom: 8,
+          background: 'none',
+          border: 'none',
+          color: C.primary,
+          fontSize: 12,
+          fontWeight: 600,
+          cursor: 'pointer',
+          padding: 0,
+        }}
+      >
+        {showAdvanced ? 'Hide advanced credentials' : 'Show advanced credentials (manual)'}
+      </button>
+
+      {showAdvanced && (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 8 }}>
+            <div>
+              <Label>WABA ID</Label>
+              <Input value={form.waba_id} onChange={v => set('waba_id', v)} placeholder="1234567890" />
+              {hint('Business Manager → Accounts → WhatsApp Accounts → ID.')}
+            </div>
+            <div>
+              <Label>Phone Number ID</Label>
+              <Input value={form.phone_number_id} onChange={v => set('phone_number_id', v)} placeholder="1234567890" />
+              {hint('Filled automatically by Connect WhatsApp, or from Meta API Setup.')}
+            </div>
+          </div>
+
+          <SectionTitle>API credentials</SectionTitle>
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
+              <Label>Meta System Access Token</Label>
+              <button onClick={() => setShowToken(p => !p)} style={{ fontSize: 11, color: C.primary, background: 'none', border: 'none', cursor: 'pointer' }}>
+                {showToken ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            <input
+              type={showToken ? 'text' : 'password'}
+              value={form.access_token}
+              onChange={e => set('access_token', e.target.value)}
+              placeholder="EAAxxxxxx…"
+              style={inputStyle}
+            />
+            {hint('Filled by Connect WhatsApp, or paste a system user token from Business Manager.')}
+          </div>
+          <div>
+            <Label>Webhook verify token</Label>
+            <Input value={form.webhook_secret} onChange={v => set('webhook_secret', v)} placeholder="your_webhook_secret" />
+            {hint('Optional per-outlet; platform webhook verify token is set on the Autom8 Meta app.')}
+          </div>
+        </>
+      )}
+
+      {!showAdvanced && isConnected && (
+        <div style={{ fontSize: 12, color: C.textMuted, marginTop: 12, lineHeight: 1.6 }}>
+          Linked WABA {form.waba_id} · Phone Number ID {form.phone_number_id}
+          {form.whatsapp_number ? ` · +${form.whatsapp_number}` : ''}
         </div>
-        <input
-          type={showToken ? 'text' : 'password'}
-          value={form.access_token}
-          onChange={e => set('access_token', e.target.value)}
-          placeholder="EAAxxxxxx…"
-          style={inputStyle}
-        />
-        {hint('System user token from Business Manager → Settings → System Users. Permanent — never expires.')}
-      </div>
-      <div>
-        <Label>Webhook verify token</Label>
-        <Input value={form.webhook_secret} onChange={v => set('webhook_secret', v)} placeholder="your_webhook_secret" />
-        {hint('Must match the token set in your Meta app\'s webhook configuration.')}
-      </div>
+      )}
 
       <SaveBar onSave={save} loading={saving} saved={saved} />
     </div>

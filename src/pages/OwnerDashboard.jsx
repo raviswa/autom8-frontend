@@ -719,12 +719,13 @@ function WABAPanel({ info }) {
         <span style={{ fontSize: 11, background: C.dangerLight, color: C.danger, padding: "2px 8px", borderRadius: 6 }}>Not configured</span>
       </div>
       <div style={{ fontSize: 12, color: C.textMuted, lineHeight: 1.7 }}>
-        <div style={{ fontWeight: 500, color: C.text, marginBottom: 8 }}>How to connect your WABA:</div>
-        <div>1. Go to <strong>Meta Business Suite</strong> → WhatsApp Manager</div>
-        <div>2. Create or select a WhatsApp Business Account</div>
-        <div>3. Copy your <strong>WABA ID</strong> and <strong>Phone Number ID</strong></div>
-        <div>4. Add them to your restaurant settings</div>
-        <div>5. Generate a <strong>Permanent Access Token</strong> from Meta Developer Console</div>
+        <div style={{ fontWeight: 500, color: C.text, marginBottom: 8 }}>How to connect WhatsApp:</div>
+        <div>1. Open <Link to="/settings?tab=whatsapp" style={{ color: C.primary, fontWeight: 600 }}>Settings → WhatsApp</Link></div>
+        <div>2. Click <strong>Connect WhatsApp</strong> (Meta Embedded Signup — no Developer Console)</div>
+        <div>3. Complete business verification and add your phone number</div>
+        <div>4. Add a payment method in WhatsApp Manager when prompted</div>
+        <div>5. Send <strong>Hi</strong> to your number to test the ordering bot</div>
+        <div style={{ marginTop: 8 }}>Advanced: you can still paste WABA ID / Phone Number ID / token under Advanced credentials.</div>
       </div>
     </div>
   );
