@@ -1,8 +1,9 @@
-// RegistrationForm.jsx — Munafe self-service restaurant registration
+// RegistrationForm.jsx — Munafe self-service restaurant registration, later extended to other LOBs
 // Converted from Gutenberg block to standalone Vite/React component.
 // Mount: see main.jsx  |  Styles: injected inline via useEffect
 
 import React, { useState, useEffect, useRef, useCallback, Fragment } from 'react';
+import * as XLSX from 'xlsx';
 import { loadFacebookSdk, launchWhatsAppEmbeddedSignup } from '../src/helpers/metaEmbeddedSignup';
 const h = React.createElement; // keeps all existing h() calls working unchanged
 
@@ -896,9 +897,23 @@ function Step4({ f, set }) {
       return;
     }
     set("menu_file", file);
-    setParseStatus(`📄 ${file.name} selected — catalog will be processed on submit.`);
-    // Note: actual parsing (XLSX→JSON) is handled server-side after multipart upload,
-    // or can be done client-side via SheetJS if bundled.
+    setParseStatus("📄 Reading " + file.name + "…");
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+      if (!rows.length) {
+        setParseStatus("⚠️ No rows found in that file.");
+        set("menu_catalog", []);
+        return;
+      }
+      set("menu_catalog", rows);
+      setParseStatus(`✅ ${rows.length} row${rows.length === 1 ? "" : "s"} ready from ${file.name}`);
+    } catch (err) {
+      setParseStatus("❌ Could not read that file — check it matches the template columns.");
+      set("menu_catalog", []);
+    }
   };
 
   const handleDrop = (e) => {
@@ -990,23 +1005,12 @@ function Step5({ form, onRedirect }) {
   const handleSubmit = async () => {
     setStatus("loading"); setErrMsg("");
 
-    // Build multipart OR JSON body depending on whether a file was attached
-    let fetchUrl;
-    let fetchOptions;
-    if (form.menu_file) {
-      fetchUrl = `${API_BASE}/api/v1/register/upload`;
-      const fd = new FormData();
-      fd.append("data", JSON.stringify(buildPayload(form)));
-      fd.append("menu_file", form.menu_file);
-      fetchOptions = { method: "POST", body: fd };
-    } else {
-      fetchUrl = `${API_BASE}/api/v1/register`;
-      fetchOptions = {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildPayload(form)),
-      };
-    }
+    const fetchUrl = `${API_BASE}/api/v1/register`;
+    const fetchOptions = {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildPayload(form)),
+    };
 
     try {
       const res  = await fetch(fetchUrl, fetchOptions);
