@@ -11,9 +11,34 @@ const h = React.createElement; // keeps all existing h() calls working unchanged
 const ROOT_ID    = "munafe-registration-root";
 const API_BASE   = (() => {
   const el = document.getElementById(ROOT_ID);
-  return (el && el.dataset.api) || "https://autom8-backend-production.up.railway.app";
+  return (el && el.dataset.api) || "https://api.autom8.works";
 })();
 const APP_LOGIN  = "https://app.autom8.works/login";
+const DRAFT_KEY  = "autom8_registration_draft_v1";
+const emailOk = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v || "").trim());
+
+function saveDraft(form) {
+  try {
+    const { owner_password, embedded_signup_code, menu_file, ...safe } = form;
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({
+      form: safe,
+      savedAt: Date.now(),
+      session: {
+        embedded_signup_code: embedded_signup_code || "",
+        es_connected: !!form.es_connected,
+      },
+    }));
+  } catch { /* ignore */ }
+}
+function loadDraft() {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+function clearDraft() {
+  try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
+}
 
 // ── Static data ───────────────────────────────────────────────────────────────
 const COUNTRIES = [
@@ -265,6 +290,9 @@ const makeDefault = () => ({
 
   // Internal
   contact_phone: "", manager_phone: "", address_line1: "",
+  idempotency_key: (typeof crypto !== "undefined" && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `reg_${Date.now()}_${Math.random().toString(36).slice(2)}`,
 });
 
 // ── Validation rules per step ─────────────────────────────────────────────────
@@ -313,180 +341,180 @@ const CSS = `
     padding: 40px 16px 80px;
   }
 
-  .mn-wrap { max-width: 100%; margin: 0 auto; padding: 0 8px; box-sizing: border-box; }
+  #munafe-registration-root .mn-wrap { max-width: 100%; margin: 0 auto; padding: 0 8px; box-sizing: border-box; }
 
   /* Header */
-  .mn-header { text-align: center; margin-bottom: 40px; }
-  .mn-header-logo { font-family: 'DM Serif Display', serif; font-size: 28px; color: var(--mn-green); letter-spacing: -.5px; display:flex; align-items:center; justify-content:center; gap:8px; margin-bottom:6px; }
-  .mn-header-sub { font-size: 14px; color: var(--mn-muted); }
+  #munafe-registration-root .mn-header { text-align: center; margin-bottom: 40px; }
+  #munafe-registration-root .mn-header-logo { font-family: 'DM Serif Display', serif; font-size: 28px; color: var(--mn-green); letter-spacing: -.5px; display:flex; align-items:center; justify-content:center; gap:8px; margin-bottom:6px; }
+  #munafe-registration-root .mn-header-sub { font-size: 14px; color: var(--mn-muted); }
 
   /* Stepper */
-  .mn-stepper { display: flex; align-items: center; justify-content: center; margin-bottom: 36px; gap: 0; overflow-x: auto; padding: 4px 0; }
-  .mn-step-item { display: flex; align-items: center; flex-shrink: 0; }
-  .mn-step-pill {
+  #munafe-registration-root .mn-stepper { display: flex; align-items: center; justify-content: center; margin-bottom: 36px; gap: 0; overflow-x: auto; padding: 4px 0; }
+  #munafe-registration-root .mn-step-item { display: flex; align-items: center; flex-shrink: 0; }
+  #munafe-registration-root .mn-step-pill {
     display: flex; align-items: center; gap: 6px;
     padding: 5px 10px; border-radius: 20px;
     font-size: 12px; font-weight: 500; transition: all .2s;
     white-space: nowrap;
   }
-  .mn-step-pill.done   { background: var(--mn-green-lt); color: var(--mn-green); }
-  .mn-step-pill.active { background: var(--mn-green); color: #fff; }
-  .mn-step-pill.future { background: transparent; color: var(--mn-muted); }
-  .mn-step-num { width: 20px; height: 20px; border-radius: 50%; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:600; flex-shrink:0; }
-  .mn-step-pill.done   .mn-step-num { background: var(--mn-green); color:#fff; }
-  .mn-step-pill.active .mn-step-num { background: rgba(255,255,255,.25); color:#fff; }
-  .mn-step-pill.future .mn-step-num { background: var(--mn-border); color:var(--mn-muted); }
-  .mn-step-connector { width: 20px; height: 1px; background: var(--mn-border); margin: 0 2px; }
+  #munafe-registration-root .mn-step-pill.done   { background: var(--mn-green-lt); color: var(--mn-green); }
+  #munafe-registration-root .mn-step-pill.active { background: var(--mn-green); color: #fff; }
+  #munafe-registration-root .mn-step-pill.future { background: transparent; color: var(--mn-muted); }
+  #munafe-registration-root .mn-step-num { width: 20px; height: 20px; border-radius: 50%; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:600; flex-shrink:0; }
+  #munafe-registration-root .mn-step-pill.done   .mn-step-num { background: var(--mn-green); color:#fff; }
+  #munafe-registration-root .mn-step-pill.active .mn-step-num { background: rgba(255,255,255,.25); color:#fff; }
+  #munafe-registration-root .mn-step-pill.future .mn-step-num { background: var(--mn-border); color:var(--mn-muted); }
+  #munafe-registration-root .mn-step-connector { width: 20px; height: 1px; background: var(--mn-border); margin: 0 2px; }
 
   /* Card */
-  .mn-card {
+  #munafe-registration-root .mn-card {
     background: var(--mn-white);
     border: 1px solid var(--mn-border);
     border-radius: var(--mn-radius);
     box-shadow: var(--mn-shadow);
     padding: 28px 32px;
   }
-  .mn-card-title { font-family:'DM Serif Display', serif; font-size:22px; color:var(--mn-text); margin-bottom:4px; }
-  .mn-card-sub   { font-size: 13px; color: var(--mn-muted); margin-bottom: 24px; line-height: 1.5; }
+  #munafe-registration-root .mn-card-title { font-family:'DM Serif Display', serif; font-size:22px; color:var(--mn-text); margin-bottom:4px; }
+  #munafe-registration-root .mn-card-sub   { font-size: 13px; color: var(--mn-muted); margin-bottom: 24px; line-height: 1.5; }
 
   /* Form fields */
-  .mn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; }
-  @media (max-width: 520px) { .mn-grid { grid-template-columns: 1fr; } }
-  .mn-field { margin-bottom: 18px; }
-  .mn-field-full { grid-column: 1 / -1; }
-  .mn-label { display:block; font-size: 12px; font-weight:600; color:var(--mn-muted); text-transform:uppercase; letter-spacing:.04em; margin-bottom: 5px; }
-  .mn-label.err { color: var(--mn-danger); }
-  .mn-hint { font-size: 11px; color: var(--mn-muted); margin-bottom: 5px; line-height:1.4; }
-  .mn-inp {
+  #munafe-registration-root .mn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; }
+  @media (max-width: 520px) { #munafe-registration-root .mn-grid { grid-template-columns: 1fr; } }
+  #munafe-registration-root .mn-field { margin-bottom: 18px; }
+  #munafe-registration-root .mn-field-full { grid-column: 1 / -1; }
+  #munafe-registration-root .mn-label { display:block; font-size: 12px; font-weight:600; color:var(--mn-muted); text-transform:uppercase; letter-spacing:.04em; margin-bottom: 5px; }
+  #munafe-registration-root .mn-label.err { color: var(--mn-danger); }
+  #munafe-registration-root .mn-hint { font-size: 11px; color: var(--mn-muted); margin-bottom: 5px; line-height:1.4; }
+  #munafe-registration-root .mn-inp {
     width:100%; padding: 9px 12px; font-size:14px; font-family:inherit;
     border: 1px solid var(--mn-border); border-radius: 7px;
     background: var(--mn-white); color: var(--mn-text);
     outline:none; transition: border-color .15s, box-shadow .15s;
   }
-  .mn-inp:focus { border-color: var(--mn-green); box-shadow: 0 0 0 3px rgba(27,122,90,.1); }
-  .mn-inp.err { border-color: var(--mn-danger); background: var(--mn-danger-bg); }
-  .mn-inp-note { font-size:11px; color:var(--mn-muted); margin-top:4px; }
+  #munafe-registration-root .mn-inp:focus { border-color: var(--mn-green); box-shadow: 0 0 0 3px rgba(27,122,90,.1); }
+  #munafe-registration-root .mn-inp.err { border-color: var(--mn-danger); background: var(--mn-danger-bg); }
+  #munafe-registration-root .mn-inp-note { font-size:11px; color:var(--mn-muted); margin-top:4px; }
 
   /* Slug row */
-  .mn-slug-row { display:flex; align-items:center; border:1px solid var(--mn-border); border-radius:7px; overflow:hidden; transition:border-color .15s; }
-  .mn-slug-row:focus-within { border-color:var(--mn-green); box-shadow:0 0 0 3px rgba(27,122,90,.1); }
-  .mn-slug-row.err { border-color:var(--mn-danger); }
-  .mn-slug-pre { padding:9px 10px; background:var(--mn-bg); font-size:12px; color:var(--mn-muted); border-right:1px solid var(--mn-border); white-space:nowrap; }
-  .mn-slug-inp { flex:1; padding:9px 10px; border:none; outline:none; font-size:14px; font-family:inherit; color:var(--mn-text); background:transparent; }
-  .mn-slug-badge { padding:0 10px; font-size:11px; font-weight:600; white-space:nowrap; }
-  .mn-slug-badge.ok  { color: var(--mn-green); }
-  .mn-slug-badge.na  { color: var(--mn-danger); }
-  .mn-slug-badge.chk { color: var(--mn-muted); }
+  #munafe-registration-root .mn-slug-row { display:flex; align-items:center; border:1px solid var(--mn-border); border-radius:7px; overflow:hidden; transition:border-color .15s; }
+  #munafe-registration-root .mn-slug-row:focus-within { border-color:var(--mn-green); box-shadow:0 0 0 3px rgba(27,122,90,.1); }
+  #munafe-registration-root .mn-slug-row.err { border-color:var(--mn-danger); }
+  #munafe-registration-root .mn-slug-pre { padding:9px 10px; background:var(--mn-bg); font-size:12px; color:var(--mn-muted); border-right:1px solid var(--mn-border); white-space:nowrap; }
+  #munafe-registration-root .mn-slug-inp { flex:1; padding:9px 10px; border:none; outline:none; font-size:14px; font-family:inherit; color:var(--mn-text); background:transparent; }
+  #munafe-registration-root .mn-slug-badge { padding:0 10px; font-size:11px; font-weight:600; white-space:nowrap; }
+  #munafe-registration-root .mn-slug-badge.ok  { color: var(--mn-green); }
+  #munafe-registration-root .mn-slug-badge.na  { color: var(--mn-danger); }
+  #munafe-registration-root .mn-slug-badge.chk { color: var(--mn-muted); }
 
   /* Checkboxes / multi-select pills */
-  .mn-pill-group { display:flex; flex-wrap:wrap; gap:8px; }
-  .mn-pill {
+  #munafe-registration-root .mn-pill-group { display:flex; flex-wrap:wrap; gap:8px; }
+  #munafe-registration-root .mn-pill {
     padding:6px 14px; border-radius:20px; font-size:13px; cursor:pointer;
     border:1px solid var(--mn-border); background:var(--mn-white); color:var(--mn-muted);
     user-select:none; transition: all .15s;
   }
-  .mn-pill.sel { border-color:var(--mn-green); background:var(--mn-green-lt); color:var(--mn-green); font-weight:500; }
+  #munafe-registration-root .mn-pill.sel { border-color:var(--mn-green); background:var(--mn-green-lt); color:var(--mn-green); font-weight:500; }
 
   /* Workflow selector */
-  .mn-workflow-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
-  @media(max-width:520px){ .mn-workflow-grid { grid-template-columns:1fr; } }
-  .mn-workflow-card {
+  #munafe-registration-root .mn-workflow-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  @media(max-width:520px){ #munafe-registration-root .mn-workflow-grid { grid-template-columns:1fr; } }
+  #munafe-registration-root .mn-workflow-card {
     padding:12px 14px; border-radius:8px; border:1px solid var(--mn-border);
     cursor:pointer; transition:all .15s; background:var(--mn-white);
   }
-  .mn-workflow-card:hover { border-color:var(--mn-green-mid); }
-  .mn-workflow-card.sel { border-color:var(--mn-green); background:var(--mn-green-lt); }
-  .mn-workflow-label { font-size:13px; font-weight:600; color:var(--mn-text); margin-bottom:3px; }
-  .mn-workflow-card.sel .mn-workflow-label { color:var(--mn-green); }
-  .mn-workflow-desc  { font-size:11px; color:var(--mn-muted); line-height:1.4; }
+  #munafe-registration-root .mn-workflow-card:hover { border-color:var(--mn-green-mid); }
+  #munafe-registration-root .mn-workflow-card.sel { border-color:var(--mn-green); background:var(--mn-green-lt); }
+  #munafe-registration-root .mn-workflow-label { font-size:13px; font-weight:600; color:var(--mn-text); margin-bottom:3px; }
+  #munafe-registration-root .mn-workflow-card.sel .mn-workflow-label { color:var(--mn-green); }
+  #munafe-registration-root .mn-workflow-desc  { font-size:11px; color:var(--mn-muted); line-height:1.4; }
 
   /* Business type cards */
-  .mn-lob-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
-  @media(max-width:560px){ .mn-lob-grid { grid-template-columns:repeat(2,1fr); } }
-  .mn-lob-card {
+  #munafe-registration-root .mn-lob-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  @media(max-width:560px){ #munafe-registration-root .mn-lob-grid { grid-template-columns:repeat(2,1fr); } }
+  #munafe-registration-root .mn-lob-card {
     padding:18px 12px; border-radius:10px; border:1.5px solid var(--mn-border);
     cursor:pointer; transition:all .15s; background:var(--mn-white);
     text-align:center; display:flex; flex-direction:column; align-items:center; gap:8px;
   }
-  .mn-lob-card:hover { border-color:var(--mn-green-mid); }
-  .mn-lob-card.sel { border-color:var(--mn-green); background:var(--mn-green-lt); }
-  .mn-lob-icon { font-size:26px; }
-  .mn-lob-label { font-size:12.5px; font-weight:600; color:var(--mn-text); line-height:1.3; }
-  .mn-lob-card.sel .mn-lob-label { color:var(--mn-green); }
+  #munafe-registration-root .mn-lob-card:hover { border-color:var(--mn-green-mid); }
+  #munafe-registration-root .mn-lob-card.sel { border-color:var(--mn-green); background:var(--mn-green-lt); }
+  #munafe-registration-root .mn-lob-icon { font-size:26px; }
+  #munafe-registration-root .mn-lob-label { font-size:12.5px; font-weight:600; color:var(--mn-text); line-height:1.3; }
+  #munafe-registration-root .mn-lob-card.sel .mn-lob-label { color:var(--mn-green); }
 
   /* Fulfillment cards */
-  .mn-fulfill-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-  @media(max-width:400px){ .mn-fulfill-grid { grid-template-columns:1fr; } }
-  .mn-fulfill-card {
+  #munafe-registration-root .mn-fulfill-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  @media(max-width:400px){ #munafe-registration-root .mn-fulfill-grid { grid-template-columns:1fr; } }
+  #munafe-registration-root .mn-fulfill-card {
     padding:14px; border-radius:8px; border:1.5px solid var(--mn-border);
     cursor:pointer; transition:all .15s; background:var(--mn-white);
     display:flex; align-items:flex-start; gap:10px;
   }
-  .mn-fulfill-card:hover { border-color:var(--mn-green-mid); }
-  .mn-fulfill-card.sel { border-color:var(--mn-green); background:var(--mn-green-lt); }
-  .mn-fulfill-icon  { font-size:22px; line-height:1; }
-  .mn-fulfill-label { font-size:13px; font-weight:600; margin-bottom:2px; }
-  .mn-fulfill-card.sel .mn-fulfill-label { color:var(--mn-green); }
-  .mn-fulfill-desc  { font-size:11px; color:var(--mn-muted); line-height:1.4; }
+  #munafe-registration-root .mn-fulfill-card:hover { border-color:var(--mn-green-mid); }
+  #munafe-registration-root .mn-fulfill-card.sel { border-color:var(--mn-green); background:var(--mn-green-lt); }
+  #munafe-registration-root .mn-fulfill-icon  { font-size:22px; line-height:1; }
+  #munafe-registration-root .mn-fulfill-label { font-size:13px; font-weight:600; margin-bottom:2px; }
+  #munafe-registration-root .mn-fulfill-card.sel .mn-fulfill-label { color:var(--mn-green); }
+  #munafe-registration-root .mn-fulfill-desc  { font-size:11px; color:var(--mn-muted); line-height:1.4; }
 
   /* Toggle */
-  .mn-toggle-row { display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--mn-border); }
-  .mn-toggle-row:last-child { border-bottom:none; }
-  .mn-toggle-label { font-size:14px; color:var(--mn-text); }
-  .mn-toggle-track { width:40px; height:22px; border-radius:11px; cursor:pointer; position:relative; transition:background .2s; flex-shrink:0; }
-  .mn-toggle-thumb { position:absolute; top:3px; width:16px; height:16px; border-radius:50%; background:#fff; transition:left .2s; }
+  #munafe-registration-root .mn-toggle-row { display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--mn-border); }
+  #munafe-registration-root .mn-toggle-row:last-child { border-bottom:none; }
+  #munafe-registration-root .mn-toggle-label { font-size:14px; color:var(--mn-text); }
+  #munafe-registration-root .mn-toggle-track { width:40px; height:22px; border-radius:11px; cursor:pointer; position:relative; transition:background .2s; flex-shrink:0; }
+  #munafe-registration-root .mn-toggle-thumb { position:absolute; top:3px; width:16px; height:16px; border-radius:50%; background:#fff; transition:left .2s; }
 
   /* Drop zone */
-  .mn-dropzone {
+  #munafe-registration-root .mn-dropzone {
     border: 2px dashed var(--mn-border); border-radius: 10px;
     padding: 40px 24px; text-align:center; cursor:pointer;
     transition: all .2s; background: var(--mn-bg);
   }
-  .mn-dropzone.over { border-color: var(--mn-green); background: var(--mn-green-lt); }
-  .mn-dropzone-icon { font-size:36px; margin-bottom:10px; }
-  .mn-dropzone-text { font-size:14px; color:var(--mn-muted); margin-bottom:6px; }
-  .mn-dropzone-text strong { color:var(--mn-green); }
-  .mn-dropzone-sub  { font-size:12px; color:var(--mn-muted); }
-  .mn-file-badge { display:inline-flex; align-items:center; gap:8px; margin-top:12px; padding:8px 14px; background:var(--mn-green-lt); border-radius:20px; font-size:13px; color:var(--mn-green); font-weight:500; }
-  .mn-file-rm { cursor:pointer; font-size:15px; color:var(--mn-muted); }
+  #munafe-registration-root .mn-dropzone.over { border-color: var(--mn-green); background: var(--mn-green-lt); }
+  #munafe-registration-root .mn-dropzone-icon { font-size:36px; margin-bottom:10px; }
+  #munafe-registration-root .mn-dropzone-text { font-size:14px; color:var(--mn-muted); margin-bottom:6px; }
+  #munafe-registration-root .mn-dropzone-text strong { color:var(--mn-green); }
+  #munafe-registration-root .mn-dropzone-sub  { font-size:12px; color:var(--mn-muted); }
+  #munafe-registration-root .mn-file-badge { display:inline-flex; align-items:center; gap:8px; margin-top:12px; padding:8px 14px; background:var(--mn-green-lt); border-radius:20px; font-size:13px; color:var(--mn-green); font-weight:500; }
+  #munafe-registration-root .mn-file-rm { cursor:pointer; font-size:15px; color:var(--mn-muted); }
 
   /* Summary table */
-  .mn-summary { background:var(--mn-bg); border-radius:8px; border:1px solid var(--mn-border); overflow:hidden; margin-bottom:20px; }
-  .mn-summary-row { display:grid; grid-template-columns:140px 1fr; padding:10px 16px; border-bottom:1px solid var(--mn-border); font-size:13px; }
-  .mn-summary-row:last-child { border-bottom:none; }
-  .mn-summary-key { color:var(--mn-muted); }
-  .mn-summary-val { color:var(--mn-text); font-weight:500; }
+  #munafe-registration-root .mn-summary { background:var(--mn-bg); border-radius:8px; border:1px solid var(--mn-border); overflow:hidden; margin-bottom:20px; }
+  #munafe-registration-root .mn-summary-row { display:grid; grid-template-columns:140px 1fr; padding:10px 16px; border-bottom:1px solid var(--mn-border); font-size:13px; }
+  #munafe-registration-root .mn-summary-row:last-child { border-bottom:none; }
+  #munafe-registration-root .mn-summary-key { color:var(--mn-muted); }
+  #munafe-registration-root .mn-summary-val { color:var(--mn-text); font-weight:500; }
 
   /* Alert */
-  .mn-alert { padding:12px 16px; border-radius:8px; font-size:13px; margin-bottom:16px; }
-  .mn-alert.err  { background:var(--mn-danger-bg); color:var(--mn-danger); border:1px solid #FECACA; }
-  .mn-alert.info { background:var(--mn-green-lt); color:var(--mn-green); border:1px solid #A7F3D0; }
+  #munafe-registration-root .mn-alert { padding:12px 16px; border-radius:8px; font-size:13px; margin-bottom:16px; }
+  #munafe-registration-root .mn-alert.err  { background:var(--mn-danger-bg); color:var(--mn-danger); border:1px solid #FECACA; }
+  #munafe-registration-root .mn-alert.info { background:var(--mn-green-lt); color:var(--mn-green); border:1px solid #A7F3D0; }
 
-  /* Buttons */
-  .mn-nav { display:flex; justify-content:space-between; align-items:center; margin-top:24px; }
-  .mn-btn {
-    padding:10px 22px; border-radius:8px; font-size:14px; font-weight:600;
-    cursor:pointer; border:none; transition:all .15s; font-family:inherit;
-    display:inline-flex; align-items:center; gap:6px;
+  /* Buttons — !important on legibility props to beat WP theme button resets */
+  #munafe-registration-root .mn-nav { display:flex !important; justify-content:space-between; align-items:center; margin-top:24px; }
+  #munafe-registration-root .mn-btn {
+    padding:10px 22px !important; border-radius:8px; font-size:14px !important; font-weight:600 !important;
+    cursor:pointer; border:none !important; transition:all .15s; font-family:inherit;
+    display:inline-flex !important; align-items:center; gap:6px;
   }
-  .mn-btn:disabled { opacity:.45; cursor:not-allowed; }
-  .mn-btn-primary   { background:var(--mn-green); color:#fff; }
-  .mn-btn-primary:hover:not(:disabled) { background:#166248; }
-  .mn-btn-secondary { background:var(--mn-white); color:var(--mn-text); border:1px solid var(--mn-border); }
-  .mn-btn-secondary:hover:not(:disabled) { border-color:var(--mn-green); color:var(--mn-green); }
+  #munafe-registration-root .mn-btn:disabled { opacity:.45; cursor:not-allowed; }
+  #munafe-registration-root .mn-btn-primary   { background:var(--mn-green) !important; color:#fff !important; }
+  #munafe-registration-root .mn-btn-primary:hover:not(:disabled) { background:#166248 !important; }
+  #munafe-registration-root .mn-btn-secondary { background:var(--mn-white) !important; color:var(--mn-text) !important; border:1px solid var(--mn-border) !important; }
+  #munafe-registration-root .mn-btn-secondary:hover:not(:disabled) { border-color:var(--mn-green) !important; color:var(--mn-green) !important; }
 
   /* Success screen */
-  .mn-success { text-align:center; padding:40px 0; }
-  .mn-success-icon { font-size:56px; margin-bottom:16px; }
-  .mn-success-title { font-family:'DM Serif Display',serif; font-size:26px; margin-bottom:8px; }
-  .mn-success-sub { font-size:14px; color:var(--mn-muted); }
+  #munafe-registration-root .mn-success { text-align:center; padding:40px 0; }
+  #munafe-registration-root .mn-success-icon { font-size:56px; margin-bottom:16px; }
+  #munafe-registration-root .mn-success-title { font-family:'DM Serif Display',serif; font-size:26px; margin-bottom:8px; }
+  #munafe-registration-root .mn-success-sub { font-size:14px; color:var(--mn-muted); }
 
   /* Section divider */
-  .mn-section { margin-top:24px; padding-top:20px; border-top:1px solid var(--mn-border); }
-  .mn-section-title { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.06em; color:var(--mn-muted); margin-bottom:12px; }
+  #munafe-registration-root .mn-section { margin-top:24px; padding-top:20px; border-top:1px solid var(--mn-border); }
+  #munafe-registration-root .mn-section-title { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.06em; color:var(--mn-muted); margin-bottom:12px; }
 
   /* Time row */
-  .mn-time-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:8px; }
+  #munafe-registration-root .mn-time-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:8px; }
 `;
 
 // ── Primitive components ───────────────────────────────────────────────────────
@@ -577,7 +605,7 @@ function Step0({ f, set, errors }) {
 // ── Step 1: Core Business Details ─────────────────────────────────────────────
 
 function Step1({ f, set, errors }) {
-  const [slugStatus, setSlugStatus] = useState("idle"); // idle|checking|ok|taken
+  const [slugStatus, setSlugStatus] = useState("idle"); // idle|checking|ok|taken|error
   const slugTimer = useRef(null);
   const e = (k) => errors.includes(k);
 
@@ -606,10 +634,11 @@ function Step1({ f, set, errors }) {
     slugTimer.current = setTimeout(async () => {
       try {
         const res = await fetch(`${API_BASE}/api/v1/slug-check/${encodeURIComponent(slug)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         setSlugStatus(data.available ? "ok" : "taken");
       } catch {
-        setSlugStatus("idle");
+        setSlugStatus("error");
       }
     }, 600);
   };
@@ -647,6 +676,7 @@ function Step1({ f, set, errors }) {
           slugStatus === "checking" && h("span", { className: "mn-slug-badge chk" }, "checking…"),
           slugStatus === "ok"       && h("span", { className: "mn-slug-badge ok"  }, "✓ available"),
           slugStatus === "taken"    && h("span", { className: "mn-slug-badge na"  }, "✗ taken"),
+          slugStatus === "error"    && h("span", { className: "mn-slug-badge chk" }, "couldn't check"),
         )
       ),
 
@@ -681,10 +711,21 @@ function Step1({ f, set, errors }) {
         h(Field, { label: "Owner name *", error: e("owner_name") ? "required" : "" },
           h(Input, { value: f.owner_name, onChange: (v) => set("owner_name", v), placeholder: "Your full name", hasError: e("owner_name") })
         ),
-        h(Field, { label: "Login email *", error: e("email") ? "required" : "" },
+        h(Field, {
+          label: "Login email *",
+          error: e("email")
+            ? (f.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(f.email).trim()) ? "Invalid email" : "required")
+            : "",
+        },
           h(Input, { value: f.email, onChange: (v) => set("email", v), placeholder: "you@business.com", hasError: e("email") })
         ),
-        h(Field, { label: "Password *", error: e("owner_password") ? "required" : "", full: true },
+        h(Field, {
+          label: "Password *",
+          error: e("owner_password")
+            ? (f.owner_password && String(f.owner_password).length < 8 ? "Min 8 characters" : "required")
+            : "",
+          full: true,
+        },
           h(Input, { type: "password", value: f.owner_password, onChange: (v) => set("owner_password", v), placeholder: "Min 8 characters", hasError: e("owner_password") })
         ),
       )
@@ -756,20 +797,44 @@ function Step2({ f, set }) {
 
 function Step3({ f, set, errors }) {
   const e = (k) => errors.includes(k);
-  const [esConfig, setEsConfig] = useState(null);
+  const [esConfig, setEsConfig] = useState(null);           // null = loading (or after network fail)
+  const [esConfigError, setEsConfigError] = useState(null); // "network" | null
   const [connecting, setConnecting] = useState(false);
   const [connectErr, setConnectErr] = useState("");
 
-  useEffect(() => {
+  const loadEsConfig = useCallback(() => {
+    setEsConfigError(null);
+    setEsConfig(null);
     fetch(`${API_BASE}/api/whatsapp/embedded-signup/config`)
-      .then((r) => r.json())
-      .then((data) => setEsConfig(data))
-      .catch(() => setEsConfig({ enabled: false }));
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data) => {
+        setEsConfig(data);
+        setEsConfigError(null);
+      })
+      .catch(() => {
+        setEsConfig(null);
+        setEsConfigError("network");
+      });
   }, []);
+
+  useEffect(() => { loadEsConfig(); }, [loadEsConfig]);
+
+  const connectDisabled =
+    connecting ||
+    esConfigError === "network" ||
+    esConfig?.enabled === false ||
+    (esConfig == null && !esConfigError); // still loading
 
   const connectWhatsApp = async () => {
     setConnectErr("");
-    if (!esConfig?.enabled) {
+    if (esConfigError === "network" || esConfig == null) {
+      setConnectErr("Can't reach the Autom8 server right now. Please try again in a moment.");
+      return;
+    }
+    if (!esConfig.enabled) {
       setConnectErr("WhatsApp connect is not enabled yet. Contact Autom8 support.");
       return;
     }
@@ -827,7 +892,7 @@ function Step3({ f, set, errors }) {
       h("button", {
         type: "button",
         className: "mn-btn mn-btn-primary",
-        disabled: connecting || esConfig?.enabled === false,
+        disabled: connectDisabled,
         onClick: connectWhatsApp,
         style: { whiteSpace: "nowrap" },
       }, connecting ? "Connecting…" : (f.es_connected ? "Reconnect WhatsApp" : "Connect WhatsApp"))
@@ -837,7 +902,17 @@ function Step3({ f, set, errors }) {
       "Please click Connect WhatsApp before continuing."
     ),
     connectErr && h("div", { className: "mn-alert err" }, connectErr),
-    esConfig && esConfig.enabled === false && h("div", { className: "mn-alert err" },
+    esConfigError === "network" && h("div", { className: "mn-alert err" },
+      h("div", { style: { marginBottom: 10 } },
+        "Can't reach the Autom8 server right now. Please check your connection and try again in a moment — if this keeps happening, contact Autom8 support."
+      ),
+      h("button", {
+        type: "button",
+        className: "mn-btn mn-btn-secondary",
+        onClick: loadEsConfig,
+      }, "Retry")
+    ),
+    !esConfigError && esConfig && esConfig.enabled === false && h("div", { className: "mn-alert err" },
       "Embedded Signup is not configured on the server yet. Autom8 must set META_EMBEDDED_SIGNUP_CONFIG_ID."
     ),
 
@@ -981,8 +1056,9 @@ function Step4({ f, set }) {
 // ── Step 5: Review & Checkout ─────────────────────────────────────────────────
 
 function Step5({ form, onRedirect }) {
-  const [status, setStatus] = useState("idle");   // idle|loading|error
+  const [status, setStatus] = useState("idle");   // idle|loading|error|needs_attention
   const [errMsg, setErrMsg] = useState("");
+  const [attentionMsg, setAttentionMsg] = useState("");
 
   const country = COUNTRIES.find((c) => c.code === form.country_code);
   const cfg = LOB_CONFIGS[form.business_type] || LOB_CONFIGS.restaurant;
@@ -1003,12 +1079,15 @@ function Step5({ form, onRedirect }) {
   ];
 
   const handleSubmit = async () => {
-    setStatus("loading"); setErrMsg("");
+    setStatus("loading"); setErrMsg(""); setAttentionMsg("");
 
     const fetchUrl = `${API_BASE}/api/v1/register`;
     const fetchOptions = {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": form.idempotency_key || "",
+      },
       body: JSON.stringify(buildPayload(form)),
     };
 
@@ -1016,6 +1095,15 @@ function Step5({ form, onRedirect }) {
       const res  = await fetch(fetchUrl, fetchOptions);
       const data = await res.json();
       if (res.ok) {
+        clearDraft();
+        if (data.status === "needs_attention" || data.whatsapp?.success === false) {
+          setStatus("needs_attention");
+          setAttentionMsg(data.message || "Account created — finish WhatsApp in Settings → WhatsApp after login.");
+          setTimeout(() => {
+            window.location.href = data.checkout_url || data.login_url || APP_LOGIN;
+          }, 4000);
+          return;
+        }
         const dest = data.checkout_url || data.login_url || APP_LOGIN;
         window.location.href = dest;
       } else {
@@ -1024,7 +1112,7 @@ function Step5({ form, onRedirect }) {
       }
     } catch {
       setStatus("error");
-      setErrMsg("Could not reach the Autom8 server. Please check your connection.");
+      setErrMsg("Could not reach the Autom8 server. If you already submitted, wait before retrying.");
     }
   };
 
@@ -1038,13 +1126,14 @@ function Step5({ form, onRedirect }) {
       )
     ),
     status === "error" && h("div", { className: "mn-alert err" }, errMsg),
+    status === "needs_attention" && h("div", { className: "mn-alert info" }, attentionMsg),
     h("div", { className: "mn-alert info" },
       "After submit, your account is created and WhatsApp is linked. You'll go to the app login to start your trial."
     ),
     h("div", { style: { marginTop: 12 } },
       h("button", {
         className: "mn-btn mn-btn-primary",
-        disabled: status === "loading",
+        disabled: status === "loading" || status === "needs_attention",
         onClick: handleSubmit,
       }, status === "loading" ? "Processing…" : "Create account & continue →")
     )
@@ -1088,6 +1177,10 @@ function buildPayload(form) {
     contact_phone:    form.contact_phone,
     manager_phone:    form.manager_phone || form.contact_phone,
     address_line1:    form.address_line1,
+    has_lunch:        form.has_lunch,
+    has_dinner:       form.has_dinner,
+    cuisines:         form.categories,
+    idempotency_key:  form.idempotency_key,
   };
 }
 
@@ -1097,6 +1190,7 @@ function MunafeRegistrationForm() {
   const [step,   setStep  ] = useState(0);
   const [form,   setForm  ] = useState(makeDefault);
   const [errors, setErrors] = useState([]);
+  const [draftPrompt, setDraftPrompt] = useState(null);
 
   // Inject CSS once
   useEffect(() => {
@@ -1107,23 +1201,93 @@ function MunafeRegistrationForm() {
     document.head.appendChild(style);
   }, []);
 
+  useEffect(() => {
+    const d = loadDraft();
+    if (d?.form) setDraftPrompt(d);
+  }, []);
+
   const set = useCallback((k, v) => {
-    setForm((f) => ({ ...f, [k]: v }));
+    setForm((f) => {
+      const next = { ...f, [k]: v };
+      saveDraft(next);
+      return next;
+    });
     setErrors((e) => e.filter((x) => x !== k));
   }, []);
 
-  const validate = () => {
+  useEffect(() => {
+    if (!form.es_connected || !form.email || !emailOk(form.email)) return;
+    const t = setTimeout(() => {
+      fetch(`${API_BASE}/api/v1/draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: form.email,
+          draft: (() => {
+            const { owner_password, embedded_signup_code, menu_file, ...safe } = form;
+            return safe;
+          })(),
+          waba_id: form.waba_id,
+          phone_number_id: form.phone_number_id,
+          whatsapp_number: form.whatsapp_number,
+          embedded_signup_code: form.embedded_signup_code || null,
+        }),
+      }).catch(() => {});
+    }, 400);
+    return () => clearTimeout(t);
+  }, [form.es_connected, form.waba_id, form.phone_number_id, form.email]);
+
+  const validate = async () => {
     const req = REQUIRED[step] || [];
     const bad = req.filter((k) => {
       const v = form[k];
       return v == null || String(v).trim() === "";
     });
+    if (step === 1) {
+      if (form.owner_password && String(form.owner_password).length < 8 && !bad.includes("owner_password")) {
+        bad.push("owner_password");
+      }
+      if (form.email && !emailOk(form.email) && !bad.includes("email")) {
+        bad.push("email");
+      }
+    }
     setErrors(bad);
-    return bad.length === 0;
+    if (bad.length) return false;
+    if (step === 1 && form.email) {
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/email-check/${encodeURIComponent(form.email.trim())}`);
+        const data = await res.json();
+        if (data.available === false) {
+          setErrors((e) => [...e, "email"]);
+          alert(data.message || "This email already has an Autom8 account. Please log in instead.");
+          return false;
+        }
+      } catch { /* allow continue */ }
+    }
+    return true;
   };
 
-  const next = () => { if (validate()) setStep((s) => s + 1); };
+  const next = async () => { if (await validate()) setStep((s) => s + 1); };
   const back = () => { setErrors([]); setStep((s) => s - 1); };
+
+  const resumeDraft = () => {
+    if (!draftPrompt?.form) return;
+    setForm({
+      ...makeDefault(),
+      ...draftPrompt.form,
+      owner_password: "",
+      embedded_signup_code: draftPrompt.session?.embedded_signup_code || "",
+      es_connected: !!draftPrompt.session?.es_connected,
+      menu_file: null,
+    });
+    setDraftPrompt(null);
+  };
+  const startOver = () => {
+    clearDraft();
+    setForm(makeDefault());
+    setStep(0);
+    setDraftPrompt(null);
+  };
 
   const cfg   = LOB_CONFIGS[form.business_type] || LOB_CONFIGS.restaurant;
   const STEPS = buildSteps(form.business_type);
@@ -1146,6 +1310,12 @@ function MunafeRegistrationForm() {
         h("span", null, "Munafe")
       ),
       h("p", { className: "mn-header-sub" }, form.business_type ? cfg.tagline : "Multi-LOB commerce engine · Self-service onboarding")
+    ),
+
+    draftPrompt && h("div", { className: "mn-alert info", style: { marginBottom: 16 } },
+      h("div", { style: { marginBottom: 8 } }, "You have an unfinished registration. Resume where you left off?"),
+      h("button", { className: "mn-btn mn-btn-primary", style: { marginRight: 8 }, onClick: resumeDraft }, "Resume"),
+      h("button", { className: "mn-btn mn-btn-secondary", onClick: startOver }, "Start over")
     ),
 
     // ── Stepper
