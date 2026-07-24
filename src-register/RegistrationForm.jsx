@@ -15,14 +15,6 @@ const API_BASE   = (() => {
 const APP_LOGIN  = "https://app.autom8.works/login";
 
 // ── Static data ───────────────────────────────────────────────────────────────
-const STEPS = [
-  { id: "details",     label: "Restaurant Details",   icon: "🍽️" },
-  { id: "fulfillment", label: "Service Fulfillment",  icon: "🚀" },
-  { id: "whatsapp",    label: "WhatsApp & Automation", icon: "💬" },
-  { id: "menu",        label: "Menu Catalog",          icon: "📋" },
-  { id: "checkout",    label: "Review & Subscribe",    icon: "✅" },
-];
-
 const COUNTRIES = [
   { code: "IN", label: "India",               currency: "INR", tz: "Asia/Kolkata" },
   { code: "AE", label: "UAE",                 currency: "AED", tz: "Asia/Dubai" },
@@ -35,38 +27,222 @@ const COUNTRIES = [
   { code: "OM", label: "Oman",                currency: "OMR", tz: "Asia/Muscat" },
 ];
 
-const CUISINE_OPTIONS = [
-  { id: "veg",          label: "🥦 Veg" },
-  { id: "non_veg",      label: "🍗 Non-Veg" },
-  { id: "asian",        label: "🍜 Asian" },
-  { id: "continental",  label: "🍝 Continental" },
-  { id: "fast_food",    label: "🍔 Fast Food" },
-];
-
-const WORKFLOW_OPTIONS = [
-  { value: "KOT_only",         label: "Paper KOT Only",       desc: "Traditional paper kitchen order tickets" },
-  { value: "KDS_only",         label: "Digital KDS Only",     desc: "Kitchen display screens throughout" },
-  { value: "Both_KOT_and_KDS", label: "KOT + KDS Hybrid",    desc: "Paper backup with digital screens" },
-];
-
-const FULFILLMENT_OPTIONS = [
-  { id: "dine_in",           label: "Dine-In",          icon: "🪑", desc: "WhatsApp QR-to-table ordering" },
-  { id: "takeaway",          label: "Takeaway",          icon: "🛍️", desc: "Self-service counter pickup" },
-  { id: "door_delivery",     label: "Door Delivery",     icon: "🚗", desc: "Your own private drivers only" },
-  { id: "table_reservation", label: "Table Reservation", icon: "📅", desc: "Book-ahead scheduling" },
-];
-
 const TIMEZONES = [
   "Asia/Kolkata","Asia/Dubai","Asia/Singapore","Asia/Colombo",
   "Asia/Riyadh","Asia/Qatar","Asia/Kuwait","Asia/Bahrain","Asia/Muscat","UTC",
 ];
 
+// ── LOB (Line of Business) configuration registry ──────────────────────────────
+// Everything that differs by business type lives here. Adding a new LOB means
+// adding one entry — no changes needed to the step components themselves.
+const LOB_CONFIGS = {
+  restaurant: {
+    label: "Restaurant / F&B", icon: "🍽️",
+    tagline: "Cross-border restaurant engine · Self-service onboarding",
+    categoryLabel: "Cuisine Types",
+    categoryOptions: [
+      { id: "veg",          label: "🥦 Veg" },
+      { id: "non_veg",      label: "🍗 Non-Veg" },
+      { id: "asian",        label: "🍜 Asian" },
+      { id: "continental",  label: "🍝 Continental" },
+      { id: "fast_food",    label: "🍔 Fast Food" },
+    ],
+    hasWorkflow: true,
+    workflowOptions: [
+      { value: "KOT_only",         label: "Paper KOT Only",     desc: "Traditional paper kitchen order tickets" },
+      { value: "KDS_only",         label: "Digital KDS Only",   desc: "Kitchen display screens throughout" },
+      { value: "Both_KOT_and_KDS", label: "KOT + KDS Hybrid",   desc: "Paper backup with digital screens" },
+    ],
+    fulfillmentLabel: "Service Fulfillment",
+    fulfillmentOptions: [
+      { id: "dine_in",           label: "Dine-In",          icon: "🪑", desc: "WhatsApp QR-to-table ordering" },
+      { id: "takeaway",          label: "Takeaway",         icon: "🛍️", desc: "Self-service counter pickup" },
+      { id: "door_delivery",     label: "Door Delivery",    icon: "🚗", desc: "Your own private drivers only" },
+      { id: "table_reservation", label: "Table Reservation", icon: "📅", desc: "Book-ahead scheduling" },
+    ],
+    showTableCount: true,
+    catalogStepLabel: "Menu Catalog",
+    catalogLabel: "menu catalog",
+    catalogTemplateName: "munafe_menu_template.csv",
+    catalogTemplateColumns: ["item_name","category","price","description","is_veg","sku","slot"],
+    catalogTemplateSample: [
+      ["Masala Dosa","Breakfast","80","Crispy dosa with potato filling","TRUE","SKU001","all_day"],
+      ["Chicken Biryani","Main Course","220","Fragrant rice with spiced chicken","FALSE","SKU002","lunch"],
+      ["Filter Coffee","Beverages","30","Traditional South Indian filter coffee","TRUE","SKU003","all_day"],
+    ],
+    catalogDropHint: "Supports .xlsx, .xls, .csv — columns: Item Name, Price, SKU, Slot",
+    catalogHint: "💡 Columns expected: Item Name · Price · SKU (optional) · Slot (lunch / dinner / all_day)",
+  },
+
+  supply: {
+    label: "B2B Supply", icon: "📦",
+    tagline: "Supplier-to-restaurant ordering · Self-service onboarding",
+    categoryLabel: "Supply Categories",
+    categoryOptions: [
+      { id: "perishables",     label: "🥬 Perishables" },
+      { id: "packaged_goods",  label: "📦 Packaged Goods" },
+      { id: "beverages",       label: "🥤 Beverages" },
+      { id: "equipment",       label: "🔧 Kitchen Equipment" },
+    ],
+    hasWorkflow: false,
+    fulfillmentLabel: "Fulfillment Options",
+    fulfillmentOptions: [
+      { id: "scheduled_delivery", label: "Scheduled Delivery", icon: "🚚", desc: "Recurring supply runs to buyers" },
+      { id: "on_demand",          label: "On-Demand Orders",   icon: "⚡", desc: "Ad-hoc restock requests" },
+      { id: "warehouse_pickup",   label: "Warehouse Pickup",   icon: "🏭", desc: "Buyer collects from your depot" },
+    ],
+    showTableCount: false,
+    catalogStepLabel: "Product Catalog",
+    catalogLabel: "product catalog",
+    catalogTemplateName: "munafe_supply_catalog_template.csv",
+    catalogTemplateColumns: ["item_name","category","price","unit","moq","sku"],
+    catalogTemplateSample: [
+      ["Basmati Rice 25kg","Staples","1800","bag","2","SKU101"],
+      ["Sunflower Oil 15L","Oils","2200","can","1","SKU102"],
+    ],
+    catalogDropHint: "Supports .xlsx, .xls, .csv — columns: Item Name, Price, Unit, MOQ, SKU",
+    catalogHint: "💡 Columns expected: Item Name · Price · Unit · MOQ (minimum order qty) · SKU",
+  },
+
+  retail: {
+    label: "Retail / General Store", icon: "🛒",
+    tagline: "Retail ordering & storefront · Self-service onboarding",
+    categoryLabel: "Store Categories",
+    categoryOptions: [
+      { id: "grocery",    label: "🛍️ Grocery" },
+      { id: "home_goods", label: "🏠 Home Goods" },
+      { id: "apparel",    label: "👕 Apparel" },
+      { id: "general",    label: "🧾 General Merchandise" },
+    ],
+    hasWorkflow: false,
+    fulfillmentLabel: "Fulfillment Options",
+    fulfillmentOptions: [
+      { id: "in_store_pickup", label: "In-Store Pickup", icon: "🏬", desc: "Customer collects from your outlet" },
+      { id: "door_delivery",   label: "Door Delivery",   icon: "🚗", desc: "Local delivery to customers" },
+    ],
+    showTableCount: false,
+    catalogStepLabel: "Product Catalog",
+    catalogLabel: "product catalog",
+    catalogTemplateName: "munafe_retail_catalog_template.csv",
+    catalogTemplateColumns: ["item_name","category","price","description","sku","stock_qty"],
+    catalogTemplateSample: [
+      ["Cotton Bedsheet Set","Home Goods","899","King size, 2 pillow covers","SKU201","40"],
+    ],
+    catalogDropHint: "Supports .xlsx, .xls, .csv — columns: Item Name, Price, SKU, Stock Qty",
+    catalogHint: "💡 Columns expected: Item Name · Price · SKU · Stock Qty",
+  },
+
+  food_products: {
+    label: "Packaged Food Products", icon: "🍯",
+    tagline: "Packaged food ordering · Self-service onboarding",
+    categoryLabel: "Product Categories",
+    categoryOptions: [
+      { id: "snacks",    label: "🍿 Snacks" },
+      { id: "sweets",    label: "🍬 Sweets" },
+      { id: "pickles",   label: "🥒 Pickles & Preserves" },
+      { id: "beverages", label: "🥤 Beverages" },
+    ],
+    hasWorkflow: false,
+    fulfillmentLabel: "Fulfillment Options",
+    fulfillmentOptions: [
+      { id: "door_delivery",  label: "Door Delivery",  icon: "🚗", desc: "Ship directly to customers" },
+      { id: "store_pickup",   label: "Store Pickup",   icon: "🏬", desc: "Customer collects from your outlet" },
+      { id: "wholesale",      label: "Wholesale Orders", icon: "📦", desc: "Bulk orders to retailers" },
+    ],
+    showTableCount: false,
+    catalogStepLabel: "Product Catalog",
+    catalogLabel: "product catalog",
+    catalogTemplateName: "munafe_food_products_catalog_template.csv",
+    catalogTemplateColumns: ["item_name","category","price","description","sku","shelf_life_days"],
+    catalogTemplateSample: [
+      ["Mango Pickle 250g","Pickles & Preserves","150","Traditional Andhra style","SKU301","180"],
+    ],
+    catalogDropHint: "Supports .xlsx, .xls, .csv — columns: Item Name, Price, SKU, Shelf Life",
+    catalogHint: "💡 Columns expected: Item Name · Price · SKU · Shelf Life (days)",
+  },
+
+  jewellery: {
+    label: "Artificial Jewellery", icon: "💍",
+    tagline: "Jewellery catalog ordering · Self-service onboarding",
+    categoryLabel: "Product Categories",
+    categoryOptions: [
+      { id: "necklaces",  label: "📿 Necklaces" },
+      { id: "earrings",   label: "💎 Earrings" },
+      { id: "bangles",    label: "⭕ Bangles" },
+      { id: "bridal_sets", label: "👰 Bridal Sets" },
+    ],
+    hasWorkflow: false,
+    fulfillmentLabel: "Fulfillment Options",
+    fulfillmentOptions: [
+      { id: "door_delivery", label: "Door Delivery", icon: "🚗", desc: "Ship directly to customers" },
+      { id: "store_pickup",  label: "Store Pickup",  icon: "🏬", desc: "Customer collects from your outlet" },
+    ],
+    showTableCount: false,
+    catalogStepLabel: "Product Catalog",
+    catalogLabel: "product catalog",
+    catalogTemplateName: "munafe_jewellery_catalog_template.csv",
+    catalogTemplateColumns: ["item_name","category","price","description","sku","material"],
+    catalogTemplateSample: [
+      ["Kemp Choker Set","Bridal Sets","2499","Temple-style kemp stone choker","SKU401","Alloy + Kemp stone"],
+    ],
+    catalogDropHint: "Supports .xlsx, .xls, .csv — columns: Item Name, Price, SKU, Material",
+    catalogHint: "💡 Columns expected: Item Name · Price · SKU · Material",
+  },
+
+  electronics: {
+    label: "Retail / Electronics", icon: "🔌",
+    tagline: "Electronics ordering & support · Self-service onboarding",
+    categoryLabel: "Product Categories",
+    categoryOptions: [
+      { id: "mobiles",     label: "📱 Mobiles & Accessories" },
+      { id: "appliances",  label: "🔌 Home Appliances" },
+      { id: "computers",   label: "💻 Computers" },
+      { id: "audio",       label: "🎧 Audio & Wearables" },
+    ],
+    hasWorkflow: false,
+    fulfillmentLabel: "Fulfillment Options",
+    fulfillmentOptions: [
+      { id: "door_delivery", label: "Door Delivery",  icon: "🚗", desc: "Ship directly to customers" },
+      { id: "store_pickup",  label: "Store Pickup",   icon: "🏬", desc: "Customer collects from your outlet" },
+      { id: "installation",  label: "Installation Service", icon: "🛠️", desc: "On-site setup for appliances" },
+    ],
+    showTableCount: false,
+    catalogStepLabel: "Product Catalog",
+    catalogLabel: "product catalog",
+    catalogTemplateName: "munafe_electronics_catalog_template.csv",
+    catalogTemplateColumns: ["item_name","category","price","description","sku","warranty_months"],
+    catalogTemplateSample: [
+      ["1.5 Ton Split AC","Home Appliances","32999","5-star rated inverter AC","SKU501","24"],
+    ],
+    catalogDropHint: "Supports .xlsx, .xls, .csv — columns: Item Name, Price, SKU, Warranty (months)",
+    catalogHint: "💡 Columns expected: Item Name · Price · SKU · Warranty (months)",
+  },
+};
+
+const LOB_LIST = Object.keys(LOB_CONFIGS).map((id) => ({ id, ...LOB_CONFIGS[id] }));
+
+// Steps are fixed in shape; only the labels of a couple of them change per LOB.
+const buildSteps = (lobId) => {
+  const cfg = LOB_CONFIGS[lobId] || LOB_CONFIGS.restaurant;
+  return [
+    { id: "business_type", label: "Business Type",          icon: "🏷️" },
+    { id: "details",       label: `${cfg.label} Details`,   icon: cfg.icon },
+    { id: "fulfillment",   label: cfg.fulfillmentLabel,      icon: "🚀" },
+    { id: "whatsapp",      label: "WhatsApp & Automation",   icon: "💬" },
+    { id: "catalog",       label: cfg.catalogStepLabel,      icon: "📋" },
+    { id: "checkout",      label: "Review & Subscribe",      icon: "✅" },
+  ];
+};
+
 // ── Default form state ─────────────────────────────────────────────────────────
 const makeDefault = () => ({
+  // Step 0
+  business_type: "",
+
   // Step 1
   name: "", display_name: "", slug: "", city: "",
   country_code: "IN", currency_code: "INR",
-  cuisines: [], kitchen_workflow: "KOT_only",
+  categories: [], kitchen_workflow: "KOT_only",
   owner_name: "", email: "", owner_password: "",
 
   // Step 2
@@ -92,11 +268,12 @@ const makeDefault = () => ({
 
 // ── Validation rules per step ─────────────────────────────────────────────────
 const REQUIRED = {
-  0: ["name", "display_name", "slug", "city", "country_code", "owner_name", "email", "owner_password"],
-  1: [],
-  2: ["embedded_signup_code", "waba_id", "phone_number_id"],
-  3: [],
+  0: ["business_type"],
+  1: ["name", "display_name", "slug", "city", "country_code", "owner_name", "email", "owner_password"],
+  2: [],
+  3: ["embedded_signup_code", "waba_id", "phone_number_id"],
   4: [],
+  5: [],
 };
 
 // ── Utility functions ─────────────────────────────────────────────────────────
@@ -221,6 +398,20 @@ const CSS = `
   .mn-workflow-label { font-size:13px; font-weight:600; color:var(--mn-text); margin-bottom:3px; }
   .mn-workflow-card.sel .mn-workflow-label { color:var(--mn-green); }
   .mn-workflow-desc  { font-size:11px; color:var(--mn-muted); line-height:1.4; }
+
+  /* Business type cards */
+  .mn-lob-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  @media(max-width:560px){ .mn-lob-grid { grid-template-columns:repeat(2,1fr); } }
+  .mn-lob-card {
+    padding:18px 12px; border-radius:10px; border:1.5px solid var(--mn-border);
+    cursor:pointer; transition:all .15s; background:var(--mn-white);
+    text-align:center; display:flex; flex-direction:column; align-items:center; gap:8px;
+  }
+  .mn-lob-card:hover { border-color:var(--mn-green-mid); }
+  .mn-lob-card.sel { border-color:var(--mn-green); background:var(--mn-green-lt); }
+  .mn-lob-icon { font-size:26px; }
+  .mn-lob-label { font-size:12.5px; font-weight:600; color:var(--mn-text); line-height:1.3; }
+  .mn-lob-card.sel .mn-lob-label { color:var(--mn-green); }
 
   /* Fulfillment cards */
   .mn-fulfill-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
@@ -361,7 +552,28 @@ function Pill({ label, selected, onToggle }) {
   }, label);
 }
 
-// ── Step 1: Core Restaurant Details ───────────────────────────────────────────
+// ── Step 0: Business Type ─────────────────────────────────────────────────────
+
+function Step0({ f, set, errors }) {
+  const e = errors.includes("business_type");
+  return h(Fragment, null,
+    e && h("div", { className: "mn-alert err" }, "Please choose the type of business you're onboarding."),
+    h("div", { className: "mn-lob-grid" },
+      LOB_LIST.map((lob) =>
+        h("div", {
+          key: lob.id,
+          className: `mn-lob-card${f.business_type === lob.id ? " sel" : ""}`,
+          onClick: () => set("business_type", lob.id),
+        },
+          h("div", { className: "mn-lob-icon" }, lob.icon),
+          h("div", { className: "mn-lob-label" }, lob.label),
+        )
+      )
+    )
+  );
+}
+
+// ── Step 1: Core Business Details ─────────────────────────────────────────────
 
 function Step1({ f, set, errors }) {
   const [slugStatus, setSlugStatus] = useState("idle"); // idle|checking|ok|taken
@@ -401,9 +613,11 @@ function Step1({ f, set, errors }) {
     }, 600);
   };
 
-  const toggleCuisine = (id) => {
-    const cur = f.cuisines || [];
-    set("cuisines", cur.includes(id) ? cur.filter((c) => c !== id) : [...cur, id]);
+  const cfg = LOB_CONFIGS[f.business_type] || LOB_CONFIGS.restaurant;
+
+  const toggleCategory = (id) => {
+    const cur = f.categories || [];
+    set("categories", cur.includes(id) ? cur.filter((c) => c !== id) : [...cur, id]);
   };
 
   return h(Fragment, null,
@@ -475,25 +689,25 @@ function Step1({ f, set, errors }) {
       )
     ),
 
-    // Cuisines
+    // Categories (label & options vary per LOB)
     h("div", { className: "mn-field mn-field-full", style: { marginTop: 4 } },
-      h("label", { className: "mn-label" }, "Cuisine Types"),
+      h("label", { className: "mn-label" }, cfg.categoryLabel),
       h("div", { className: "mn-pill-group", style: { marginTop: 6 } },
-        CUISINE_OPTIONS.map((c) =>
+        cfg.categoryOptions.map((c) =>
           h(Pill, {
             key: c.id, label: c.label,
-            selected: (f.cuisines || []).includes(c.id),
-            onToggle: () => toggleCuisine(c.id),
+            selected: (f.categories || []).includes(c.id),
+            onToggle: () => toggleCategory(c.id),
           })
         )
       )
     ),
 
-    // Kitchen workflow
-    h("div", { className: "mn-section" },
+    // Kitchen workflow — restaurant LOB only
+    cfg.hasWorkflow && h("div", { className: "mn-section" },
       h("p", { className: "mn-section-title" }, "Kitchen Workflow"),
       h("div", { className: "mn-workflow-grid" },
-        WORKFLOW_OPTIONS.map((w) =>
+        cfg.workflowOptions.map((w) =>
           h("div", {
             key: w.value,
             className: `mn-workflow-card${f.kitchen_workflow === w.value ? " sel" : ""}`,
@@ -511,10 +725,11 @@ function Step1({ f, set, errors }) {
 // ── Step 2: Service Fulfillment Matrix ────────────────────────────────────────
 
 function Step2({ f, set }) {
+  const cfg = LOB_CONFIGS[f.business_type] || LOB_CONFIGS.restaurant;
   const toggle = (id) => set(id, !f[id]);
   return h(Fragment, null,
     h("div", { className: "mn-fulfill-grid" },
-      FULFILLMENT_OPTIONS.map((opt) =>
+      cfg.fulfillmentOptions.map((opt) =>
         h("div", {
           key: opt.id,
           className: `mn-fulfill-card${f[opt.id] ? " sel" : ""}`,
@@ -528,7 +743,7 @@ function Step2({ f, set }) {
         )
       )
     ),
-    f.dine_in && h("div", { className: "mn-field", style: { marginTop: 20, maxWidth: 200 } },
+    cfg.showTableCount && f.dine_in && h("div", { className: "mn-field", style: { marginTop: 20, maxWidth: 200 } },
       h(Field, { label: "Table Count", hint: "Total physical tables" },
         h(Input, { type: "number", value: f.table_count, onChange: (v) => set("table_count", parseInt(v) || 0) })
       )
@@ -667,6 +882,7 @@ function Step3({ f, set, errors }) {
 // ── Step 4: Menu Catalog Upload ───────────────────────────────────────────────
 
 function Step4({ f, set }) {
+  const cfg = LOB_CONFIGS[f.business_type] || LOB_CONFIGS.restaurant;
   const [dragOver, setDragOver] = useState(false);
   const [parseStatus, setParseStatus] = useState("");
   const fileInputRef = useRef(null);
@@ -697,17 +913,12 @@ function Step4({ f, set }) {
   };
 
   const downloadTemplate = () => {
-    const rows = [
-      ["item_name","category","price","description","is_veg","sku","slot"],
-      ["Masala Dosa","Breakfast","80","Crispy dosa with potato filling","TRUE","SKU001","all_day"],
-      ["Chicken Biryani","Main Course","220","Fragrant rice with spiced chicken","FALSE","SKU002","lunch"],
-      ["Filter Coffee","Beverages","30","Traditional South Indian filter coffee","TRUE","SKU003","all_day"],
-    ];
+    const rows = [cfg.catalogTemplateColumns, ...cfg.catalogTemplateSample];
     const csv = rows.map(r => r.map(v => `"${v}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "munafe_menu_template.csv";
+    a.download = cfg.catalogTemplateName;
     a.click();
     URL.revokeObjectURL(a.href);
   };
@@ -715,8 +926,8 @@ function Step4({ f, set }) {
   return h(Fragment, null,
     h("div", { style: { marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "#F0F6FF", borderRadius: 8, border: "1px solid #C5DDF8" } },
       h("div", null,
-        h("div", { style: { fontSize: 13, fontWeight: 600, color: "#185FA5" } }, "📥 Download menu template"),
-        h("div", { style: { fontSize: 11, color: "#555", marginTop: 2 } }, "Fill in your items and upload below. Columns: item_name, category, price, description, is_veg, sku, slot")
+        h("div", { style: { fontSize: 13, fontWeight: 600, color: "#185FA5" } }, `📥 Download ${cfg.catalogLabel} template`),
+        h("div", { style: { fontSize: 11, color: "#555", marginTop: 2 } }, `Fill in your items and upload below. Columns: ${cfg.catalogTemplateColumns.join(", ")}`)
       ),
       h("button", {
         onClick: downloadTemplate,
@@ -732,9 +943,9 @@ function Step4({ f, set }) {
     },
       h("div", { className: "mn-dropzone-icon" }, "📊"),
       h("p", { className: "mn-dropzone-text" },
-        h("strong", null, "Click or drag"), " your menu catalog here"
+        h("strong", null, "Click or drag"), ` your ${cfg.catalogLabel} here`
       ),
-      h("p", { className: "mn-dropzone-sub" }, "Supports .xlsx, .xls, .csv — columns: Item Name, Price, SKU, Slot"),
+      h("p", { className: "mn-dropzone-sub" }, cfg.catalogDropHint),
       f.menu_file && h("div", { className: "mn-file-badge" },
         `✅ ${f.menu_file.name}`,
         h("span", { className: "mn-file-rm", onClick: (e) => { e.stopPropagation(); removeFile(); } }, " ✕")
@@ -747,7 +958,7 @@ function Step4({ f, set }) {
     }),
     parseStatus && h("p", { style: { marginTop: 10, fontSize: 13, color: "var(--mn-muted)" } }, parseStatus),
     h("div", { className: "mn-alert info", style: { marginTop: 16 } },
-      "💡 Columns expected: Item Name · Price · SKU (optional) · Slot (lunch / dinner / all_day)"
+      cfg.catalogHint
     )
   );
 }
@@ -759,19 +970,21 @@ function Step5({ form, onRedirect }) {
   const [errMsg, setErrMsg] = useState("");
 
   const country = COUNTRIES.find((c) => c.code === form.country_code);
+  const cfg = LOB_CONFIGS[form.business_type] || LOB_CONFIGS.restaurant;
 
   const summaryRows = [
+    ["Business type",   cfg.label],
     ["Business name",   form.display_name || form.name],
     ["Subdomain",       form.slug ? `autom8.works/${form.slug}` : "—"],
     ["Location",        [form.city, country?.label].filter(Boolean).join(", ")],
-    ["Cuisines",        (form.cuisines || []).join(", ") || "—"],
-    ["Kitchen flow",    form.kitchen_workflow],
-    ["Services",        FULFILLMENT_OPTIONS.filter((o) => form[o.id]).map((o) => o.label).join(", ") || "—"],
+    [cfg.categoryLabel, (form.categories || []).join(", ") || "—"],
+    ...(cfg.hasWorkflow ? [["Kitchen flow", form.kitchen_workflow]] : []),
+    [cfg.fulfillmentLabel, cfg.fulfillmentOptions.filter((o) => form[o.id]).map((o) => o.label).join(", ") || "—"],
     ["Owner email",     form.email || "—"],
     ["WhatsApp",        form.es_connected ? (form.whatsapp_number || "Connected") : (form.whatsapp_number || "—")],
     ["Timezone",        form.timezone],
     ["Payment mode",    form.payment_mode],
-    ["Menu file",       form.menu_file?.name || (form.menu_catalog?.length ? `${form.menu_catalog.length} items` : "Not uploaded")],
+    [cfg.catalogStepLabel, form.menu_file?.name || (form.menu_catalog?.length ? `${form.menu_catalog.length} items` : "Not uploaded")],
   ];
 
   const handleSubmit = async () => {
@@ -837,14 +1050,16 @@ function Step5({ form, onRedirect }) {
 // ── Payload builder ───────────────────────────────────────────────────────────
 function buildPayload(form) {
   return {
+    business_type:    form.business_type, // kept for reference/logging; backend keys off lob_type below
+    lob_type:         form.business_type, // onboarding.js reads body.lob_type — this is the field that actually drives catalog schema selection
     name:             form.name,
     display_name:     form.display_name,
     slug:             form.slug,
     city:             form.city,
     country_code:     form.country_code,
     currency_code:    form.currency_code,
-    cuisines:         form.cuisines,
-    kitchen_workflow: form.kitchen_workflow,
+    categories:       form.categories,
+    kitchen_workflow: form.business_type === "restaurant" ? form.kitchen_workflow : null,
     dine_in:          form.dine_in,
     takeaway:         form.takeaway,
     door_delivery:    form.door_delivery,
@@ -906,7 +1121,11 @@ function MunafeRegistrationForm() {
   const next = () => { if (validate()) setStep((s) => s + 1); };
   const back = () => { setErrors([]); setStep((s) => s - 1); };
 
+  const cfg   = LOB_CONFIGS[form.business_type] || LOB_CONFIGS.restaurant;
+  const STEPS = buildSteps(form.business_type);
+
   const stepComponents = [
+    h(Step0, { f: form, set, errors }),
     h(Step1, { f: form, set, errors }),
     h(Step2, { f: form, set, errors }),
     h(Step3, { f: form, set, errors }),
@@ -919,10 +1138,10 @@ function MunafeRegistrationForm() {
     // ── Header
     h("div", { className: "mn-header" },
       h("div", { className: "mn-header-logo" },
-        h("span", null, "🍽️"),
+        h("span", null, form.business_type ? cfg.icon : "🍽️"),
         h("span", null, "Munafe")
       ),
-      h("p", { className: "mn-header-sub" }, "Cross-border restaurant engine · Self-service onboarding")
+      h("p", { className: "mn-header-sub" }, form.business_type ? cfg.tagline : "Multi-LOB commerce engine · Self-service onboarding")
     ),
 
     // ── Stepper
@@ -944,10 +1163,11 @@ function MunafeRegistrationForm() {
     h("div", { className: "mn-card" },
       h("h2", { className: "mn-card-title" }, STEPS[step].icon + " " + STEPS[step].label),
       h("p", { className: "mn-card-sub" }, [
+        "Choose the type of business you're setting up on Munafe.",
         "Tell us about your business and create your owner login.",
         "Select the fulfillment modes your team manages.",
         "Connect WhatsApp with one click — no Meta Developer Console.",
-        "Upload your daily menu catalog in Excel or CSV format.",
+        `Upload your ${cfg.catalogLabel} in Excel or CSV format.`,
         "Review your details, then create your account and start the trial.",
       ][step]),
       stepComponents[step]
