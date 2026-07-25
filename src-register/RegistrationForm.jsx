@@ -384,7 +384,7 @@ const CSS = `
   #munafe-registration-root .mn-field-full { grid-column: 1 / -1; }
   #munafe-registration-root .mn-label { display:block; font-size: 12px; font-weight:600; color:var(--mn-muted); text-transform:uppercase; letter-spacing:.04em; margin-bottom: 5px; }
   #munafe-registration-root .mn-label.err { color: var(--mn-danger); }
-  #munafe-registration-root .mn-hint { font-size: 11px; color: var(--mn-muted); margin-bottom: 5px; line-height:1.4; }
+  #munafe-registration-root .mn-hint { font-size: 11px; color: var(--mn-muted); margin-bottom: 5px; line-height:1.4; min-height: 15.4px; }
   #munafe-registration-root .mn-inp {
     width:100%; padding: 9px 12px; font-size:14px; font-family:inherit;
     border: 1px solid var(--mn-border); border-radius: 7px;
@@ -524,7 +524,8 @@ function Field({ label, hint, error, full, children }) {
     h("label", { className: `mn-label${error ? " err" : ""}` },
       error ? `${label} — ${error}` : label
     ),
-    hint && h("p", { className: "mn-hint" }, hint),
+    // Always reserve hint height so paired .mn-grid columns keep inputs aligned
+    h("div", { className: "mn-hint" }, hint || "\u00A0"),
     children
   );
 }

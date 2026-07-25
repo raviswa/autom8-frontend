@@ -851,6 +851,86 @@ function WAOrdersTable({ orders, rangeLabel }) {
   );
 }
 
+function LocalCourierQueue({ apiClient }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState(null);
+
+  const load = useCallback(async () => {
+    if (!apiClient) return;
+    setLoading(true);
+    try {
+      const res = await apiClient.get('/api/dashboard/shipment/local-channel/pending');
+      setRows(res.data.pending || []);
+    } catch (_) {
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [apiClient]);
+
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 30000);
+    return () => clearInterval(t);
+  }, [load]);
+
+  const act = async (bookingId, action) => {
+    setBusyId(bookingId);
+    try {
+      await apiClient.post(`/api/dashboard/shipment/local-channel/${bookingId}`, { action });
+      await load();
+    } catch (err) {
+      alert(err.response?.data?.error || err.message || 'Action failed');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (loading && !rows.length) return null;
+  if (!rows.length) return null;
+
+  return (
+    <div style={{ background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: 14, marginBottom: 12 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Same-city courier requests</div>
+      <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 10 }}>
+        Shopper asked for Shiprocket. Approve courier or fulfill with your own team.
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {rows.map((r) => (
+          <div key={r.booking_id} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', justifyContent: 'space-between', borderTop: `0.5px solid ${C.border}`, paddingTop: 8 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{r.customer_name || r.order_ref || r.booking_id.slice(0, 8)}</div>
+              <div style={{ fontSize: 11, color: C.textMuted }}>
+                {r.token_number ? `${r.token_number} · ` : ''}{r.delivery_address || 'Address on file'}
+                {r.delivery_charge != null ? ` · ₹${Math.round(Number(r.delivery_charge))}` : ''}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+              <button
+                type="button"
+                disabled={busyId === r.booking_id}
+                onClick={() => act(r.booking_id, 'approve')}
+                style={{ fontSize: 11, fontWeight: 600, padding: '6px 10px', borderRadius: 8, border: 'none', background: C.primary, color: '#fff', cursor: 'pointer' }}
+              >
+                Approve
+              </button>
+              <button
+                type="button"
+                disabled={busyId === r.booking_id}
+                onClick={() => act(r.booking_id, 'reject')}
+                style={{ fontSize: 11, fontWeight: 600, padding: '6px 10px', borderRadius: 8, border: `0.5px solid ${C.border}`, background: '#fff', color: C.text, cursor: 'pointer' }}
+              >
+                Own team
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function OwnerDashboard({ restaurantId, restaurantName, onLogout, apiClient: apiClientProp }) {
   const { apiClient: apiClientCtx } = useAuth();
@@ -959,6 +1039,8 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
     ? [
         { to: "/dashboard/manager", label: "Manager", chip: CHIP_PRIMARY },
         { to: "/dashboard/packing", label: "Packing", chip: CHIP_PRIMARY },
+        // Store-pickup QR handover (when takeaway is enabled in Settings)
+        { to: "/dashboard/captain", label: "Captain", chip: CHIP_SECONDARY },
         { to: "/dashboard/menu",    label: "Menu",     chip: CHIP_SECONDARY },
         { to: "/settings?tab=kitchen#scheduled-ordering", label: "Kitchen hours", chip: CHIP_PRIMARY },
         { to: "/settings",          label: "Settings", chip: CHIP_SECONDARY },
@@ -1034,6 +1116,7 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
               <TableOccupancy tables={tableSnapshot.tables} takeawayActive={tableSnapshot.takeawayActive} queueWaiting={tableSnapshot.queueWaiting} />
               <KotStatus stats={kotStats} />
             </div>
+            {isPackagedGoods && <LocalCourierQueue apiClient={apiClient} />}
             {/* WABA quick ref in live tab */}
             <WABAPanel info={wabaInfo} />
           </>

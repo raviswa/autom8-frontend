@@ -22,24 +22,11 @@ export function SubscriptionProvider({ children }) {
   const [subscription, setSubscription] = useState(null);
   const [loading, setLoading]           = useState(true);
 
-  // ── KEY FIX ──────────────────────────────────────────────────────────────
-  // Reset loading=true SYNCHRONOUSLY whenever user changes.
-  // This runs before the fetch effect, closing the window where:
-  //   user=null  → setLoading(false) [no user, stop loading]
-  //   user=X     → React renders AppRoutes with loading=false, features=[]
-  //              → hasAnyOf()=false → FeatureWall flashes ❌
-  //
-  // With this effect, the moment user changes the loading flag goes back to
-  // true before AppRoutes ever sees the new user value, so AppRoutes always
-  // renders a spinner during the transition, never FeatureWall.
   useEffect(() => {
     if (user) {
-      // User just logged in (or page refreshed with existing session).
-      // Force loading=true immediately so no render sees user+empty features.
       setLoading(true);
     }
   }, [user]);
-  // ─────────────────────────────────────────────────────────────────────────
 
   const fetchSubscription = useCallback(async () => {
     if (!user) {
@@ -53,6 +40,18 @@ export function SubscriptionProvider({ children }) {
     setLoading(true);
 
     try {
+      // Brand roles may lack a single outlet — brand billing is separate
+      if (user.role === 'brand_owner' || user.role === 'brand_manager') {
+        setFeatures(Object.values(FEATURES));
+        setPaidFeatures(Object.values(FEATURES));
+        setSubscription({
+          status: 'active',
+          soft_locked: false,
+          is_brand: true,
+        });
+        return;
+      }
+
       const res = await apiClient.get('/api/subscription');
       const enabled = res.data.enabled_features
         || res.data.features
@@ -61,11 +60,13 @@ export function SubscriptionProvider({ children }) {
       const paid = res.data.paid_features || enabled;
       setFeatures(enabled.length > 0 ? enabled : Object.values(FEATURES));
       setPaidFeatures(paid.length > 0 ? paid : Object.values(FEATURES));
-      setSubscription(res.data.subscription || res.data || null);
+      setSubscription(res.data);
     } catch {
       // Network/auth error: assume all features so no one gets locked out.
+      // Do NOT invent soft_locked=true on errors.
       setFeatures(Object.values(FEATURES));
       setPaidFeatures(Object.values(FEATURES));
+      setSubscription({ status: 'trial', soft_locked: false, fail_open: true });
     } finally {
       setLoading(false);
     }
@@ -83,6 +84,7 @@ export function SubscriptionProvider({ children }) {
     <SubscriptionContext.Provider value={{
       features, paidFeatures, subscription, loading, hasFeature, hasPaidFeature, hasAnyOf,
       refresh: fetchSubscription,
+      softLocked: Boolean(subscription?.soft_locked),
     }}>
       {children}
     </SubscriptionContext.Provider>

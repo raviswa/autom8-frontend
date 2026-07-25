@@ -59,10 +59,10 @@ export default function FeatureWall({ feature }) {
               As the owner, you can update your plan from the dashboard.
             </p>
             <button
-              onClick={() => window.location.href = '/dashboard/owner'}
+              onClick={() => window.location.href = '/billing'}
               className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-xl transition text-sm"
             >
-              Go to owner dashboard
+              View subscription & billing
             </button>
           </div>
         ) : (

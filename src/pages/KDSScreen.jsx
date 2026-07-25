@@ -590,7 +590,7 @@ function OrderItemRow({ item, onAdvance, onVoid, packingMode = false }) {
   );
 }
 
-function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll, packingMode = false }) {
+function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll, packingMode = false, apiClient = null }) {
   const { anchor, items, orderNumber, serviceType, aggregateStatus, createdAt } = order;
   const handleReprint = () => printKOT(buildKOTFromFeedItem(anchor, allItems));
   const tokenLabel = anchor.token_number ? formatTokenDisplay(anchor.token_number) : null;
@@ -599,6 +599,7 @@ function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll, pac
   const pendingCount = items.filter((i) => i.status === 'pending').length;
   const cookingCount = items.filter((i) => i.status === 'in_progress').length;
   const readyCount = items.filter((i) => i.status === 'ready').length;
+  const fullyPacked = packingMode && readyCount > 0 && pendingCount === 0 && cookingCount === 0;
 
   let checkAllLabel = 'Check all';
   let checkAllDisabled = false;
@@ -640,6 +641,15 @@ function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll, pac
         ))}
       </div>
 
+      {packingMode && apiClient && (
+        <ShiprocketStatusBar
+          apiClient={apiClient}
+          tokenNumber={anchor.token_number}
+          orderNumber={anchor.order_item?.order?.order_number || orderNumber}
+          fullyPacked={fullyPacked}
+        />
+      )}
+
       <div className="kds-ticket-footer">
         {!packingMode && (
           <button
@@ -663,14 +673,134 @@ function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll, pac
   );
 }
 
+function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked }) {
+  const [shipment, setShipment] = useState(null);
+  const [bookingId, setBookingId] = useState(null);
+  const [channel, setChannel] = useState(null);
+  const [channelStatus, setChannelStatus] = useState(null);
+  const [fulfillmentType, setFulfillmentType] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    if (!apiClient || (!tokenNumber && !orderNumber)) return;
+    setLoading(true);
+    setError('');
+    try {
+      const res = await apiClient.get('/api/dashboard/shipment-lookup', {
+        params: {
+          ...(tokenNumber ? { token: tokenNumber } : {}),
+          ...(orderNumber ? { order_ref: orderNumber } : {}),
+        },
+      });
+      setBookingId(res.data.booking_id || null);
+      setShipment(res.data.shipment || null);
+      setChannel(res.data.delivery_channel || null);
+      setChannelStatus(res.data.delivery_channel_status || null);
+      setFulfillmentType(res.data.fulfillment_type || null);
+    } catch (err) {
+      if (err.response?.status === 404) {
+        setBookingId(null);
+        setShipment(null);
+        setChannel(null);
+        setChannelStatus(null);
+        setFulfillmentType(null);
+      } else {
+        setError(err.response?.data?.error || err.message || 'Shipment lookup failed');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [apiClient, tokenNumber, orderNumber]);
+
+  useEffect(() => {
+    load();
+    if (!fullyPacked) return undefined;
+    const t = setInterval(load, 20000);
+    return () => clearInterval(t);
+  }, [load, fullyPacked]);
+
+  const retry = async () => {
+    if (!bookingId) {
+      await load();
+      return;
+    }
+    setRetrying(true);
+    setError('');
+    try {
+      const res = await apiClient.post(`/api/dashboard/shipment/shiprocket/${bookingId}`, { force: true });
+      setShipment(res.data.shipment || null);
+      if (res.data.error) setError(res.data.error);
+    } catch (err) {
+      setError(err.response?.data?.error || err.message || 'Retry failed');
+      if (err.response?.data?.shipment) setShipment(err.response.data.shipment);
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  const status = String(shipment?.shipment_status || '').toLowerCase();
+  const failed = status.includes('fail') || !!shipment?.shiprocket_last_error;
+  const hasAwb = !!shipment?.awb;
+  const isPickup = String(fulfillmentType || '').toLowerCase() === 'pickup';
+  const isOwnTeam = String(channel || '').toLowerCase() === 'own_team';
+  const isPending = String(channelStatus || '') === 'pending_manager';
+  const shiprocketReady = String(channel || '').toLowerCase() === 'shiprocket'
+    && ['confirmed', 'auto_accepted'].includes(String(channelStatus || 'confirmed'));
+  const needsRetry = fullyPacked && shiprocketReady && (!hasAwb || failed) && !isOwnTeam && !isPickup;
+
+  let label = loading ? 'Fulfillment…' : 'Fulfillment';
+  if (isPickup) {
+    label = 'Store pickup · captain QR at collection';
+  } else if (isPending) {
+    label = 'Shiprocket · awaiting manager approval';
+  } else if (isOwnTeam) {
+    label = channelStatus === 'rejected_to_own_team'
+      ? 'Own delivery team (courier declined)'
+      : 'Own delivery team';
+  } else if (hasAwb) {
+    label = `${shipment.courier_name || 'Courier'} · AWB ${shipment.awb}`;
+    if (shipment.shipment_status) label += ` · ${shipment.shipment_status}`;
+  } else if (failed) {
+    label = shipment.shiprocket_last_error || 'Shiprocket failed';
+  } else if (shipment?.shiprocket_order_id) {
+    label = `SR #${shipment.shiprocket_order_id} · awaiting AWB`;
+  } else if (shiprocketReady) {
+    label = 'Shiprocket · will create when packed';
+  } else if (!bookingId && !loading) {
+    label = 'No booking linked';
+  }
+
+  return (
+    <div className={`kds-ship-bar ${failed ? 'kds-ship-bar-fail' : hasAwb || isOwnTeam || isPickup ? 'kds-ship-bar-ok' : isPending ? 'kds-ship-bar-fail' : ''}`}>
+      <span className="kds-ship-label" title={error || shipment?.shiprocket_last_error || ''}>
+        {label}
+      </span>
+      {needsRetry && bookingId && (
+        <button
+          type="button"
+          className="kds-ship-retry"
+          onClick={retry}
+          disabled={retrying}
+        >
+          {retrying ? 'Retrying…' : 'Retry pickup'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ─── History table ────────────────────────────────────────────────────────────
 
 function HistoryView({ apiClient, active, queue = 'cooking' }) {
   const today = todayISTStr();
+  const packingHistory = queue === 'packing';
   const [draftFrom, setDraftFrom] = useState(today);
   const [draftTo, setDraftTo] = useState(today);
-  const [appliedFrom, setAppliedFrom] = useState(null);
-  const [appliedTo, setAppliedTo] = useState(null);
+  // Default to today so History loads immediately (no empty Apply gate).
+  const [appliedFrom, setAppliedFrom] = useState(today);
+  const [appliedTo, setAppliedTo] = useState(today);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -707,6 +837,8 @@ function HistoryView({ apiClient, active, queue = 'cooking' }) {
       if (!isDateInRangeIST(i.updated_at ?? i.created_at, appliedFrom, appliedTo)) return false;
       if (i.status === 'cancelled') return true;
       if (i.status === 'ready') {
+        // Packing History: show ready immediately (Live still keeps the 20-min strip).
+        if (packingHistory) return true;
         if (!viewingTodayOnly) return true;
         const readyAt = i.updated_at ?? i.created_at;
         const minsReady = (nowMs - new Date(toUTC(readyAt))) / 60000;
@@ -928,7 +1060,7 @@ export default function KDSScreen() {
   const [loading,  setLoading]    = useState(true);
   const [filter,   setFilter]     = useState('all');
   const [view,     setView]       = useState('live');
-  const [packingLayout, setPackingLayout] = useState('sku'); // orders | sku
+  const [packingLayout, setPackingLayout] = useState('orders'); // orders | sku
   const [compliance, setCompliance] = useState(null);
   const [sound,    setSound]      = useState(true);
   const [printMsg, setPrintMsg]   = useState('');   // transient "Printing KOT…" toast
@@ -1208,34 +1340,43 @@ const fetchFeed = useCallback(async () => {
                 >History</button>
               </div>
               {packingMode && (
-                <a
+                <button
+                  type="button"
                   className="kds-ribbon-chip"
-                  href={`/api/dashboard/packing-slips/today`}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={(e) => {
-                    const token = localStorage.getItem('authToken');
-                    if (!token) return;
-                    e.preventDefault();
-                    fetch('/api/dashboard/packing-slips/today', {
-                      headers: { Authorization: `Bearer ${token}` },
-                    })
-                      .then(async (r) => {
-                        if (!r.ok) {
-                          const err = await r.json().catch(() => ({}));
-                          throw new Error(err.error || 'No slips today');
-                        }
-                        return r.blob();
-                      })
-                      .then((blob) => {
-                        const url = URL.createObjectURL(blob);
-                        window.open(url, '_blank');
-                      })
-                      .catch((err) => alert(err.message || 'Could not open packing slips'));
+                  onClick={async () => {
+                    try {
+                      const res = await apiClient.get('/api/dashboard/packing-slips/today', {
+                        responseType: 'blob',
+                      });
+                      const blob = res.data instanceof Blob
+                        ? res.data
+                        : new Blob([res.data], { type: 'application/pdf' });
+                      // Axios may still return JSON error bodies as blobs
+                      if (blob.type && blob.type.includes('json')) {
+                        const text = await blob.text();
+                        const err = JSON.parse(text);
+                        throw new Error(err.error || 'No slips today');
+                      }
+                      const url = URL.createObjectURL(blob);
+                      window.open(url, '_blank', 'noopener,noreferrer');
+                      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+                    } catch (err) {
+                      let msg = err.message || 'Could not open packing slips';
+                      const data = err.response?.data;
+                      if (data instanceof Blob) {
+                        try {
+                          const parsed = JSON.parse(await data.text());
+                          msg = parsed.error || msg;
+                        } catch (_) { /* keep msg */ }
+                      } else if (data?.error) {
+                        msg = data.error;
+                      }
+                      alert(msg);
+                    }
                   }}
                 >
                   Today’s slips
-                </a>
+                </button>
               )}
               {packingMode ? (
                 !['food_products', 'retail', 'b2b', 'psl'].includes(String(compliance?.lobType || '').toLowerCase()) && (
@@ -1255,7 +1396,14 @@ const fetchFeed = useCallback(async () => {
               )}
               <button
                 className={`kds-ribbon-chip ${sound ? 'kds-ribbon-chip-on' : ''}`}
-                onClick={() => setSound(s => !s)}
+                onClick={() => {
+                  setSound((s) => {
+                    const next = !s;
+                    // Unlock autoplay on the user gesture that enables sound.
+                    if (next) playOrderAlert();
+                    return next;
+                  });
+                }}
               >
                 {sound ? 'Sound on' : 'Sound off'}
               </button>
@@ -1367,6 +1515,7 @@ const fetchFeed = useCallback(async () => {
                     onVoid={voidItem}
                     onAdvanceAll={advanceAllInOrder}
                     packingMode={packingMode}
+                    apiClient={apiClient}
                   />
                 ))
               )}
@@ -1669,6 +1818,25 @@ const KDS_CSS = `
   .row-btn-cooking { background: #7c2d12; color: #fed7aa; }
   .row-btn-cooking:hover:not(:disabled) { background: #15803d; color: #fff; }
   .row-btn-done    { background: #14532d; color: #86efac; }
+
+  .kds-ship-bar {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 8px 12px; border-top: 1px solid #222;
+    background: #121212; font-size: 12px; color: #d1d5db;
+  }
+  .kds-ship-bar-ok { background: #052e16; color: #bbf7d0; }
+  .kds-ship-bar-fail { background: #450a0a; color: #fecaca; }
+  .kds-ship-label {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .kds-ship-retry {
+    flex-shrink: 0;
+    border: 1px solid #fbbf24; background: transparent; color: #fbbf24;
+    border-radius: 6px; padding: 4px 10px; font-size: 11px; font-weight: 600;
+    cursor: pointer;
+  }
+  .kds-ship-retry:hover:not(:disabled) { background: #fbbf24; color: #111; }
+  .kds-ship-retry:disabled { opacity: 0.55; cursor: default; }
 
   .kds-ticket-footer {
     display: grid; grid-template-columns: 1fr 1fr; gap: 0;

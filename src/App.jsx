@@ -17,6 +17,10 @@ import MenuPage from './pages/MenuPage';
 import WalkInForm from './pages/WalkInForm';
 import FeatureWall from './pages/FeatureWall';
 import NotFound from './pages/NotFound';
+import SetupStatusPage from './pages/SetupStatusPage';
+import BillingPage from './pages/BillingPage';
+import SoftLockPage from './pages/SoftLockPage';
+import SubscriptionStatusBar from './components/SubscriptionStatusBar';
 
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
@@ -63,9 +67,65 @@ function ProtectedRoute({ children, allowedRoles }) {
 }
 
 function FeatureRoute({ feature, children }) {
-  const { hasFeature, loading } = useSubscription();
+  const { hasFeature, loading, softLocked } = useSubscription();
   if (loading) return <Spinner />;
+  if (softLocked) return <Navigate to="/subscription-locked" replace />;
   if (!hasFeature(feature)) return <FeatureWall feature={feature} />;
+  return children;
+}
+
+/** Soft-lock gate for operational dashboards (Screen D). Settings/billing stay reachable. */
+function SubscriptionGate({ children }) {
+  const { softLocked, loading } = useSubscription();
+  if (loading) return <Spinner />;
+  if (softLocked) return <Navigate to="/subscription-locked" replace />;
+  return children;
+}
+
+/** After login: incomplete setup → Screen A (owners / brand owners). */
+function SetupGate({ children }) {
+  const { user, apiClient } = useAuth();
+  const [state, setState] = React.useState({ loading: true, redirect: null });
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!user) {
+        if (!cancelled) setState({ loading: false, redirect: null });
+        return;
+      }
+      const role = user.role;
+      // Screen A is per-outlet; brand multi-outlet uses B2 / outlet drill-down instead
+      if (role !== 'owner') {
+        if (!cancelled) setState({ loading: false, redirect: null });
+        return;
+      }
+      try {
+        const seen = sessionStorage.getItem('autom8_setup_seen');
+        if (seen === '1') {
+          if (!cancelled) setState({ loading: false, redirect: null });
+          return;
+        }
+      } catch { /* ignore */ }
+
+      try {
+        const res = await apiClient.get('/api/onboarding/status');
+        if (cancelled) return;
+        if (res.data && res.data.setup_complete === false) {
+          setState({ loading: false, redirect: '/setup' });
+        } else {
+          try { sessionStorage.setItem('autom8_setup_seen', '1'); } catch { /* ignore */ }
+          setState({ loading: false, redirect: null });
+        }
+      } catch {
+        if (!cancelled) setState({ loading: false, redirect: null });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user, apiClient]);
+
+  if (state.loading) return <Spinner />;
+  if (state.redirect) return <Navigate to={state.redirect} replace />;
   return children;
 }
 
@@ -118,12 +178,49 @@ function AppRoutes() {
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
 
+      {/* ── Setup / Billing / Soft-lock ── */}
+      <Route
+        path="/setup"
+        element={
+          <ProtectedRoute allowedRoles={['owner', 'brand_owner', 'brand_manager']}>
+            <SetupStatusPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/billing"
+        element={
+          <ProtectedRoute allowedRoles={['owner', 'brand_owner', 'brand_manager', 'manager']}>
+            <BillingPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/settings/billing"
+        element={<Navigate to="/billing" replace />}
+      />
+      <Route
+        path="/subscription-locked"
+        element={
+          <ProtectedRoute allowedRoles={['owner', 'brand_owner', 'brand_manager', 'manager', 'kitchen_staff', 'packing_staff', 'dispatch_staff', 'sales_staff', 'captain']}>
+            <SoftLockPage />
+          </ProtectedRoute>
+        }
+      />
+
       {/* ── Brand Owner / Manager ── */}
       <Route
         path="/dashboard/brand"
         element={
           <ProtectedRoute allowedRoles={['brand_owner', 'brand_manager']}>
-            <BrandDashboard />
+            <SubscriptionGate>
+              <SetupGate>
+                <>
+                  <SubscriptionStatusBar />
+                  <BrandDashboard />
+                </>
+              </SetupGate>
+            </SubscriptionGate>
           </ProtectedRoute>
         }
       />
@@ -131,12 +228,14 @@ function AppRoutes() {
         path="/dashboard/brand/outlet/:outletId"
         element={
           <ProtectedRoute allowedRoles={['brand_owner', 'brand_manager']}>
-            <OutletDrillDown />
+            <SubscriptionGate>
+              <OutletDrillDown />
+            </SubscriptionGate>
           </ProtectedRoute>
         }
       />
 
-      {/* ── Settings ── */}
+      {/* ── Settings (allowed during soft-lock) ── */}
       <Route
         path="/settings"
         element={
@@ -171,12 +270,19 @@ function AppRoutes() {
         path="/dashboard/owner"
         element={
           <ProtectedRoute allowedRoles={['owner']}>
-            <OwnerDashboard
-              restaurantId={restaurantId}
-              restaurantName={restaurantName}
-              onLogout={logout}
-              apiClient={apiClient}
-            />
+            <SubscriptionGate>
+              <SetupGate>
+                <>
+                  <SubscriptionStatusBar />
+                  <OwnerDashboard
+                    restaurantId={restaurantId}
+                    restaurantName={restaurantName}
+                    onLogout={logout}
+                    apiClient={apiClient}
+                  />
+                </>
+              </SetupGate>
+            </SubscriptionGate>
           </ProtectedRoute>
         }
       />
@@ -185,12 +291,14 @@ function AppRoutes() {
         path="/dashboard/marketing"
         element={
           <ProtectedRoute allowedRoles={['marketing', 'owner']}>
-            <MarketingDashboard
-              restaurantId={restaurantId}
-              restaurantName={restaurantName}
-              onLogout={logout}
-              apiClient={apiClient}
-            />
+            <SubscriptionGate>
+              <MarketingDashboard
+                restaurantId={restaurantId}
+                restaurantName={restaurantName}
+                onLogout={logout}
+                apiClient={apiClient}
+              />
+            </SubscriptionGate>
           </ProtectedRoute>
         }
       />
@@ -199,7 +307,9 @@ function AppRoutes() {
         path="/dashboard/manager"
         element={
           <ProtectedRoute allowedRoles={['manager', 'owner', 'sales_staff']}>
-            <ManagerPortal />
+            <SubscriptionGate>
+              <ManagerPortal />
+            </SubscriptionGate>
           </ProtectedRoute>
         }
       />
@@ -208,9 +318,11 @@ function AppRoutes() {
         path="/dashboard/kitchen"
         element={
           <ProtectedRoute allowedRoles={['kitchen_staff', 'owner', 'manager']}>
-            {hasAnyOf(FEATURES.DINE_IN, FEATURES.TAKEAWAY, FEATURES.DELIVERY)
-              ? <KDSScreen />
-              : <FeatureWall feature={FEATURES.DINE_IN} />}
+            <SubscriptionGate>
+              {hasAnyOf(FEATURES.DINE_IN, FEATURES.TAKEAWAY, FEATURES.DELIVERY)
+                ? <KDSScreen />
+                : <FeatureWall feature={FEATURES.DINE_IN} />}
+            </SubscriptionGate>
           </ProtectedRoute>
         }
       />
@@ -218,9 +330,11 @@ function AppRoutes() {
         path="/dashboard/packing"
         element={
           <ProtectedRoute allowedRoles={['kitchen_staff', 'packing_staff', 'dispatch_staff', 'owner', 'manager']}>
-            {hasAnyOf(FEATURES.DINE_IN, FEATURES.TAKEAWAY, FEATURES.DELIVERY)
-              ? <KDSScreen />
-              : <FeatureWall feature={FEATURES.DINE_IN} />}
+            <SubscriptionGate>
+              {hasAnyOf(FEATURES.DINE_IN, FEATURES.TAKEAWAY, FEATURES.DELIVERY)
+                ? <KDSScreen />
+                : <FeatureWall feature={FEATURES.DINE_IN} />}
+            </SubscriptionGate>
           </ProtectedRoute>
         }
       />
@@ -229,9 +343,11 @@ function AppRoutes() {
         path="/dashboard/menu"
         element={
           <ProtectedRoute allowedRoles={['owner', 'manager']}>
-            {hasAnyOf(FEATURES.DINE_IN, FEATURES.TAKEAWAY, FEATURES.DELIVERY)
-              ? <MenuPage />
-              : <FeatureWall feature={FEATURES.DINE_IN} />}
+            <SubscriptionGate>
+              {hasAnyOf(FEATURES.DINE_IN, FEATURES.TAKEAWAY, FEATURES.DELIVERY)
+                ? <MenuPage />
+                : <FeatureWall feature={FEATURES.DINE_IN} />}
+            </SubscriptionGate>
           </ProtectedRoute>
         }
       />

@@ -95,7 +95,8 @@ const requestInterceptor = apiClient.interceptors.request.use(
         const isPublicAuth = url.includes('/api/auth/login')
           || url.includes('/api/auth/signup')
           || url.includes('/api/auth/refresh')
-          || url.includes('/api/auth/forgot-password');
+          || url.includes('/api/auth/forgot-password')
+          || url.includes('/api/auth/otp/');
 
         if ((error.response?.status === 401 || error.response?.status === 403)
             && !originalRequest._retry
@@ -287,6 +288,39 @@ const requestInterceptor = apiClient.interceptors.request.use(
     }
   }, []);
 
+  const requestWhatsAppOtp = useCallback(async (email, purpose = 'password_reset') => {
+    setError(null);
+    try {
+      const response = await apiClient.post('/api/auth/otp/request', {
+        email,
+        purpose,
+      });
+      return response.data;
+    } catch (err) {
+      const message = err.response?.data?.error || 'Could not send WhatsApp code';
+      setError(message);
+      throw new Error(message);
+    }
+  }, []);
+
+  const verifyWhatsAppOtp = useCallback(async (email, code, purpose = 'password_reset') => {
+    setError(null);
+    try {
+      const redirectTo = `${window.location.origin}/reset-password`;
+      const response = await apiClient.post('/api/auth/otp/verify', {
+        email,
+        code,
+        purpose,
+        redirectTo,
+      });
+      return response.data;
+    } catch (err) {
+      const message = err.response?.data?.error || 'Could not verify code';
+      setError(message);
+      throw new Error(message);
+    }
+  }, []);
+
   const completePasswordReset = useCallback(async (password) => {
     setError(null);
     try {
@@ -316,6 +350,8 @@ const requestInterceptor = apiClient.interceptors.request.use(
     logout,
     refreshToken,
     requestPasswordReset,
+    requestWhatsAppOtp,
+    verifyWhatsAppOtp,
     completePasswordReset,
     supabaseClient: supabase,
     apiClient
