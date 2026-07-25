@@ -357,7 +357,8 @@ const CSS = `
     font-size: 12px; font-weight: 500; transition: all .2s;
     white-space: nowrap;
   }
-  #munafe-registration-root .mn-step-pill.done   { background: var(--mn-green-lt); color: var(--mn-green); }
+  #munafe-registration-root .mn-step-pill.done   { background: var(--mn-green-lt); color: var(--mn-green); cursor: pointer; }
+  #munafe-registration-root .mn-step-pill.done:hover { box-shadow: 0 0 0 2px rgba(27,122,90,.25); }
   #munafe-registration-root .mn-step-pill.active { background: var(--mn-green); color: #fff; }
   #munafe-registration-root .mn-step-pill.future { background: transparent; color: var(--mn-muted); }
   #munafe-registration-root .mn-step-num { width: 20px; height: 20px; border-radius: 50%; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:600; flex-shrink:0; }
@@ -385,14 +386,36 @@ const CSS = `
   #munafe-registration-root .mn-label { display:block; font-size: 12px; font-weight:600; color:var(--mn-muted); text-transform:uppercase; letter-spacing:.04em; margin-bottom: 5px; }
   #munafe-registration-root .mn-label.err { color: var(--mn-danger); }
   #munafe-registration-root .mn-hint { font-size: 11px; color: var(--mn-muted); margin-bottom: 5px; line-height:1.4; min-height: 15.4px; }
+  /* !important on legibility props — WP themes restyle input/select/textarea
+     (dark bg on focus) and Chrome autofill paints its own background. */
   #munafe-registration-root .mn-inp {
     width:100%; padding: 9px 12px; font-size:14px; font-family:inherit;
     border: 1px solid var(--mn-border); border-radius: 7px;
-    background: var(--mn-white); color: var(--mn-text);
+    background: var(--mn-white) !important; color: var(--mn-text) !important;
+    -webkit-text-fill-color: var(--mn-text) !important;
+    caret-color: var(--mn-text);
     outline:none; transition: border-color .15s, box-shadow .15s;
   }
+  #munafe-registration-root .mn-inp:focus,
+  #munafe-registration-root .mn-inp:hover,
+  #munafe-registration-root .mn-inp:active {
+    background: var(--mn-white) !important; color: var(--mn-text) !important;
+    -webkit-text-fill-color: var(--mn-text) !important;
+  }
   #munafe-registration-root .mn-inp:focus { border-color: var(--mn-green); box-shadow: 0 0 0 3px rgba(27,122,90,.1); }
-  #munafe-registration-root .mn-inp.err { border-color: var(--mn-danger); background: var(--mn-danger-bg); }
+  #munafe-registration-root .mn-inp.err { border-color: var(--mn-danger); background: var(--mn-danger-bg) !important; }
+  #munafe-registration-root .mn-inp:-webkit-autofill,
+  #munafe-registration-root .mn-inp:-webkit-autofill:hover,
+  #munafe-registration-root .mn-inp:-webkit-autofill:focus,
+  #munafe-registration-root .mn-slug-inp:-webkit-autofill,
+  #munafe-registration-root .mn-slug-inp:-webkit-autofill:hover,
+  #munafe-registration-root .mn-slug-inp:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0 1000px var(--mn-white) inset !important;
+    box-shadow: 0 0 0 1000px var(--mn-white) inset !important;
+    -webkit-text-fill-color: var(--mn-text) !important;
+    caret-color: var(--mn-text) !important;
+    transition: background-color 99999s ease-out 0s;
+  }
   #munafe-registration-root .mn-inp-note { font-size:11px; color:var(--mn-muted); margin-top:4px; }
 
   /* Slug row */
@@ -400,7 +423,10 @@ const CSS = `
   #munafe-registration-root .mn-slug-row:focus-within { border-color:var(--mn-green); box-shadow:0 0 0 3px rgba(27,122,90,.1); }
   #munafe-registration-root .mn-slug-row.err { border-color:var(--mn-danger); }
   #munafe-registration-root .mn-slug-pre { padding:9px 10px; background:var(--mn-bg); font-size:12px; color:var(--mn-muted); border-right:1px solid var(--mn-border); white-space:nowrap; }
-  #munafe-registration-root .mn-slug-inp { flex:1; padding:9px 10px; border:none; outline:none; font-size:14px; font-family:inherit; color:var(--mn-text); background:transparent; }
+  #munafe-registration-root .mn-slug-inp { flex:1; padding:9px 10px; border:none; outline:none; font-size:14px; font-family:inherit; color:var(--mn-text) !important; -webkit-text-fill-color:var(--mn-text) !important; background:transparent !important; }
+  #munafe-registration-root .mn-slug-inp:focus,
+  #munafe-registration-root .mn-slug-inp:hover,
+  #munafe-registration-root .mn-slug-inp:active { color:var(--mn-text) !important; -webkit-text-fill-color:var(--mn-text) !important; background:transparent !important; }
   #munafe-registration-root .mn-slug-badge { padding:0 10px; font-size:11px; font-weight:600; white-space:nowrap; }
   #munafe-registration-root .mn-slug-badge.ok  { color: var(--mn-green); }
   #munafe-registration-root .mn-slug-badge.na  { color: var(--mn-danger); }
@@ -1056,13 +1082,17 @@ function Step4({ f, set }) {
 
 // ── Step 5: Review & Checkout ─────────────────────────────────────────────────
 
-function Step5({ form, onRedirect }) {
+function Step5({ form, set, onRedirect }) {
   const [status, setStatus] = useState("idle");   // idle|loading|error|needs_attention
   const [errMsg, setErrMsg] = useState("");
   const [attentionMsg, setAttentionMsg] = useState("");
 
   const country = COUNTRIES.find((c) => c.code === form.country_code);
   const cfg = LOB_CONFIGS[form.business_type] || LOB_CONFIGS.restaurant;
+
+  // Drafts never persist the password (security) — after a "Resume" it is
+  // empty, so let the user set it right here instead of failing on submit.
+  const pwMissing = !form.owner_password || String(form.owner_password).length < 8;
 
   const summaryRows = [
     ["Business type",   cfg.label],
@@ -1080,6 +1110,11 @@ function Step5({ form, onRedirect }) {
   ];
 
   const handleSubmit = async () => {
+    if (pwMissing) {
+      setStatus("error");
+      setErrMsg("Please set your owner password below (min 8 characters) before creating the account.");
+      return;
+    }
     setStatus("loading"); setErrMsg(""); setAttentionMsg("");
 
     const fetchUrl = `${API_BASE}/api/v1/register`;
@@ -1125,6 +1160,19 @@ function Step5({ form, onRedirect }) {
           h("span", { className: "mn-summary-val"  }, fmt(v)),
         )
       )
+    ),
+    pwMissing && h("div", { className: "mn-field", style: { marginTop: 4, marginBottom: 16 } },
+      h("label", { className: "mn-label" }, "Owner password *"),
+      h("div", { className: "mn-hint" },
+        "For security, your password isn't saved in drafts — please enter it again to create the account."
+      ),
+      h(Input, {
+        type: "password",
+        value: form.owner_password,
+        onChange: (v) => set("owner_password", v),
+        placeholder: "Min 8 characters",
+        hasError: status === "error" && pwMissing,
+      })
     ),
     status === "error" && h("div", { className: "mn-alert err" }, errMsg),
     status === "needs_attention" && h("div", { className: "mn-alert info" }, attentionMsg),
@@ -1299,7 +1347,7 @@ function MunafeRegistrationForm() {
     h(Step2, { f: form, set, errors }),
     h(Step3, { f: form, set, errors }),
     h(Step4, { f: form, set }),
-    h(Step5, { form, onRedirect: () => {} }),
+    h(Step5, { form, set, onRedirect: () => {} }),
   ];
 
   return h("div", { className: "mn-wrap" },
@@ -1319,12 +1367,14 @@ function MunafeRegistrationForm() {
       h("button", { className: "mn-btn mn-btn-secondary", onClick: startOver }, "Start over")
     ),
 
-    // ── Stepper
+    // ── Stepper (completed steps are clickable to jump back and edit)
     h("div", { className: "mn-stepper" },
       STEPS.map((s, i) => h(Fragment, { key: s.id },
         h("div", { className: "mn-step-item" },
           h("div", {
             className: `mn-step-pill ${i < step ? "done" : i === step ? "active" : "future"}`,
+            title: i < step ? `Go back to ${s.label}` : undefined,
+            onClick: i < step ? () => { setErrors([]); setStep(i); } : undefined,
           },
             h("div", { className: "mn-step-num" }, i < step ? "✓" : i + 1),
             h("span", null, s.label)
@@ -1348,11 +1398,15 @@ function MunafeRegistrationForm() {
       stepComponents[step]
     ),
 
-    // ── Navigation
-    step < STEPS.length - 1 && h("div", { className: "mn-nav" },
-      step > 0
-        ? h("button", { className: "mn-btn mn-btn-secondary", onClick: back }, "← Back")
-        : h("span"),
+    // ── Navigation (Back stays available on the review step; submit lives in Step5)
+    step > 0 && h("div", { className: "mn-nav" },
+      h("button", { className: "mn-btn mn-btn-secondary", onClick: back }, "← Back"),
+      step < STEPS.length - 1
+        ? h("button", { className: "mn-btn mn-btn-primary", onClick: next }, "Continue →")
+        : h("span")
+    ),
+    step === 0 && h("div", { className: "mn-nav" },
+      h("span"),
       h("button", { className: "mn-btn mn-btn-primary", onClick: next }, "Continue →")
     )
   );
