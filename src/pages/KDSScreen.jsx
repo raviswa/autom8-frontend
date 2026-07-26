@@ -590,7 +590,7 @@ function OrderItemRow({ item, onAdvance, onVoid, packingMode = false }) {
   );
 }
 
-function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll, packingMode = false, apiClient = null }) {
+function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll, packingMode = false, apiClient = null, combinedMode = true }) {
   const { anchor, items, orderNumber, serviceType, aggregateStatus, createdAt } = order;
   const handleReprint = () => printKOT(buildKOTFromFeedItem(anchor, allItems));
   const tokenLabel = anchor.token_number ? formatTokenDisplay(anchor.token_number) : null;
@@ -647,6 +647,7 @@ function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll, pac
           tokenNumber={anchor.token_number}
           orderNumber={anchor.order_item?.order?.order_number || orderNumber}
           fullyPacked={fullyPacked}
+          combinedMode={combinedMode}
         />
       )}
 
@@ -673,15 +674,17 @@ function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll, pac
   );
 }
 
-function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked }) {
+function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked, combinedMode = true }) {
   const [shipment, setShipment] = useState(null);
   const [bookingId, setBookingId] = useState(null);
   const [channel, setChannel] = useState(null);
   const [channelStatus, setChannelStatus] = useState(null);
   const [fulfillmentType, setFulfillmentType] = useState(null);
+  const [skipReason, setSkipReason] = useState(null);
   const [loading, setLoading] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState('');
+  const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
     if (!apiClient || (!tokenNumber && !orderNumber)) return;
@@ -699,6 +702,7 @@ function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked 
       setChannel(res.data.delivery_channel || null);
       setChannelStatus(res.data.delivery_channel_status || null);
       setFulfillmentType(res.data.fulfillment_type || null);
+      setSkipReason(res.data.skip_reason || null);
     } catch (err) {
       if (err.response?.status === 404) {
         setBookingId(null);
@@ -706,6 +710,7 @@ function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked 
         setChannel(null);
         setChannelStatus(null);
         setFulfillmentType(null);
+        setSkipReason(null);
       } else {
         setError(err.response?.data?.error || err.message || 'Shipment lookup failed');
       }
@@ -743,6 +748,9 @@ function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked 
   const status = String(shipment?.shipment_status || '').toLowerCase();
   const failed = status.includes('fail') || !!shipment?.shiprocket_last_error;
   const hasAwb = !!shipment?.awb;
+  const srId = shipment?.shiprocket_order_id;
+  const track = shipment?.tracking_url
+    || (hasAwb ? `https://shiprocket.co/tracking/${encodeURIComponent(shipment.awb)}` : null);
   const isPickup = String(fulfillmentType || '').toLowerCase() === 'pickup';
   const isOwnTeam = String(channel || '').toLowerCase() === 'own_team';
   const isPending = String(channelStatus || '') === 'pending_manager';
@@ -750,40 +758,65 @@ function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked 
     && ['confirmed', 'auto_accepted'].includes(String(channelStatus || 'confirmed'));
   const needsRetry = fullyPacked && shiprocketReady && (!hasAwb || failed) && !isOwnTeam && !isPickup;
 
+  const skipLabels = {
+    shiprocket_not_connected: 'Add Shiprocket API user in Settings',
+    own_team: 'Own delivery team',
+    pending_manager: 'Awaiting manager courier approval',
+    missing_delivery_address: 'Missing address / pincode',
+    pickup_or_takeaway: 'Store pickup',
+    custom_courier: 'Custom courier',
+    channel_blocked: 'Courier channel not ready',
+    shiprocket_error: shipment?.shiprocket_last_error || 'Shiprocket error',
+    not_delivery: 'Not a delivery order',
+  };
+
   let label = loading ? 'Fulfillment…' : 'Fulfillment';
-  if (isPickup) {
-    label = 'Store pickup · captain QR at collection';
-  } else if (isPending) {
-    label = 'Shiprocket · awaiting manager approval';
-  } else if (isOwnTeam) {
+  if (isPickup) label = 'Store pickup · captain QR at collection';
+  else if (isPending) label = 'Shiprocket · awaiting manager approval';
+  else if (isOwnTeam) {
     label = channelStatus === 'rejected_to_own_team'
       ? 'Own delivery team (courier declined)'
       : 'Own delivery team';
-  } else if (hasAwb) {
-    label = `${shipment.courier_name || 'Courier'} · AWB ${shipment.awb}`;
-    if (shipment.shipment_status) label += ` · ${shipment.shipment_status}`;
-  } else if (failed) {
-    label = shipment.shiprocket_last_error || 'Shiprocket failed';
-  } else if (shipment?.shiprocket_order_id) {
-    label = `SR #${shipment.shiprocket_order_id} · awaiting AWB`;
-  } else if (shiprocketReady) {
-    label = 'Shiprocket · will create when packed';
-  } else if (!bookingId && !loading) {
-    label = 'No booking linked';
+  } else if (srId && hasAwb) {
+    label = `SR #${srId} · ${shipment.courier_name || 'Courier'} · AWB ${shipment.awb}`;
+  } else if (srId) label = `SR order #${srId} · awaiting AWB`;
+  else if (failed) label = shipment.shiprocket_last_error || 'Shiprocket failed';
+  else if (shiprocketReady) label = fullyPacked ? 'Shiprocket · creating order…' : 'Shiprocket · will create when packed';
+  else if (skipReason && skipLabels[skipReason]) label = skipLabels[skipReason];
+  else if (!bookingId && !loading) label = 'No booking linked';
+
+  if (!combinedMode) {
+    return (
+      <div className="kds-ship-bar">
+        <span className="kds-ship-label">{srId ? `SR #${srId}` : 'Pack here · full status in Manager'}</span>
+        <a className="kds-ship-retry" href="/dashboard/manager" style={{ textDecoration: 'none' }}>Manager →</a>
+      </div>
+    );
   }
 
   return (
     <div className={`kds-ship-bar ${failed ? 'kds-ship-bar-fail' : hasAwb || isOwnTeam || isPickup ? 'kds-ship-bar-ok' : isPending ? 'kds-ship-bar-fail' : ''}`}>
-      <span className="kds-ship-label" title={error || shipment?.shiprocket_last_error || ''}>
-        {label}
-      </span>
-      {needsRetry && bookingId && (
+      <span className="kds-ship-label" title={error || shipment?.shiprocket_last_error || ''}>{label}</span>
+      {srId && (
         <button
           type="button"
           className="kds-ship-retry"
-          onClick={retry}
-          disabled={retrying}
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(String(srId));
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            } catch (_e) { /* ignore */ }
+          }}
         >
+          {copied ? 'Copied' : 'Copy SR #'}
+        </button>
+      )}
+      {track && (
+        <a className="kds-ship-retry" href={track} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>Track</a>
+      )}
+      {needsRetry && bookingId && (
+        <button type="button" className="kds-ship-retry" onClick={retry} disabled={retrying}>
           {retrying ? 'Retrying…' : 'Retry pickup'}
         </button>
       )}
@@ -1061,6 +1094,7 @@ export default function KDSScreen() {
   const [filter,   setFilter]     = useState('all');
   const [view,     setView]       = useState('live');
   const [packingLayout, setPackingLayout] = useState('orders'); // orders | sku
+  const [orderOpsMode, setOrderOpsMode] = useState('combined'); // combined | split
   const [compliance, setCompliance] = useState(null);
   const [sound,    setSound]      = useState(true);
   const [printMsg, setPrintMsg]   = useState('');   // transient "Printing KOT…" toast
@@ -1110,7 +1144,7 @@ const fetchFeed = useCallback(async () => {
     setLoading(true);
     setFilter('all');
     setView('live');
-    if (packingMode) setPackingLayout('sku');
+    if (packingMode) setPackingLayout('orders');
   }, [queue, packingMode]);
 
   useEffect(() => {
@@ -1120,6 +1154,7 @@ const fetchFeed = useCallback(async () => {
       .then((r) => {
         if (cancelled) return;
         const d = r.data?.restaurant || {};
+        setOrderOpsMode(d.order_ops_mode === 'split' ? 'split' : 'combined');
         setCompliance({
           fssai: d.fssai_license || '',
           gstin: d.gstin || '',
@@ -1516,6 +1551,7 @@ const fetchFeed = useCallback(async () => {
                     onAdvanceAll={advanceAllInOrder}
                     packingMode={packingMode}
                     apiClient={apiClient}
+                    combinedMode={orderOpsMode !== 'split'}
                   />
                 ))
               )}

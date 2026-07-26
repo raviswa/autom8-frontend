@@ -30,6 +30,14 @@ import DateRangeApply, { formatDateDMY } from '../components/DateRangeApply';
 import BrandHeader from '../components/BrandHeader';
 import { formatBusinessLabel } from '../config/lobTaxonomy';
 import { MENU_SLOT_OPTIONS, normalizeMenuSlots, toggleMenuSlot } from '../helpers/menuSlots';
+import {
+  JOURNEY_STAGES,
+  stageToStepperKey,
+  stageLabel,
+  skipReasonLabel,
+  shiprocketTrackUrl,
+  copyText,
+} from '../helpers/orderJourney';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 import { C, FONTS } from '../theme/brand'; 
@@ -682,6 +690,8 @@ export default function ManagerPortal() {
   const [kitchenBusyToggling, setKitchenBusyToggling] = useState(false);
   const [kdsItems,       setKdsItems]       = useState([]);
   const [scheduledBoard, setScheduledBoard] = useState([]);
+  const [journeyOrders,  setJourneyOrders]  = useState([]);
+  const [orderOpsMode,   setOrderOpsMode]   = useState('combined');
   const [ordersFilter,   setOrdersFilter]   = useState('all');
   const [approvalHistory, setApprovalHistory] = useState([]);
   const [approvalDraftFrom, setApprovalDraftFrom] = useState(todayDateStr());
@@ -788,9 +798,22 @@ const fetchRestaurantMeta = useCallback(async () => {
       setAllowManagerUpload(!!rest.allow_manager_menu_upload);
       setInstagramHandle(rest.instagram_handle || '');
       setInstagramUserId(rest.instagram_user_id || '');
+      setOrderOpsMode(rest.order_ops_mode === 'split' ? 'split' : 'combined');
     }
   } catch (e) { /* non-fatal — falls back to restaurant schema */ }
 }, [apiClient]);
+
+  const fetchJourneyOrders = useCallback(async () => {
+    try {
+      const r = await apiClient.get('/api/dashboard/orders/journey');
+      setJourneyOrders(r.data?.orders || []);
+      if (r.data?.order_ops_mode) {
+        setOrderOpsMode(r.data.order_ops_mode === 'split' ? 'split' : 'combined');
+      }
+    } catch (e) {
+      /* non-fatal for restaurant LOBs / older backends */
+    }
+  }, [apiClient]);
 
   
   const fetchCatalogStatus = useCallback(async () => {
@@ -815,10 +838,10 @@ const fetchRestaurantMeta = useCallback(async () => {
   const fetchData = useCallback(async () => {
     await Promise.all([
       fetchTables(), fetchOrders(), fetchTokens(), fetchMenuItems(), fetchCategorySlots(), fetchKitchenStatus(),
-      fetchKdsFeed(), fetchScheduledBoard(), fetchCatalogStatus(), fetchRestaurantMeta(),
+      fetchKdsFeed(), fetchScheduledBoard(), fetchCatalogStatus(), fetchRestaurantMeta(), fetchJourneyOrders(),
     ]);
     setLoading(false);
-  }, [fetchTables, fetchOrders, fetchTokens, fetchMenuItems, fetchCategorySlots, fetchKitchenStatus, fetchKdsFeed, fetchScheduledBoard, fetchCatalogStatus, fetchRestaurantMeta]);
+  }, [fetchTables, fetchOrders, fetchTokens, fetchMenuItems, fetchCategorySlots, fetchKitchenStatus, fetchKdsFeed, fetchScheduledBoard, fetchCatalogStatus, fetchRestaurantMeta, fetchJourneyOrders]);
 
   useEffect(() => {
     fetchData();
@@ -851,8 +874,9 @@ const fetchRestaurantMeta = useCallback(async () => {
       fetchOrders();
       fetchKdsFeed();
       fetchScheduledBoard();
+      fetchJourneyOrders();
     }
-  }, [updates, fetchTokens, fetchTables, fetchOrders, fetchKdsFeed, fetchScheduledBoard]);
+  }, [updates, fetchTokens, fetchTables, fetchOrders, fetchKdsFeed, fetchScheduledBoard, fetchJourneyOrders]);
 
   const applyApprovalHistory = () => {
     setApprovalAppliedFrom(approvalDraftFrom);
@@ -3190,18 +3214,108 @@ const fetchRestaurantMeta = useCallback(async () => {
             </div>
             <AlertBanner type="info">
               {isPackagedLob
-                ? <>Live delivery and pickup orders appear here. Use <strong>Packing display</strong> for the packing queue.</>
+                ? (orderOpsMode === 'split'
+                  ? <>Full order journey (Prep → Packing → Shipment) lives here. Use <strong>Packing display</strong> only to mark items packed.</>
+                  : <>Order journey for each live order. Packing display also shows the journey in <strong>Combined</strong> mode (Settings).</>)
                 : <>Dine-in table orders and live takeaway/delivery tokens appear here. Scheduled pre-bookings are on the <strong>Scheduled</strong> tab.</>}
             </AlertBanner>
+
+            {isPackagedLob ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {journeyOrders.length === 0 ? (
+                  <div style={{ ...CARD, textAlign: 'center', padding: '40px 20px', color: C.textMuted, fontSize: 13 }}>
+                    No active orders right now.
+                  </div>
+                ) : journeyOrders.map((row) => {
+                  const stepKey = stageToStepperKey(row.stage);
+                  const srId = row.shipment?.shiprocket_order_id;
+                  const awb = row.shipment?.awb;
+                  const track = shiprocketTrackUrl(row.shipment);
+                  const skip = skipReasonLabel(row.skip_reason, row.shiprocket_error);
+                  return (
+                    <div key={row.token_number} style={{ ...CARD }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
+                        <div>
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 600, fontSize: 14 }}>{row.token_number}</span>
+                            {row.order_number && <span style={{ fontSize: 12, color: C.textMuted }}>Order {row.order_number}</span>}
+                            <Pill label={stageLabel(row.stage)} variant="amber" />
+                          </div>
+                          <p style={{ fontSize: 12, color: C.textSub, margin: '4px 0 0' }}>
+                            {row.customer_name || 'Customer'}
+                            {row.customer_phone ? ` · +${row.customer_phone}` : ''}
+                          </p>
+                        </div>
+                        <Btn variant="ghost" onClick={() => dismissToken(row.token_number)} style={{ fontSize: 11 }}>Done</Btn>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+                        {JOURNEY_STAGES.map((s) => {
+                          const active = s.key === stepKey;
+                          const done = JOURNEY_STAGES.findIndex((x) => x.key === stepKey)
+                            > JOURNEY_STAGES.findIndex((x) => x.key === s.key);
+                          return (
+                            <span
+                              key={s.key}
+                              style={{
+                                fontSize: 11,
+                                padding: '4px 10px',
+                                borderRadius: 999,
+                                border: `0.5px solid ${active ? C.primary : C.border}`,
+                                background: active ? C.primaryLight : done ? C.successLight : C.cardBg,
+                                color: active ? C.primaryDark : done ? C.successDark : C.textMuted,
+                                fontWeight: active ? 600 : 400,
+                              }}
+                            >
+                              {s.label}
+                            </span>
+                          );
+                        })}
+                      </div>
+                      {row.items?.length > 0 && (
+                        <div style={{ fontSize: 12, color: C.textSub, marginBottom: 10 }}>
+                          {row.items.slice(0, 6).map((it, idx) => (
+                            <span key={idx}>{idx > 0 ? ' · ' : ''}{it.qty}× {it.name}</span>
+                          ))}
+                          {row.items.length > 6 ? ` · +${row.items.length - 6} more` : ''}
+                        </div>
+                      )}
+                      <div style={{
+                        fontSize: 12, padding: '10px 12px', borderRadius: 8,
+                        background: C.primaryLight, border: `0.5px solid ${C.primaryBorder}`,
+                        color: C.primaryDark, display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center',
+                      }}>
+                        {srId ? (
+                          <>
+                            <strong>SR order #{srId}</strong>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                if (await copyText(srId)) showToast('Shiprocket order number copied');
+                              }}
+                              style={{
+                                fontSize: 11, border: `0.5px solid ${C.primary}`, background: '#fff',
+                                borderRadius: 6, padding: '2px 8px', cursor: 'pointer', color: C.primaryDark,
+                              }}
+                            >
+                              Copy
+                            </button>
+                          </>
+                        ) : (
+                          <span>{skip || 'Shipment pending pack / courier create'}</span>
+                        )}
+                        {awb && <span>{row.shipment?.courier_name || 'Courier'} · AWB {awb}</span>}
+                        {track && (
+                          <a href={track} target="_blank" rel="noreferrer" style={{ color: C.primaryDark, fontWeight: 600 }}>Track →</a>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+            <>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
-              {(isPackagedLob
-                ? [
-                    { key: 'all', label: 'All' },
-                    { key: 'live_delivery', label: 'Delivery' },
-                    { key: 'live_takeaway', label: 'Pickup' },
-                  ]
-                : FULFILLMENT_FILTERS
-              ).map(f => (
+              {FULFILLMENT_FILTERS.map(f => (
                 <button key={f.key} onClick={() => setOrdersFilter(f.key)} style={{
                   padding: '5px 12px', borderRadius: 20, fontSize: 11, cursor: 'pointer',
                   border: `0.5px solid ${ordersFilter === f.key ? C.primary : C.border}`,
@@ -3300,6 +3414,8 @@ const fetchRestaurantMeta = useCallback(async () => {
                 </div>
               )}
             </div>
+            </>
+            )}
           </div>
         )}
 

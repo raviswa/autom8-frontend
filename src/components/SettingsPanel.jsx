@@ -1325,6 +1325,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
           || '21:00',
         lob_type: d.lob_type ?? 'restaurant',
         shipping_provider: d.shipping_provider === 'custom' ? 'custom' : 'shiprocket',
+        order_ops_mode: d.order_ops_mode === 'split' ? 'split' : 'combined',
         courier_name: d.courier_name ?? '',
         courier_rate_card: normalizeCourierRateCard(d.courier_rate_card),
         shiprocket_connected: !!d.shiprocket_connected,
@@ -1492,6 +1493,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
         fulfillment_sections:       isRest ? sections : [],
         opening_hours,
         shipping_provider: form.shipping_provider === 'custom' ? 'custom' : 'shiprocket',
+        order_ops_mode: form.order_ops_mode === 'split' ? 'split' : 'combined',
         courier_name: (form.courier_name || '').trim() || null,
         courier_rate_card: serializeCourierRateCard(form.courier_rate_card),
         // Backend derives shiprocket_connected from whether email+password exist.
@@ -1771,6 +1773,44 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
 
       {showDelivery && !isRestaurantLob(form.lob_type || lobType) && (
         <>
+          <SectionTitle>Order operations layout</SectionTitle>
+          <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 12, lineHeight: 1.5 }}>
+            Choose where staff see the full order journey (Prep → Packing → Shipment). Switch to Split when packing staff and managers need separate screens.
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
+            {[
+              {
+                value: 'combined',
+                label: 'Combined (small team)',
+                desc: 'Journey + packing actions live on the Packing screen.',
+              },
+              {
+                value: 'split',
+                label: 'Split (growing team)',
+                desc: 'Manager Portal shows the journey; Packing is pack-only.',
+              },
+            ].map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => set('order_ops_mode', opt.value)}
+                style={{
+                  padding: 14, borderRadius: 10, cursor: 'pointer', textAlign: 'left',
+                  background: (form.order_ops_mode || 'combined') === opt.value ? C.primaryLight : C.cardBg,
+                  border: `0.5px solid ${(form.order_ops_mode || 'combined') === opt.value ? C.primary : C.border}`,
+                }}
+              >
+                <div style={{
+                  fontSize: 13, fontWeight: 600, marginBottom: 4,
+                  color: (form.order_ops_mode || 'combined') === opt.value ? C.primaryDark : C.text,
+                }}>
+                  {(form.order_ops_mode || 'combined') === opt.value ? '◉ ' : '○ '}{opt.label}
+                </div>
+                <div style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.45 }}>{opt.desc}</div>
+              </button>
+            ))}
+          </div>
+
           <SectionTitle>Shipping &amp; courier</SectionTitle>
           {/* TODO(jewellery): high-value parcels need insured courier options — not modeled yet */}
           <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 12, lineHeight: 1.5 }}>
