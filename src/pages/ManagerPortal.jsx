@@ -28,6 +28,7 @@ import { kotRef } from '../App';
 import { format } from 'date-fns';
 import DateRangeApply, { formatDateDMY } from '../components/DateRangeApply';
 import BrandHeader from '../components/BrandHeader';
+import { formatBusinessLabel } from '../config/lobTaxonomy';
 import { MENU_SLOT_OPTIONS, normalizeMenuSlots, toggleMenuSlot } from '../helpers/menuSlots';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -418,7 +419,7 @@ async function downloadCatalogTemplate(apiClient, showToast, currentMenuItems = 
   }
 
   // Packaged / retail: export live rows into the LOB schema columns when possible.
-  if (['food_products', 'retail', 'psl', 'b2b'].includes(schema.id) && (currentMenuItems || []).length > 0) {
+  if (['food_products', 'retail', 'psl', 'b2b', 'jewellery'].includes(schema.id) && (currentMenuItems || []).length > 0) {
     const headers = schema.templateHeaders;
     const rows = currentMenuItems.map((item) => {
       const map = {
@@ -496,9 +497,32 @@ function mapExcelRowToMenuItem(row) {
     ...(is_available !== undefined ? { is_available } : {}),
   };
 }
+
+function normalizeCatalogKey(value) {
+  return String(value || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function catalogProductKey(item) {
+  return `${normalizeCatalogKey(item?.name)}|${normalizeCatalogKey(item?.pack_size_label || item?.size_label)}`;
+}
+
+function deriveCatalogId(item, usedIds) {
+  const namePart = normalizeCatalogKey(item?.name) || 'ITEM';
+  const packPart = normalizeCatalogKey(item?.pack_size_label || item?.size_label);
+  const base = [namePart, packPart].filter(Boolean).join('-').slice(0, 90).replace(/-+$/g, '') || 'ITEM';
+  if (!usedIds.has(base)) return base;
+  let suffix = 2;
+  while (usedIds.has(`${base.slice(0, 86)}-${suffix}`)) suffix += 1;
+  return `${base.slice(0, 86)}-${suffix}`;
+}
+
 function validateRow(row, index) {
   const errors = [];
-  if (!row.id)        errors.push(`Row ${index + 1}: missing id`);
   if (!row.name)      errors.push(`Row ${index + 1}: missing name/title`);
   if (row.price <= 0) errors.push(`Row ${index + 1} (${row.name || row.id}): price must be > 0`);
   if (!row.category)  errors.push(`Row ${index + 1} (${row.name || row.id}): missing category (e.g. Tiffin, Beverages, Snacks)`);
@@ -595,6 +619,7 @@ export default function ManagerPortal() {
   const [assigningToken, setAssigningToken] = useState(null);
   const [assignTableSel, setAssignTableSel] = useState({});
   const [lobType,        setLobType]        = useState('restaurant');
+  const [businessTaxonomy, setBusinessTaxonomy] = useState(null);
   const [allowManagerUpload, setAllowManagerUpload] = useState(false);
   const [instagramHandle, setInstagramHandle] = useState('');
   const [instagramUserId, setInstagramUserId] = useState('');
@@ -638,8 +663,16 @@ export default function ManagerPortal() {
   const [uploadDragOver, setUploadDragOver] = useState(false);
   const [uploadStatus,   setUploadStatus]   = useState('idle');
   const [uploadResult,   setUploadResult]   = useState(null);
+  const [uploadMode,     setUploadMode]     = useState('merge');
+  const [missingPolicy,  setMissingPolicy]  = useState('keep');
+  const [stockPolicy,    setStockPolicy]    = useState('leave');
   const [downloadingTpl, setDownloadingTpl] = useState(false);
   const [togglingId,     setTogglingId]     = useState(null);
+  const [showBatchModal, setShowBatchModal] = useState(false);
+  const [batchItemIds,   setBatchItemIds]   = useState(null);
+  const [batchMadeOn,    setBatchMadeOn]    = useState(todayDateStr());
+  const [batchQuantities,setBatchQuantities]= useState({});
+  const [batchSaving,    setBatchSaving]    = useState(false);
   const [togglingSpecialId, setTogglingSpecialId] = useState(null);
   const [menuSearch,     setMenuSearch]     = useState('');
   const [menuCategory,   setMenuCategory]   = useState('all');
@@ -746,6 +779,12 @@ const fetchRestaurantMeta = useCallback(async () => {
     const rest = r.data?.restaurant;
     if (rest) {
       setLobType(rest.lob_type || 'restaurant');
+      setBusinessTaxonomy({
+        business_family: rest.business_family || null,
+        business_vertical: rest.business_vertical || null,
+        business_vertical_other: rest.business_vertical_other || null,
+        lob_type: rest.lob_type || 'restaurant',
+      });
       setAllowManagerUpload(!!rest.allow_manager_menu_upload);
       setInstagramHandle(rest.instagram_handle || '');
       setInstagramUserId(rest.instagram_user_id || '');
@@ -796,7 +835,7 @@ const fetchRestaurantMeta = useCallback(async () => {
 
   // Packaged LOBs: no queue / tables / scheduled — default to active orders.
   useEffect(() => {
-    const packaged = ['food_products', 'retail', 'psl', 'b2b'].includes(String(lobType || '').toLowerCase());
+    const packaged = ['food_products', 'retail', 'psl', 'b2b', 'jewellery'].includes(String(lobType || '').toLowerCase());
     if (!packaged) return;
     if (activeTab === 'queue' || activeTab === 'tables' || activeTab === 'scheduled') {
       setActiveTab('orders');
@@ -928,7 +967,8 @@ const fetchRestaurantMeta = useCallback(async () => {
     + scheduledDeliveryTokens.length + scheduledPrepOrders.length;
   const activeKdsItems = kdsItems.filter(i => ['pending', 'in_progress', 'ready'].includes(i.status));
 
-  const isPackagedLob = ['food_products', 'retail', 'psl', 'b2b'].includes(String(lobType || '').toLowerCase());
+  const isPackagedLob = ['food_products', 'retail', 'psl', 'b2b', 'jewellery'].includes(String(lobType || '').toLowerCase());
+  const businessLabel = formatBusinessLabel(businessTaxonomy || { lob_type: lobType });
   const openShipmentCount = liveTakeawayTokens.length + liveDeliveryTokens.length;
   const freeTablesCount    = tables.filter(t => getTableStatus(t).status === 'available').length;
 
@@ -1269,38 +1309,63 @@ const fetchRestaurantMeta = useCallback(async () => {
   };
 
   const restockBatch = async (item) => {
-    const raw = window.prompt(
-      item.current_stock != null
-        ? `Add jars to batch for "${item.name}" (current: ${item.current_stock}). Enter number to add:`
-        : `Set batch size for "${item.name}" (enables auto sold-out at zero). Enter starting stock:`,
-      '50',
-    );
-    if (raw == null || raw === '') return;
-    const n = parseInt(raw, 10);
-    if (!Number.isFinite(n) || n <= 0) {
-      showToast('Enter a positive number', 'error');
+    setBatchItemIds([item.id]);
+    setBatchQuantities({ [item.id]: '' });
+    setBatchMadeOn(todayDateStr());
+    setShowBatchModal(true);
+  };
+
+  const openBulkBatch = () => {
+    setBatchItemIds(null);
+    setBatchQuantities({});
+    setBatchMadeOn(todayDateStr());
+    setShowBatchModal(true);
+  };
+
+  const closeBatchModal = () => {
+    if (batchSaving) return;
+    setShowBatchModal(false);
+    setBatchItemIds(null);
+    setBatchQuantities({});
+  };
+
+  const submitRecordedBatch = async () => {
+    const lines = Object.entries(batchQuantities)
+      .map(([itemId, value]) => ({ item_id: itemId, received_qty: Math.floor(Number(value)) }))
+      .filter((line) => Number.isFinite(line.received_qty) && line.received_qty > 0);
+    if (!lines.length) {
+      showToast('Enter received quantity for at least one item');
       return;
     }
-    setTogglingId(item.id);
+    setBatchSaving(true);
     try {
-      const body = item.current_stock != null
-        ? { add_qty: n }
-        : { set_qty: n };
-      const res = await apiClient.post(`/api/menu-items/${item.id}/restock`, body);
-      const next = res.data?.current_stock;
+      const res = await apiClient.post('/api/menu-items/bulk-restock', {
+        made_on_date: batchMadeOn || null,
+        lines,
+      });
+      const resultById = new Map((res.data?.results || []).map((row) => [row.id, row]));
+      setMenuItems(prev => prev.map((item) => {
+        const result = resultById.get(item.id);
+        return result
+          ? {
+              ...item,
+              current_stock: result.current_stock,
+              made_on_date: result.made_on_date || item.made_on_date,
+              availability_status: result.availability_status || item.availability_status,
+              is_stocked: result.now_in_stock,
+              is_available: result.now_in_stock,
+            }
+          : item;
+      }));
+      setShowBatchModal(false);
+      setBatchItemIds(null);
+      setBatchQuantities({});
       const notified = res.data?.waitlist_notified || 0;
-      setMenuItems(prev => prev.map(m => m.id === item.id
-        ? { ...m, current_stock: next, is_stocked: next > 0, is_available: next > 0 }
-        : m));
-      showToast(
-        notified
-          ? `${item.name}: ${next} in stock · notified ${notified} waitlist`
-          : `${item.name}: ${next} in stock`,
-      );
+      showToast(`Batch recorded — ${res.data?.items_updated || lines.length} items · ${res.data?.units_added || 0} units${notified ? ` · notified ${notified}` : ''}`);
     } catch (err) {
-      showToast(err.response?.data?.error || `Failed to restock ${item.name}`);
+      showToast(err.response?.data?.error || 'Failed to record batch');
     } finally {
-      setTogglingId(null);
+      setBatchSaving(false);
     }
   };
 
@@ -1588,10 +1653,33 @@ const fetchRestaurantMeta = useCallback(async () => {
         const sheetName = workbook.SheetNames.includes('WhatsApp Catalog') ? 'WhatsApp Catalog' : workbook.SheetNames[0];
         const rawRows   = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' });
         if (rawRows.length === 0) { setUploadErrors(['The selected sheet appears to be empty.']); setUploadStatus('idle'); return; }
-        const mapped   = rawRows.map(schema.mapRow);
-        const nonEmpty = mapped.filter(r => r.id || r.name);
+        const mapped = rawRows.map(schema.mapRow).filter((row) => row.id || row.name);
+        const existingByProduct = new Map(menuItems.map((item) => [catalogProductKey(item), item]));
+        const usedIds = new Set(menuItems.map((item) => normalizeCatalogKey(item.retailer_id)).filter(Boolean));
+        const nonEmpty = mapped.map((row) => {
+          if (row.id) {
+            usedIds.add(normalizeCatalogKey(row.id));
+            return row;
+          }
+          const existing = existingByProduct.get(catalogProductKey(row));
+          const id = existing?.retailer_id || deriveCatalogId(row, usedIds);
+          usedIds.add(normalizeCatalogKey(id));
+          return { ...row, id, _generated_id: !existing };
+        });
+        const duplicateIds = new Set();
+        const seenIds = new Set();
+        nonEmpty.forEach((row) => {
+          const key = normalizeCatalogKey(row.id);
+          if (seenIds.has(key)) duplicateIds.add(key);
+          seenIds.add(key);
+        });
         setUploadRows(nonEmpty);
-        setUploadErrors(nonEmpty.flatMap((r, i) => schema.validateRow(r, i + 1)));
+        setUploadErrors([
+          ...nonEmpty.flatMap((row, index) => schema.validateRow(row, index + 1)),
+          ...nonEmpty.flatMap((row, index) => duplicateIds.has(normalizeCatalogKey(row.id))
+            ? [`Row ${index + 1} (${row.id}): duplicate item ID in this file`]
+            : []),
+        ]);
         setUploadStatus('preview');
       } catch(err) { setUploadErrors([`Could not read the file: ${err.message}`]); setUploadStatus('idle'); }
     };
@@ -1608,17 +1696,42 @@ const fetchRestaurantMeta = useCallback(async () => {
     if (uploadErrors.length > 0) { showToast('Fix the errors before uploading'); return; }
     setUploadStatus('uploading');
     try {
-      const res = await apiClient.post('/api/menu/upload', { items: uploadRows });
+      const res = await apiClient.post('/api/menu/upload', {
+        items: uploadRows,
+        mode: uploadMode,
+        missing_policy: missingPolicy,
+        stock_policy: stockPolicy,
+      });
       setUploadResult(res.data); setUploadStatus('done'); await fetchMenuItems();
-      const purged = res.data.purged ? ` · ${res.data.purged} old items removed` : '';
-      showToast(`Catalog replaced — ${res.data.upserted} items saved${purged}`);
-    } catch(err) { setUploadErrors([`Upload failed: ${err.response?.data?.error || err.message}`]); setUploadStatus('preview'); }
+      showToast(`Catalog updated — ${res.data.created || 0} added · ${res.data.updated || 0} updated`);
+    } catch(err) {
+      const responseErrors = err.response?.data?.errors || [];
+      setUploadErrors([
+        `Upload failed: ${err.response?.data?.error || err.message}`,
+        ...responseErrors.map((row) => `${row.row_id || `Row ${row.row || '?'}`}: ${row.error}`),
+      ]);
+      setUploadStatus('preview');
+    }
   };
   const handleResetUpload = () => {
     setUploadFile(null); setUploadRows([]); setUploadErrors([]);
     setUploadStatus('idle'); setUploadResult(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
+
+  const activeCatalogItems = menuItems.filter((item) => !item.archived_at);
+  const activeIds = new Set(activeCatalogItems.map((item) => normalizeCatalogKey(item.retailer_id)).filter(Boolean));
+  const uploadIds = new Set(uploadRows.map((item) => normalizeCatalogKey(item.id)).filter(Boolean));
+  const uploadMatched = uploadRows.filter((item) => activeIds.has(normalizeCatalogKey(item.id))).length;
+  const uploadNew = uploadRows.length - uploadMatched;
+  const uploadMissing = activeCatalogItems.filter((item) => !uploadIds.has(normalizeCatalogKey(item.retailer_id))).length;
+  const batchItems = batchItemIds
+    ? menuItems.filter((item) => batchItemIds.includes(item.id))
+    : menuItems;
+  const batchUnits = Object.values(batchQuantities)
+    .reduce((sum, value) => sum + (Math.max(0, Math.floor(Number(value))) || 0), 0);
+  const batchLineCount = Object.values(batchQuantities)
+    .filter((value) => Number.isFinite(Number(value)) && Number(value) > 0).length;
 
   // ── Loading ───────────────────────────────────────────────────────────────
   if (loading) {
@@ -1643,6 +1756,96 @@ const fetchRestaurantMeta = useCallback(async () => {
     <div style={{ minHeight: "100vh", background: C.pageBg }}>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <Toast msg={toastMsg} />
+
+      {showBatchModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Record new batch"
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 80, padding: 16 }}
+        >
+          <div style={{ ...CARD, width: 'min(760px, 100%)', maxHeight: '88vh', padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '18px 20px', borderBottom: `0.5px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 16, color: C.text }}>Record new batch</h3>
+                <p style={{ margin: '4px 0 0', fontSize: 12, color: C.textMuted }}>
+                  Enter only what was received today. Existing stock is carried forward automatically.
+                </p>
+              </div>
+              <button type="button" onClick={closeBatchModal} disabled={batchSaving} aria-label="Close" style={{ border: 0, background: 'transparent', color: C.textMuted, fontSize: 20, cursor: 'pointer' }}>×</button>
+            </div>
+
+            <div style={{ padding: '14px 20px', background: C.surfaceBg, borderBottom: `0.5px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: C.textSub }}>
+                Made on
+                <input
+                  type="date"
+                  value={batchMadeOn}
+                  max={todayDateStr()}
+                  onChange={(event) => setBatchMadeOn(event.target.value)}
+                  style={{ padding: '7px 10px', border: `0.5px solid ${C.border}`, borderRadius: 8, background: C.cardBg, color: C.text }}
+                />
+              </label>
+              <span style={{ fontSize: 12, color: C.textSub }}>
+                {batchLineCount} item{batchLineCount !== 1 ? 's' : ''} · {batchUnits} units to add
+              </span>
+            </div>
+
+            <div style={{ overflowY: 'auto', padding: '0 20px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead style={{ position: 'sticky', top: 0, background: C.cardBg, zIndex: 1 }}>
+                  <tr style={{ borderBottom: `0.5px solid ${C.border}` }}>
+                    <th style={{ padding: '11px 8px', textAlign: 'left', color: C.textMuted, fontWeight: 500 }}>Item</th>
+                    <th style={{ padding: '11px 8px', textAlign: 'right', color: C.textMuted, fontWeight: 500 }}>Remaining</th>
+                    <th style={{ padding: '11px 8px', textAlign: 'right', color: C.textMuted, fontWeight: 500 }}>Received</th>
+                    <th style={{ padding: '11px 8px', textAlign: 'right', color: C.textMuted, fontWeight: 500 }}>New total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {batchItems.map((item) => {
+                    const remaining = item.current_stock == null ? 0 : Math.max(0, Number(item.current_stock) || 0);
+                    const received = Math.max(0, Math.floor(Number(batchQuantities[item.id])) || 0);
+                    return (
+                      <tr key={item.id} style={{ borderBottom: `0.5px solid ${C.border}` }}>
+                        <td style={{ padding: '11px 8px' }}>
+                          <div style={{ fontWeight: 500, color: C.text }}>{item.name}</div>
+                          <div style={{ fontSize: 10, color: C.textMuted }}>
+                            {[item.pack_size_label || item.size_label, item.retailer_id].filter(Boolean).join(' · ')}
+                          </div>
+                        </td>
+                        <td style={{ padding: '11px 8px', textAlign: 'right', color: C.textSub }}>{item.current_stock == null ? 'Not tracked' : remaining}</td>
+                        <td style={{ padding: '11px 8px', textAlign: 'right' }}>
+                          <input
+                            type="number"
+                            min="1"
+                            step="1"
+                            inputMode="numeric"
+                            value={batchQuantities[item.id] ?? ''}
+                            onChange={(event) => setBatchQuantities((previous) => ({ ...previous, [item.id]: event.target.value }))}
+                            placeholder="0"
+                            aria-label={`Units received for ${item.name}`}
+                            style={{ width: 86, padding: '7px 9px', border: `0.5px solid ${received > 0 ? C.primary : C.border}`, borderRadius: 8, textAlign: 'right' }}
+                          />
+                        </td>
+                        <td style={{ padding: '11px 8px', textAlign: 'right', fontWeight: received > 0 ? 600 : 400, color: received > 0 ? C.primaryDark : C.textMuted }}>
+                          {received > 0 ? `${remaining} + ${received} = ${remaining + received}` : '—'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ padding: '14px 20px', borderTop: `0.5px solid ${C.border}`, display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <Btn variant="secondary" onClick={closeBatchModal} disabled={batchSaving}>Cancel</Btn>
+              <Btn onClick={submitRecordedBatch} disabled={batchSaving || batchLineCount === 0}>
+                {batchSaving ? 'Recording…' : `Record ${batchUnits} units`}
+              </Btn>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Add walk-in modal ────────────────────────────────────────────── */}
       {showWalkInModal && (
@@ -2054,9 +2257,9 @@ const fetchRestaurantMeta = useCallback(async () => {
       {/* ── Header ───────────────────────────────────────────────────────── */}
 <BrandHeader
   title="Manager portal"
-  subtitle={isPackagedLob
+  subtitle={`${businessLabel} · ${isPackagedLob
     ? 'Manage catalog, packing and delivery orders'
-    : 'Manage tables, orders and kitchen operations'}
+    : 'Manage tables, orders and kitchen operations'}`}
   right={
     <>
               {kitchenStatus && (
@@ -3211,8 +3414,8 @@ const fetchRestaurantMeta = useCallback(async () => {
 
                 <p style={{ fontSize: 12, color: C.textMuted, margin: "4px 0 0" }}>
                   {isPackagedLob
-                    ? <>Toggle stock, set time-bound discounts or Specials, and upload Excel to <strong>fully replace</strong> the catalog. Template includes pack, trust, gallery and discount columns.</>
-                    : <>Pull from Meta to upsert WhatsApp catalog items, toggle stock, or upload Excel to <strong>fully replace</strong> the menu. See the <strong>Column guide</strong> sheet for scheduling columns.</>}
+                    ? <>Record new production batches without Excel, or safely merge product details from a file. Existing stock is preserved by default.</>
+                    : <>Pull from Meta or safely merge product details from Excel. Existing items and availability are preserved by default.</>}
                 </p>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -3222,6 +3425,15 @@ const fetchRestaurantMeta = useCallback(async () => {
                     disabled={metaSyncing}
                     style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 500, padding: "7px 14px", borderRadius: 8, border: `0.5px solid ${C.primaryBorder}`, background: C.primaryLight, color: C.primaryDark, cursor: metaSyncing ? 'wait' : 'pointer' }}>
                     {metaSyncing ? <Spinner size={14} /> : '↻'} Pull from Meta
+                  </button>
+                )}
+                {isPackagedLob && menuItems.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={openBulkBatch}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, padding: '7px 14px', borderRadius: 8, border: `0.5px solid ${C.primary}`, background: C.primary, color: '#fff', cursor: 'pointer' }}
+                  >
+                    + Record new batch
                   </button>
                 )}
                 <button
@@ -3239,7 +3451,7 @@ const fetchRestaurantMeta = useCallback(async () => {
                 <strong>Meta catalog:</strong>{' '}
                 {metaLastSync ? `Last sync ${new Date(metaLastSync).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}` : 'Not synced yet'}
               </div>
-              <span style={{ fontSize: 11, color: C.textMuted }}>Excel upload replaces all items · Meta pull updates by product ID</span>
+              <span style={{ fontSize: 11, color: C.textMuted }}>Excel merges by stable item ID · existing stock stays unchanged</span>
             </div>
             )}
 
@@ -3291,6 +3503,58 @@ const fetchRestaurantMeta = useCallback(async () => {
             </ul>
           </AlertBanner>
         )}
+        <div style={{ ...CARD, padding: '14px 16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 4 }}>File comparison</div>
+            <div style={{ fontSize: 13, color: C.text, fontWeight: 500 }}>
+              {uploadMatched} matched · {uploadNew} new · {uploadMissing} not in file
+            </div>
+          </div>
+          <label style={{ fontSize: 10, color: C.textMuted }}>
+            Upload mode
+            <select
+              value={uploadMode}
+              onChange={(event) => {
+                const next = event.target.value;
+                setUploadMode(next);
+                setMissingPolicy(next === 'replace' ? 'archive' : 'keep');
+              }}
+              style={{ display: 'block', width: '100%', marginTop: 4, padding: '7px 9px', borderRadius: 8, border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.text }}
+            >
+              <option value="merge">Merge safely (recommended)</option>
+              <option value="replace">Replace catalog</option>
+            </select>
+          </label>
+          <label style={{ fontSize: 10, color: C.textMuted }}>
+            Items not in this file
+            <select
+              value={missingPolicy}
+              onChange={(event) => setMissingPolicy(event.target.value)}
+              style={{ display: 'block', width: '100%', marginTop: 4, padding: '7px 9px', borderRadius: 8, border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.text }}
+            >
+              <option value="keep">Keep unchanged (recommended)</option>
+              <option value="sold_out">Mark out of stock</option>
+              <option value="archive">Archive</option>
+            </select>
+          </label>
+          <label style={{ fontSize: 10, color: C.textMuted }}>
+            Existing stock quantities
+            <select
+              value={stockPolicy}
+              onChange={(event) => setStockPolicy(event.target.value)}
+              style={{ display: 'block', width: '100%', marginTop: 4, padding: '7px 9px', borderRadius: 8, border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.text }}
+            >
+              <option value="leave">Leave unchanged (recommended)</option>
+              <option value="add">Add file quantity</option>
+              <option value="replace">Replace with file quantity</option>
+            </select>
+          </label>
+        </div>
+        {stockPolicy !== 'leave' && (
+          <AlertBanner type="warn">
+            This file will {stockPolicy === 'add' ? 'add to' : 'replace'} existing stock quantities. Use Record new batch for normal production receipts.
+          </AlertBanner>
+        )}
         <div style={{ ...CARD, padding: 0, overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed" }}>
             <thead>
@@ -3318,6 +3582,8 @@ const fetchRestaurantMeta = useCallback(async () => {
                         content = <span style={{ fontSize: 10, background: C.surfaceBg, color: C.textSub, padding: "2px 8px", borderRadius: 20, fontWeight: 500 }}>{val || '—'}</span>;
                       } else if (col.price) {
                         content = `₹${Number(val || 0).toFixed(2)}`;
+                      } else if (col.key === 'id' && row._generated_id) {
+                        content = <>{val} <span style={{ fontSize: 9, color: C.primaryDark, background: C.primaryLight, padding: '1px 5px', borderRadius: 10 }}>auto</span></>;
                       } else {
                         content = val ?? '—';
                       }
@@ -3342,7 +3608,9 @@ const fetchRestaurantMeta = useCallback(async () => {
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
           <Btn variant="secondary" onClick={handleResetUpload}>Cancel</Btn>
-          <Btn onClick={handleConfirmUpload} disabled={uploadErrors.length > 0}>Confirm &amp; upload {uploadRows.length} items</Btn>
+          <Btn onClick={handleConfirmUpload} disabled={uploadErrors.length > 0}>
+            Confirm {uploadMode === 'merge' ? 'merge' : 'replacement'} · {uploadRows.length} items
+          </Btn>
         </div>
       </div>
     )}
@@ -3352,21 +3620,30 @@ const fetchRestaurantMeta = useCallback(async () => {
         <Spinner size={32} />
         <p style={{ fontSize: 13, fontWeight: 500, color: C.text, marginTop: 12 }}>Saving to database…</p>
         <p style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
-          {isPackagedLob ? 'Replacing catalog items' : 'Updating Meta catalog in the background'}
+          {uploadMode === 'merge' ? 'Matching and updating catalog items safely' : 'Replacing catalog items as requested'}
         </p>
       </div>
     )}
 
     {uploadStatus === 'done' && uploadResult && (
-      <div style={{ background: C.successLight, border: `0.5px solid ${C.successBorder}`, borderRadius: 12, padding: "28px 24px", textAlign: "center" }}>
-        <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
-        <div style={{ fontSize: 15, fontWeight: 500, color: C.successDark, marginBottom: 4 }}>Catalog replaced successfully</div>
-        <div style={{ fontSize: 12, color: C.success, marginBottom: 16 }}>
-          {uploadResult.upserted} item{uploadResult.upserted !== 1 ? 's' : ''} saved
-          {uploadResult.skipped > 0 ? ` · ${uploadResult.skipped} skipped` : ''}
-          {uploadResult.purged  > 0 ? ` · ${uploadResult.purged} removed`  : ''}
-          {' '}· WhatsApp catalog updated
+      <div style={{ background: uploadResult.skipped > 0 ? C.warningLight : C.successLight, border: `0.5px solid ${uploadResult.skipped > 0 ? C.warningBorder : C.successBorder}`, borderRadius: 12, padding: "28px 24px", textAlign: "center" }}>
+        <div style={{ fontSize: 32, marginBottom: 8 }}>{uploadResult.skipped > 0 ? '⚠' : '✓'}</div>
+        <div style={{ fontSize: 15, fontWeight: 500, color: uploadResult.skipped > 0 ? C.warningDark : C.successDark, marginBottom: 4 }}>
+          {uploadResult.skipped > 0 ? 'Catalog updated with some skipped rows' : 'Catalog updated successfully'}
         </div>
+        <div style={{ fontSize: 12, color: uploadResult.skipped > 0 ? C.warningDark : C.success, marginBottom: 12 }}>
+          {uploadResult.created || 0} added · {uploadResult.updated || 0} updated
+          {uploadResult.skipped > 0 ? ` · ${uploadResult.skipped} skipped` : ''}
+          {uploadResult.archived > 0 ? ` · ${uploadResult.archived} archived` : ''}
+          {uploadResult.marked_sold_out > 0 ? ` · ${uploadResult.marked_sold_out} marked out of stock` : ''}
+        </div>
+        {uploadResult.errors?.length > 0 && (
+          <div style={{ maxWidth: 620, margin: '0 auto 14px', textAlign: 'left', fontSize: 11, color: C.danger }}>
+            {uploadResult.errors.map((row, index) => (
+              <div key={`${row.row_id || row.row}-${index}`}>{row.row_id || `Row ${row.row || '?'}`}: {row.error}</div>
+            ))}
+          </div>
+        )}
         <Btn variant="success" onClick={handleResetUpload}>Upload another file</Btn>
       </div>
     )}
@@ -3492,7 +3769,7 @@ const fetchRestaurantMeta = useCallback(async () => {
                               {!inStock && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 500, color: C.danger, background: C.dangerLight, padding: "1px 6px", borderRadius: 20 }}>Out of stock</span>}
                               {item.current_stock != null && (
                                 <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 500, color: C.textSub, background: C.surfaceBg, padding: "1px 6px", borderRadius: 20 }}>
-                                  Batch {item.current_stock}
+                                  {item.current_stock} in stock
                                 </span>
                               )}
                               {isSpecial && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 500, color: '#b45309', background: '#fef3c7', padding: "1px 6px", borderRadius: 20 }}>⭐ Special</span>}
@@ -3577,7 +3854,7 @@ const fetchRestaurantMeta = useCallback(async () => {
                                   fontSize: 10, fontWeight: 600, padding: '4px 8px', borderRadius: 8,
                                   border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.textSub, cursor: 'pointer',
                                 }}>
-                                + Batch
+                                + Record batch
                               </button>
                               {['coming_soon', 'preorder'].includes(String(item.availability_status || '').toLowerCase()) && (
                                 <button onClick={() => launchNow(item)} disabled={launchingId === item.id}

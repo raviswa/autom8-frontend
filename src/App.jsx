@@ -100,8 +100,12 @@ function SetupGate({ children }) {
         if (!cancelled) setState({ loading: false, redirect: null });
         return;
       }
+
+      const restaurantId = user.restaurant_id || user.outlets?.[0]?.id || 'unknown';
+      const seenKey = `autom8_setup_seen_${restaurantId}`;
+
       try {
-        const seen = sessionStorage.getItem('autom8_setup_seen');
+        const seen = sessionStorage.getItem(seenKey);
         if (seen === '1') {
           if (!cancelled) setState({ loading: false, redirect: null });
           return;
@@ -111,14 +115,24 @@ function SetupGate({ children }) {
       try {
         const res = await apiClient.get('/api/onboarding/status');
         if (cancelled) return;
+        // #region agent log
+        fetch('http://127.0.0.1:7380/ingest/982e28a2-86ba-4a90-a485-a232585f9d4f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c76584'},body:JSON.stringify({sessionId:'c76584',runId:'pre-deploy',hypothesisId:'B',location:'App.jsx:SetupGate',message:'onboarding status result',data:{setup_complete:res.data?.setup_complete,lob:res.data?.lob_type,wa:res.data?.whatsapp_connected,catalog:res.data?.catalog_uploaded,fulfillment:res.data?.fulfillment_configured,code:res.data?.code||null,restaurantId},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         if (res.data && res.data.setup_complete === false) {
           setState({ loading: false, redirect: '/setup' });
-        } else {
-          try { sessionStorage.setItem('autom8_setup_seen', '1'); } catch { /* ignore */ }
+        } else if (res.data?.setup_complete === true) {
+          try { sessionStorage.setItem(seenKey, '1'); } catch { /* ignore */ }
           setState({ loading: false, redirect: null });
+        } else {
+          // Unexpected payload — send owner to activation checklist
+          setState({ loading: false, redirect: '/setup' });
         }
-      } catch {
-        if (!cancelled) setState({ loading: false, redirect: null });
+      } catch (err) {
+        // #region agent log
+        fetch('http://127.0.0.1:7380/ingest/982e28a2-86ba-4a90-a485-a232585f9d4f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c76584'},body:JSON.stringify({sessionId:'c76584',runId:'pre-deploy',hypothesisId:'B',location:'App.jsx:SetupGate',message:'onboarding status failed',data:{status:err?.response?.status||null,code:err?.response?.data?.code||null,restaurantId},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+        // Never treat API failure / tenant_missing as "setup complete"
+        if (!cancelled) setState({ loading: false, redirect: '/setup' });
       }
     })();
     return () => { cancelled = true; };

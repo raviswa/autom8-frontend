@@ -10,6 +10,7 @@ import { supabase, useAuth } from "../contexts/AuthContext";
 import { Link } from "react-router-dom";
 import OwnerInsights from "../components/OwnerInsights";
 import BrandHeader from "../components/BrandHeader";
+import { formatBusinessLabel } from "../config/lobTaxonomy";
 import { C } from "../theme/brand";
 
 // ── Export to CSV ─────────────────────────────────────────────────────────────
@@ -738,9 +739,11 @@ function WABAPanel({ info }) {
       {row("Business name",   info.name)}
       {row("Phone number",    info.whatsapp_number ? `+${info.whatsapp_number}` : null)}
       {row("WABA ID",         info.waba_id)}
+      {row("Business type",   info.lob_type || null)}
       {row("Manager phone",   info.manager_phone ? `+${info.manager_phone}` : null)}
       {row("Timezone",        info.timezone)}
-      {row("Dining duration", info.dining_duration_minutes ? `${info.dining_duration_minutes} min` : null)}
+      {!["food_products", "retail", "psl", "b2b", "jewellery"].includes(String(info.lob_type || "").toLowerCase()) &&
+        row("Dining duration", info.dining_duration_minutes ? `${info.dining_duration_minutes} min` : null)}
       {row("Payment mode",    info.payment_mode)}
       <div style={{ marginTop: 12, padding: "8px 12px", background: C.surfaceBg, borderRadius: 8, fontSize: 12, color: C.textMuted }}>
         📲 Test ordering bot: send <strong>&ldquo;Hi&rdquo;</strong> to <strong>+{info.whatsapp_number}</strong>
@@ -1021,28 +1024,33 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
   const dateStr = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 
   // ── Nav tabs: which chips show depends on the tenant's line-of-business.
-  // "Packing" tracks packed-goods production (jars/pouches/labels) and matters
-  // for any tenant selling packaged items — packaged-food-only businesses AND
-  // restaurants that also run a sweets/savories packing department. "Kitchen"
-  // (live KDS) and "Captain" (dine-in table service) only make sense where
-  // there's a-la-minute cooking or seated tables, so they drop out entirely
-  // for a pure packaged-goods tenant.
-  const lobType = wabaInfo?.lob_type || "restaurant";
-  const isPackagedGoods = lobType === "food_products" || lobType === "psl" || lobType === "retail";
+  // Packaged LOBs hide dine-in kitchen/captain chrome; Captain stays only when
+  // takeaway/store-pickup is enabled (QR handover).
+  const lobType = String(wabaInfo?.lob_type || "restaurant").toLowerCase();
+  const isPackagedGoods = ["food_products", "psl", "retail", "b2b", "jewellery"].includes(lobType);
+  const features = Array.isArray(wabaInfo?.subscribed_features) ? wabaInfo.subscribed_features : [];
+  const hasTakeaway = features.includes("takeaway");
   const businessName =
     wabaInfo?.display_name ||
     wabaInfo?.name ||
     restaurantName ||
     "Your business";
+  const businessLabel = formatBusinessLabel({
+    business_family: wabaInfo?.business_family,
+    business_vertical: wabaInfo?.business_vertical,
+    business_vertical_other: wabaInfo?.business_vertical_other,
+    lob_type: lobType,
+  });
 
   const navTabs = isPackagedGoods
     ? [
         { to: "/dashboard/manager", label: "Manager", chip: CHIP_PRIMARY },
         { to: "/dashboard/packing", label: "Packing", chip: CHIP_PRIMARY },
-        // Store-pickup QR handover (when takeaway is enabled in Settings)
-        { to: "/dashboard/captain", label: "Captain", chip: CHIP_SECONDARY },
-        { to: "/dashboard/menu",    label: "Menu",     chip: CHIP_SECONDARY },
-        { to: "/settings?tab=kitchen#scheduled-ordering", label: "Kitchen hours", chip: CHIP_PRIMARY },
+        ...(hasTakeaway
+          ? [{ to: "/dashboard/captain", label: "Captain", chip: CHIP_SECONDARY }]
+          : []),
+        { to: "/dashboard/menu",    label: "Catalog",  chip: CHIP_SECONDARY },
+        { to: "/settings?tab=kitchen#scheduled-ordering", label: "Order hours", chip: CHIP_PRIMARY },
         { to: "/settings",          label: "Settings", chip: CHIP_SECONDARY },
       ]
     : [
@@ -1055,11 +1063,19 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
         { to: "/settings",          label: "Settings", chip: CHIP_SECONDARY },
       ];
 
+  const packagedRow2 = [
+    { icon: "📦", label: "Orders",          value: kpi?.totalOrders ?? "—", sub: "selected period" },
+    { icon: "🛵", label: "Takeaway / pickup", value: kpi?.tokensIssued ?? "—", sub: "selected period" },
+    { icon: "🚗", label: "Delivery focus",  value: features.includes("delivery") ? "On" : "Off", sub: "fulfillment" },
+    { icon: "📋", label: "Catalog items",   value: menuItems?.length ?? "—", sub: "top sellers shown below" },
+  ];
+  const analyticsRow2 = isPackagedGoods ? packagedRow2 : row2;
+
   return (
     <div style={{ minHeight: "100vh", background: C.pageBg }}>
       <BrandHeader
         title="Owner dashboard"
-        subtitle={`${businessName} · ${dateStr}`}
+        subtitle={`${businessName} · ${businessLabel} · ${dateStr}`}
         right={
           <>
             <div style={{ display: "flex", gap: 2, background: "rgba(255,255,255,0.12)", borderRadius: 10, padding: 3 }}>
@@ -1104,21 +1120,33 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
         {/* ── LIVE TAB ──────────────────────────────────────────────────── */}
         {activeTab === "live" && (
           <>
-            {/* Live summary strip */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 10, marginBottom: 14 }}>
-              <MetricCard icon="🪑" label="Tables occupied"   value={`${tableSnapshot.tables.filter(t=>t.status==="occupied").length}/${tableSnapshot.tables.length}`} sub="right now" />
-              <MetricCard icon="⏳" label="Queue waiting"     value={tableSnapshot.queueWaiting}    sub="tokens in queue" />
-              <MetricCard icon="🛵" label="Takeaway active"   value={tableSnapshot.takeawayActive}  sub="in progress" />
-              <MetricCard icon="🍳" label="KOT open"          value={(kotStats?.open ?? 0) + (kotStats?.inProgress ?? 0)} sub="kitchen orders" />
-            </div>
-            {/* Table grid + KOT side by side */}
-            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12, marginBottom: 12 }}>
-              <TableOccupancy tables={tableSnapshot.tables} takeawayActive={tableSnapshot.takeawayActive} queueWaiting={tableSnapshot.queueWaiting} />
-              <KotStatus stats={kotStats} />
-            </div>
-            {isPackagedGoods && <LocalCourierQueue apiClient={apiClient} />}
-            {/* WABA quick ref in live tab */}
-            <WABAPanel info={wabaInfo} />
+            {isPackagedGoods ? (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 10, marginBottom: 14 }}>
+                  <MetricCard icon="🛵" label="Takeaway active" value={tableSnapshot.takeawayActive} sub="in progress" />
+                  <MetricCard icon="🚗" label="Delivery enabled" value={features.includes("delivery") ? "Yes" : "No"} sub="fulfillment" />
+                  <MetricCard icon="💬" label="WhatsApp" value={wabaInfo?.whatsapp_number ? "Linked" : "Not linked"} sub="connect in Settings" />
+                </div>
+                <LocalCourierQueue apiClient={apiClient} />
+                <div style={{ marginTop: 12 }}>
+                  <WABAPanel info={wabaInfo} />
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 10, marginBottom: 14 }}>
+                  <MetricCard icon="🪑" label="Tables occupied"   value={`${tableSnapshot.tables.filter(t=>t.status==="occupied").length}/${tableSnapshot.tables.length}`} sub="right now" />
+                  <MetricCard icon="⏳" label="Queue waiting"     value={tableSnapshot.queueWaiting}    sub="tokens in queue" />
+                  <MetricCard icon="🛵" label="Takeaway active"   value={tableSnapshot.takeawayActive}  sub="in progress" />
+                  <MetricCard icon="🍳" label="KOT open"          value={(kotStats?.open ?? 0) + (kotStats?.inProgress ?? 0)} sub="kitchen orders" />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12, marginBottom: 12 }}>
+                  <TableOccupancy tables={tableSnapshot.tables} takeawayActive={tableSnapshot.takeawayActive} queueWaiting={tableSnapshot.queueWaiting} />
+                  <KotStatus stats={kotStats} />
+                </div>
+                <WABAPanel info={wabaInfo} />
+              </>
+            )}
           </>
         )}
 
@@ -1143,7 +1171,7 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
               {row1.map((m, i) => <MetricCard key={i} {...m} />)}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 10, marginBottom: 14 }}>
-              {row2.map((m, i) => <MetricCard key={i} {...m} />)}
+              {analyticsRow2.map((m, i) => <MetricCard key={i} {...m} />)}
             </div>
 
             {/* Revenue chart */}
@@ -1165,7 +1193,8 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
             {/* Session outcomes + Cancel stats */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12, marginBottom: 12 }}>
               <CancellationVoids stats={cancelStats} />
-              <KotStatus stats={kotStats} />
+              {!isPackagedGoods && <KotStatus stats={kotStats} />}
+              {isPackagedGoods && <WABAPanel info={wabaInfo} />}
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12, marginBottom: 12 }}>

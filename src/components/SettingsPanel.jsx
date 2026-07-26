@@ -19,6 +19,15 @@ import { useSubscription, FEATURES } from '../contexts/SubscriptionContext';
 import { MENU_SLOT_OPTIONS, normalizeMenuSlots, toggleMenuSlot } from '../helpers/menuSlots';
 import { loadFacebookSdk, launchWhatsAppEmbeddedSignup } from '../helpers/metaEmbeddedSignup';
 import BrandHeader from './BrandHeader';
+import {
+  LOB_FAMILIES,
+  getFamily,
+  verticalsForFamily,
+  customVerticalForFamily,
+  isCustomVertical,
+  resolveBusinessTaxonomy,
+  formatBusinessLabel,
+} from '../config/lobTaxonomy';
 
 // ─── Design tokens (shared brand theme — same as ManagerPortal / owner portal) ─
 import { C } from '../theme/brand';
@@ -477,6 +486,9 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
         logo_url:      d.logo_url      ?? '',
         restaurant_type:   d.restaurant_type ?? 'restaurant',
         lob_type:          d.lob_type ?? 'restaurant',   // ← add this line
+        business_family:   d.business_family ?? '',
+        business_vertical: d.business_vertical ?? '',
+        business_vertical_other: d.business_vertical_other ?? '',
         allow_manager_menu_upload: d.allow_manager_menu_upload ?? false,
         pickup_address:    d.pickup_address ?? '',
         pickup_maps_link:  d.google_maps_url || (lat && lng ? `https://maps.google.com/?q=${lat},${lng}` : ''),
@@ -856,29 +868,87 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
       )}
 
 <SectionTitle>Business type</SectionTitle>
-<div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
-  {[
-    { value: 'restaurant',     label: 'Restaurant / Tiffin',     desc: 'Dine-in, takeaway, delivery — time-slot menu.' },
-    { value: 'psl',            label: 'Pizza & Ice Cream',       desc: 'Sizes, flavours, toppings — variant-based menu.' },
-    { value: 'food_products',  label: 'Packaged Food / Home Baker', desc: 'Pack sizes, shelf life, ingredients.' },
-    { value: 'jewellery',      label: 'Gold Jewellery',          desc: 'Live gold rate, purity, making charges.' },
-    { value: 'retail',         label: 'Retail / Electronics',    desc: 'Condition, brand, warranty, multi-image.' },
-    { value: 'b2b',            label: 'B2B Supply',              desc: 'MOQ, unit of measure, wholesale pricing.' },
-  ].map(opt => (
-    <button key={opt.value}
-      onClick={() => set('lob_type', opt.value)}
-      style={{
-        padding: '14px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
-        background: form.lob_type === opt.value ? C.primaryLight : C.cardBg,
-        border: `0.5px solid ${form.lob_type === opt.value ? C.primary : C.border}`,
-      }}>
-      <div style={{ fontSize: 13, fontWeight: 500, color: form.lob_type === opt.value ? C.primaryDark : C.text, marginBottom: 4 }}>
-        {form.lob_type === opt.value ? '◉ ' : '○ '}{opt.label}
-      </div>
-      <div style={{ fontSize: 11, color: C.textMuted }}>{opt.desc}</div>
-    </button>
-  ))}
+<div style={{ fontSize: 12, color: C.textMuted, marginBottom: 12, lineHeight: 1.45 }}>
+  Currently set to <strong>{formatBusinessLabel({
+    business_family: form.business_family,
+    business_vertical: form.business_vertical,
+    business_vertical_other: form.business_vertical_other,
+    lob_type: form.lob_type,
+  })}</strong>. This decides your catalog columns and which portal tabs appear.
 </div>
+<div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+  {LOB_FAMILIES.map(fam => {
+    const selected = (form.business_family || resolveBusinessTaxonomy({
+      business_vertical: form.business_vertical,
+      lob_type: form.lob_type,
+    }).business_family) === fam.id;
+    return (
+      <button key={fam.id}
+        onClick={() => {
+          const only = fam.custom ? customVerticalForFamily(fam.id) : null;
+          set('business_family', fam.id);
+          set('business_vertical', only?.id || '');
+          set('business_vertical_other', '');
+          if (only) set('lob_type', only.lob_type);
+        }}
+        style={{
+          padding: '14px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
+          background: selected ? C.primaryLight : C.cardBg,
+          border: `0.5px solid ${selected ? C.primary : C.border}`,
+        }}>
+        <div style={{ fontSize: 13, fontWeight: 500, color: selected ? C.primaryDark : C.text, marginBottom: 4 }}>
+          {selected ? '◉ ' : '○ '}{fam.icon} {fam.label}
+        </div>
+        <div style={{ fontSize: 11, color: C.textMuted }}>{fam.tagline}</div>
+      </button>
+    );
+  })}
+</div>
+{(() => {
+  const familyId = form.business_family || resolveBusinessTaxonomy({
+    business_vertical: form.business_vertical,
+    lob_type: form.lob_type,
+  }).business_family;
+  const verticals = getFamily(familyId)?.custom ? [] : verticalsForFamily(familyId);
+  return (
+    <>
+      {verticals.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+          {verticals.map(v => {
+            const selected = form.business_vertical === v.id;
+            return (
+              <button key={v.id}
+                onClick={() => {
+                  set('business_family', v.family);
+                  set('business_vertical', v.id);
+                  set('lob_type', v.lob_type);
+                  if (!v.custom) set('business_vertical_other', '');
+                }}
+                style={{
+                  padding: '8px 12px', borderRadius: 999, cursor: 'pointer', fontSize: 12,
+                  background: selected ? C.primaryLight : C.cardBg,
+                  color: selected ? C.primaryDark : C.text,
+                  border: `0.5px solid ${selected ? C.primary : C.border}`,
+                }}>
+                {v.icon} {v.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {isCustomVertical(form.business_vertical) && (
+        <div style={{ marginBottom: 16 }}>
+          <Label required>Tell us what your business does</Label>
+          <Input
+            value={form.business_vertical_other}
+            onChange={v => set('business_vertical_other', v.slice(0, 160))}
+            placeholder="e.g. Pet grooming supplies, Tailoring studio, Stationery wholesale"
+          />
+        </div>
+      )}
+    </>
+  );
+})()}
 
       
 
@@ -2237,22 +2307,30 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
 
 // ═════════════════════════════════════════════════════════════════════════════
 // TAB 5 — WHATSAPP
-// WA number, WABA ID, phone number ID, manager phone, access token
+// Three connect paths + Account Status + read-only template library
 // ═════════════════════════════════════════════════════════════════════════════
-function TabWhatsApp({ apiClient, showToast }) {
+function TabWhatsApp({ apiClient, showToast, initialPath = null }) {
   const [form,   setForm]   = useState(null);
   const [saving, setSaving] = useState(false);
   const [saved,  setSaved]  = useState(false);
   const [showToken, setShowToken] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(initialPath === 'advanced');
+  const [connectPath, setConnectPath] = useState(initialPath || null); // 'new' | 'existing' | 'advanced'
   const [esConfig, setEsConfig] = useState(null);
   const [connecting, setConnecting] = useState(false);
+  const [pin, setPin] = useState('');
+  const [pinBusy, setPinBusy] = useState(false);
+  const [accountStatus, setAccountStatus] = useState(null);
+  const [templates, setTemplates] = useState(null);
+  const [templatesErr, setTemplatesErr] = useState('');
+  const [templatesLoading, setTemplatesLoading] = useState(false);
 
   const loadForm = useCallback(() => {
     return Promise.all([
       apiClient.get('/api/dashboard/waba'),
       apiClient.get('/api/restaurants/integration').catch(() => ({ data: {} })),
-    ]).then(([wabaRes, intRes]) => {
+      apiClient.get('/api/whatsapp/embedded-signup/status').catch(() => ({ data: null })),
+    ]).then(([wabaRes, intRes, statusRes]) => {
       const d   = wabaRes.data.restaurant ?? {};
       const int = intRes.data.integration ?? {};
       setForm({
@@ -2263,9 +2341,26 @@ function TabWhatsApp({ apiClient, showToast }) {
         sweets_counter_phone: d.sweets_counter_phone ?? '',
         access_token:     int.access_token   ?? '',
         webhook_secret:   int.webhook_secret ?? '',
+        lob_type:         d.lob_type || 'restaurant',
+        whatsapp_needs_existing_pin: Boolean(d.whatsapp_needs_existing_pin || statusRes.data?.whatsapp_needs_existing_pin),
       });
-      if (int.phone_number_id && int.access_token) setShowAdvanced(false);
+      if (statusRes.data) setAccountStatus(statusRes.data);
+      if (int.phone_number_id && int.access_token && initialPath !== 'advanced') setShowAdvanced(false);
     });
+  }, [apiClient, initialPath]);
+
+  const loadTemplates = useCallback(async () => {
+    setTemplatesLoading(true);
+    setTemplatesErr('');
+    try {
+      const r = await apiClient.get('/api/whatsapp/embedded-signup/templates');
+      setTemplates(r.data?.templates || []);
+    } catch (e) {
+      setTemplates([]);
+      setTemplatesErr(e.response?.data?.error || e.message || 'Could not load templates');
+    } finally {
+      setTemplatesLoading(false);
+    }
   }, [apiClient]);
 
   useEffect(() => {
@@ -2278,9 +2373,16 @@ function TabWhatsApp({ apiClient, showToast }) {
       .catch(() => setEsConfig({ enabled: false }));
   }, [apiClient]);
 
+  useEffect(() => {
+    if (initialPath === 'advanced') {
+      setConnectPath('advanced');
+      setShowAdvanced(true);
+    }
+  }, [initialPath]);
+
   const set = (k, v) => { setSaved(false); setForm(p => ({ ...p, [k]: v })); };
 
-  const connectEmbeddedSignup = async () => {
+  const connectEmbeddedSignup = async (withExistingPinFlow = false) => {
     if (!esConfig?.enabled || !esConfig.appId || !esConfig.configId) {
       return showToast('Embedded Signup is not enabled on this server', 'error');
     }
@@ -2299,10 +2401,17 @@ function TabWhatsApp({ apiClient, showToast }) {
         waba_id: session.waba_id,
         phone_number_id: session.phone_number_id,
         display_phone_number: session.display_phone_number || null,
+        existing_pin: withExistingPinFlow && pin.length === 6 ? pin : undefined,
       });
       await loadForm();
       setSaved(true);
-      showToast(r.data?.next_step || 'WhatsApp connected successfully');
+      if (r.data?.whatsapp_needs_existing_pin) {
+        setConnectPath('existing');
+        showToast('Enter the existing WhatsApp 2FA PIN to finish');
+      } else {
+        showToast(r.data?.next_step || 'WhatsApp connected successfully');
+        loadTemplates().catch(() => {});
+      }
     } catch (e) {
       const msg = e.response?.data?.error || e.message || 'Connect WhatsApp failed';
       showToast(msg, 'error');
@@ -2311,18 +2420,32 @@ function TabWhatsApp({ apiClient, showToast }) {
     }
   };
 
+  const submitExistingPin = async () => {
+    if (pin.length !== 6) return showToast('Enter the 6-digit WhatsApp PIN', 'error');
+    setPinBusy(true);
+    try {
+      await apiClient.post('/api/whatsapp/embedded-signup/register-pin', { pin });
+      setPin('');
+      await loadForm();
+      showToast('PIN accepted — WhatsApp registration finished');
+      loadTemplates().catch(() => {});
+    } catch (e) {
+      showToast(e.response?.data?.error || e.message || 'PIN was rejected', 'error');
+    } finally {
+      setPinBusy(false);
+    }
+  };
+
   const save = async () => {
     if (!form.whatsapp_number) return showToast('WhatsApp number is required', 'error');
     setSaving(true);
     try {
-      // Update restaurant row
       await apiClient.put('/api/restaurants/me', {
         whatsapp_number: form.whatsapp_number,
         waba_id:         form.waba_id        || null,
         manager_phone:   form.manager_phone  || null,
         sweets_counter_phone: form.sweets_counter_phone || null,
       });
-      // Update integration row (phone_number_id + access_token live here)
       if (form.phone_number_id || form.access_token) {
         await apiClient.put('/api/restaurants/integration', {
           provider:       'meta',
@@ -2334,65 +2457,155 @@ function TabWhatsApp({ apiClient, showToast }) {
       }
       setSaved(true);
       showToast('WhatsApp settings saved');
+      await loadForm();
+      loadTemplates().catch(() => {});
     } catch (e) { showToast(e.response?.data?.error ?? 'Save failed', 'error'); }
     finally { setSaving(false); }
   };
 
   if (!form) return <div style={{ padding: 32, textAlign: 'center' }}><Spinner size={28} /></div>;
 
+  // #region agent log
+  fetch('http://127.0.0.1:7380/ingest/982e28a2-86ba-4a90-a485-a232585f9d4f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c76584'},body:JSON.stringify({sessionId:'c76584',runId:'pre-deploy',hypothesisId:'A',location:'SettingsPanel.jsx:TabWhatsApp',message:'TabWhatsApp mounted (new UI)',data:{hasAccountStatusUi:true,hasTemplateLibraryUi:true,isConnected:Boolean(form.waba_id&&form.phone_number_id&&form.access_token),connectPath,initialPath,esEnabled:Boolean(esConfig?.enabled)},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
+
   const hint = (text) => <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4, lineHeight: 1.5 }}>{text}</div>;
   const isConnected = Boolean(form.waba_id && form.phone_number_id && form.access_token);
+  const needsPin = Boolean(form.whatsapp_needs_existing_pin || accountStatus?.whatsapp_needs_existing_pin);
+
+  const pathCard = (id, title, desc) => {
+    const active = connectPath === id;
+    return (
+      <button
+        type="button"
+        key={id}
+        onClick={() => {
+          setConnectPath(id);
+          if (id === 'advanced') setShowAdvanced(true);
+        }}
+        style={{
+          textAlign: 'left',
+          padding: '14px 16px',
+          borderRadius: 10,
+          border: `1px solid ${active ? C.primary : C.border}`,
+          background: active ? C.successLight : C.cardBg,
+          cursor: 'pointer',
+        }}
+      >
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 4 }}>{title}</div>
+        <div style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.5 }}>{desc}</div>
+      </button>
+    );
+  };
+
+  const statusColor = (s) => {
+    const u = String(s || '').toUpperCase();
+    if (u === 'APPROVED') return C.successDark;
+    if (u === 'PENDING' || u === 'IN_APPEAL') return '#BA7517';
+    if (u === 'REJECTED' || u === 'DISABLED') return C.danger;
+    return C.textMuted;
+  };
 
   return (
     <div>
       <div style={{ background: '#EAF3DE', border: '0.5px solid #A7E3C0', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#3B6D11', marginBottom: 20, lineHeight: 1.7 }}>
-        {esConfig?.enabled
-          ? <>Connect WhatsApp with one click — no Meta Developer Console. Have your business documents and a phone number that is <strong>not</strong> on personal WhatsApp ready.</>
-          : <>WhatsApp credentials can be entered manually below. Ask Autom8 to enable Embedded Signup for one-click connect.</>}
-        {' '}Changes take effect on the next incoming message — no restart needed.
+        Choose how to connect WhatsApp. Changes take effect on the next incoming message — no restart needed.
       </div>
 
-      {esConfig?.enabled && (
-        <div style={{
-          ...CARD,
-          marginBottom: 20,
-          display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 16,
-        }}>
-          <div style={{ flex: '1 1 220px' }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 4 }}>
-              {isConnected ? 'WhatsApp connected' : 'Connect WhatsApp'}
-            </div>
-            <div style={{ fontSize: 12, color: C.textMuted, lineHeight: 1.6 }}>
-              {isConnected
-                ? 'You can reconnect if you need to link a different number or refresh access.'
-                : 'Opens Meta Embedded Signup. Creates or links your WhatsApp Business Account inside Autom8.'}
-            </div>
+      {/* Account Status */}
+      <div style={{ ...CARD, marginBottom: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>WhatsApp Account Status</div>
+          <span style={{
+            fontSize: 11, padding: '2px 8px', borderRadius: 6,
+            background: isConnected && !needsPin ? C.successLight : C.dangerLight,
+            color: isConnected && !needsPin ? C.successDark : C.danger,
+          }}>
+            {needsPin ? 'Needs PIN' : isConnected ? '● Connected' : 'Not connected'}
+          </span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: 12 }}>
+          <div><span style={{ color: C.textMuted }}>Number</span><div style={{ fontWeight: 500 }}>{form.whatsapp_number ? `+${form.whatsapp_number}` : '—'}</div></div>
+          <div><span style={{ color: C.textMuted }}>WABA ID</span><div style={{ fontWeight: 500, wordBreak: 'break-all' }}>{form.waba_id || '—'}</div></div>
+          <div><span style={{ color: C.textMuted }}>Phone Number ID</span><div style={{ fontWeight: 500, wordBreak: 'break-all' }}>{form.phone_number_id || '—'}</div></div>
+          <div><span style={{ color: C.textMuted }}>Billing</span><div><Link to="/billing" style={{ color: C.primary, fontWeight: 600 }}>₹1000 / number →</Link></div></div>
+        </div>
+      </div>
+
+      {/* Three paths */}
+      {!isConnected || needsPin ? (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 10 }}>Connect WhatsApp</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8, marginBottom: 14 }}>
+            {pathCard('new', '1. New WhatsApp number', 'Fresh Cloud API number via Meta Embedded Signup (no Developer Console).')}
+            {pathCard('existing', '2. Existing WhatsApp number', 'Migrate a number that already uses WhatsApp — enter the 2FA PIN after linking.')}
+            {pathCard('advanced', '3. Advanced — paste credentials', 'Manually enter WABA ID, Phone Number ID, and system user token.')}
           </div>
+
+          {(connectPath === 'new' || connectPath === 'existing') && esConfig?.enabled && (
+            <div style={{ ...CARD, marginBottom: 12 }}>
+              {connectPath === 'existing' && (
+                <div style={{ marginBottom: 12 }}>
+                  <Label>Existing WhatsApp 2FA PIN (optional before connect)</Label>
+                  <Input value={pin} onChange={v => setPin(String(v).replace(/\D/g, '').slice(0, 6))} placeholder="6-digit PIN" />
+                  {hint('If Meta asks for the PIN after connect, enter it below and submit.')}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => connectEmbeddedSignup(connectPath === 'existing')}
+                disabled={connecting}
+                style={{
+                  background: C.primary, color: '#fff', border: 'none', borderRadius: 8,
+                  padding: '10px 18px', fontSize: 13, fontWeight: 600,
+                  cursor: connecting ? 'wait' : 'pointer', opacity: connecting ? 0.7 : 1,
+                  display: 'inline-flex', alignItems: 'center', gap: 8,
+                }}
+              >
+                {connecting ? <Spinner size={16} /> : null}
+                {connecting ? 'Connecting…' : (connectPath === 'existing' ? 'Connect existing number' : 'Connect new number')}
+              </button>
+              {needsPin && (
+                <div style={{ marginTop: 14 }}>
+                  <Label required>Enter existing WhatsApp PIN</Label>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Input value={pin} onChange={v => setPin(String(v).replace(/\D/g, '').slice(0, 6))} placeholder="6-digit PIN" />
+                    <button
+                      type="button"
+                      disabled={pinBusy || pin.length !== 6}
+                      onClick={submitExistingPin}
+                      style={{
+                        background: '#BA7517', color: '#fff', border: 'none', borderRadius: 8,
+                        padding: '0 14px', fontWeight: 600, cursor: 'pointer', opacity: pinBusy || pin.length !== 6 ? 0.5 : 1,
+                      }}
+                    >
+                      {pinBusy ? '…' : 'Submit PIN'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!esConfig?.enabled && (connectPath === 'new' || connectPath === 'existing') && (
+            <div style={{ fontSize: 12, color: C.danger, marginBottom: 12 }}>
+              Embedded Signup is not enabled on this server — use Advanced credentials or ask Autom8 ops.
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{ ...CARD, marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 12, color: C.textMuted }}>Need to link a different number?</div>
           <button
             type="button"
-            onClick={connectEmbeddedSignup}
+            onClick={() => { setConnectPath('new'); connectEmbeddedSignup(false); }}
             disabled={connecting}
             style={{
-              background: C.primary,
-              color: '#fff',
-              border: 'none',
-              borderRadius: 8,
-              padding: '10px 18px',
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: connecting ? 'wait' : 'pointer',
-              opacity: connecting ? 0.7 : 1,
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 8,
+              background: 'transparent', border: `1px solid ${C.primary}`, color: C.primary,
+              borderRadius: 8, padding: '8px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
             }}
           >
-            {connecting ? <Spinner size={16} /> : null}
-            {connecting ? 'Connecting…' : (isConnected ? 'Reconnect WhatsApp' : 'Connect WhatsApp')}
+            {connecting ? 'Connecting…' : 'Reconnect WhatsApp'}
           </button>
         </div>
       )}
@@ -2401,7 +2614,7 @@ function TabWhatsApp({ apiClient, showToast }) {
         <div>
           <Label required>WhatsApp number</Label>
           <Input value={form.whatsapp_number} onChange={v => set('whatsapp_number', v)} placeholder="919444000000" />
-          {hint('Country code + number, no + or spaces.')}
+          {hint('Country code + number, no + or spaces. This is the business WABA number — not the owner OTP phone.')}
         </div>
         <div>
           <Label>Manager phone</Label>
@@ -2419,15 +2632,8 @@ function TabWhatsApp({ apiClient, showToast }) {
         type="button"
         onClick={() => setShowAdvanced(p => !p)}
         style={{
-          marginTop: 20,
-          marginBottom: 8,
-          background: 'none',
-          border: 'none',
-          color: C.primary,
-          fontSize: 12,
-          fontWeight: 600,
-          cursor: 'pointer',
-          padding: 0,
+          marginTop: 20, marginBottom: 8, background: 'none', border: 'none',
+          color: C.primary, fontSize: 12, fontWeight: 600, cursor: 'pointer', padding: 0,
         }}
       >
         {showAdvanced ? 'Hide advanced credentials' : 'Show advanced credentials (manual)'}
@@ -2473,14 +2679,61 @@ function TabWhatsApp({ apiClient, showToast }) {
         </>
       )}
 
-      {!showAdvanced && isConnected && (
-        <div style={{ fontSize: 12, color: C.textMuted, marginTop: 12, lineHeight: 1.6 }}>
-          Linked WABA {form.waba_id} · Phone Number ID {form.phone_number_id}
-          {form.whatsapp_number ? ` · +${form.whatsapp_number}` : ''}
-        </div>
-      )}
-
       <SaveBar onSave={save} loading={saving} saved={saved} />
+
+      {/* Message template library (read-only) */}
+      <div style={{ ...CARD, marginTop: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>Message template library</div>
+            <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>Approved Meta templates for this WABA (read-only)</div>
+          </div>
+          <button
+            type="button"
+            onClick={loadTemplates}
+            disabled={!isConnected || templatesLoading}
+            style={{
+              fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 8,
+              border: `1px solid ${C.border}`, background: C.surfaceBg, color: C.text,
+              cursor: !isConnected || templatesLoading ? 'default' : 'pointer',
+              opacity: !isConnected ? 0.5 : 1,
+            }}
+          >
+            {templatesLoading ? 'Loading…' : (templates ? 'Refresh' : 'Load templates')}
+          </button>
+        </div>
+        {!isConnected && (
+          <div style={{ fontSize: 12, color: C.textMuted }}>Connect WhatsApp to view templates.</div>
+        )}
+        {templatesErr && <div style={{ fontSize: 12, color: C.danger, marginBottom: 8 }}>{templatesErr}</div>}
+        {templates && templates.length === 0 && !templatesErr && (
+          <div style={{ fontSize: 12, color: C.textMuted }}>No templates found on this WABA yet.</div>
+        )}
+        {templates && templates.length > 0 && (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr style={{ textAlign: 'left', color: C.textMuted, borderBottom: `0.5px solid ${C.border}` }}>
+                  <th style={{ padding: '8px 6px' }}>Name</th>
+                  <th style={{ padding: '8px 6px' }}>Language</th>
+                  <th style={{ padding: '8px 6px' }}>Category</th>
+                  <th style={{ padding: '8px 6px' }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {templates.map((t) => (
+                  <tr key={t.id || `${t.name}-${t.language}`} style={{ borderBottom: `0.5px solid ${C.border}` }}>
+                    <td style={{ padding: '8px 6px', fontWeight: 500 }}>{t.name}</td>
+                    <td style={{ padding: '8px 6px' }}>{t.language || '—'}</td>
+                    <td style={{ padding: '8px 6px' }}>{t.category || '—'}</td>
+                    <td style={{ padding: '8px 6px', color: statusColor(t.status), fontWeight: 600 }}>{t.status || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -3180,7 +3433,7 @@ export default function SettingsPanel() {
     restaurant: <TabRestaurant apiClient={apiClient} showToast={showToast} lobType={lobType} />,
     services:   <TabServices   apiClient={apiClient} showToast={showToast} refreshSubscription={refreshSubscription} lobType={lobType} />,
     kitchen:    <TabKitchen    apiClient={apiClient} showToast={showToast} paidFeatures={paidFeatures} lobType={lobType} />,
-    whatsapp:   <TabWhatsApp   apiClient={apiClient} showToast={showToast} />,
+    whatsapp:   <TabWhatsApp   apiClient={apiClient} showToast={showToast} initialPath={searchParams.get('path')} />,
     staff:      <TabStaff      apiClient={apiClient} showToast={showToast} lobType={lobType} />,
     brand:      <TabBrand      apiClient={apiClient} showToast={showToast} user={user} />,
   };

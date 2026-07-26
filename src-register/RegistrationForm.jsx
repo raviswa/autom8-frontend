@@ -5,6 +5,16 @@
 import React, { useState, useEffect, useRef, useCallback, Fragment } from 'react';
 import * as XLSX from 'xlsx';
 import { loadFacebookSdk, launchWhatsAppEmbeddedSignup } from '../src/helpers/metaEmbeddedSignup';
+import {
+  LOB_FAMILIES,
+  verticalsForFamily,
+  otherFamilies,
+  getFamily,
+  getVertical,
+  isCustomVertical,
+  customVerticalForFamily,
+  formatBusinessLabel,
+} from '../src/config/lobTaxonomy';
 const h = React.createElement; // keeps all existing h() calls working unchanged
 
 // ── Configuration ─────────────────────────────────────────────────────────────
@@ -63,8 +73,8 @@ const TIMEZONES = [
 // adding one entry — no changes needed to the step components themselves.
 const LOB_CONFIGS = {
   restaurant: {
-    label: "Restaurant / F&B", icon: "🍽️",
-    tagline: "Cross-border restaurant engine · Self-service onboarding",
+    label: "Food & Beverages", icon: "🍽️",
+    tagline: "Cross-border food & beverages engine · Self-service onboarding",
     categoryLabel: "Cuisine Types",
     categoryOptions: [
       { id: "veg",          label: "🥦 Veg" },
@@ -102,7 +112,7 @@ const LOB_CONFIGS = {
 
   supply: {
     label: "B2B Supply", icon: "📦",
-    tagline: "Supplier-to-restaurant ordering · Self-service onboarding",
+    tagline: "Supplier-to-buyer bulk ordering · Self-service onboarding",
     categoryLabel: "Supply Categories",
     categoryOptions: [
       { id: "perishables",     label: "🥬 Perishables" },
@@ -245,24 +255,41 @@ const LOB_CONFIGS = {
   },
 };
 
+/** Map catalog schema lob_type → registration UI config (fulfillment, catalog hints). */
+function getLobConfig(formOrLob) {
+  const lob = typeof formOrLob === 'string'
+    ? formOrLob
+    : (formOrLob?.business_type || formOrLob?.lob_type || '');
+  if (LOB_CONFIGS[lob]) return LOB_CONFIGS[lob];
+  if (lob === 'psl') return LOB_CONFIGS.restaurant;
+  if (lob === 'b2b' || lob === 'supply') return LOB_CONFIGS.supply;
+  if (lob === 'jewellery' || lob === 'jewelry' || lob === 'electronics') return LOB_CONFIGS.retail;
+  const family = typeof formOrLob === 'object' ? formOrLob?.business_family : null;
+  if (family === 'b2b') return LOB_CONFIGS.supply;
+  if (family === 'retail' || family === 'other') return LOB_CONFIGS.retail;
+  return LOB_CONFIGS.restaurant;
+}
+
 const LOB_LIST = Object.keys(LOB_CONFIGS).map((id) => ({ id, ...LOB_CONFIGS[id] }));
 
 // Steps are fixed in shape; only the labels of a couple of them change per LOB.
 const buildSteps = (lobId) => {
-  const cfg = LOB_CONFIGS[lobId] || LOB_CONFIGS.restaurant;
+  const cfg = getLobConfig(lobId);
+  // Business type + fulfillment are folded into Details so step heights stay even.
   return [
-    { id: "business_type", label: "Business Type",          icon: "🏷️" },
-    { id: "details",       label: `${cfg.label} Details`,   icon: cfg.icon },
-    { id: "fulfillment",   label: cfg.fulfillmentLabel,      icon: "🚀" },
-    { id: "whatsapp",      label: "WhatsApp & Automation",   icon: "💬" },
-    { id: "catalog",       label: cfg.catalogStepLabel,      icon: "📋" },
-    { id: "checkout",      label: "Review & Subscribe",      icon: "✅" },
+    { id: "details",     label: "Business & Login",        icon: cfg.icon || "🏷️" },
+    { id: "whatsapp",    label: "WhatsApp & Automation",   icon: "💬" },
+    { id: "catalog",     label: cfg.catalogStepLabel,      icon: "📋" },
+    { id: "checkout",    label: "Review & Subscribe",      icon: "✅" },
   ];
 };
 
 // ── Default form state ─────────────────────────────────────────────────────────
 const makeDefault = () => ({
   // Step 0
+  business_family: "",
+  business_vertical: "",
+  business_vertical_other: "",
   business_type: "",
 
   // Step 1
@@ -270,12 +297,14 @@ const makeDefault = () => ({
   country_code: "IN", currency_code: "INR",
   categories: [], kitchen_workflow: "KOT_only",
   owner_name: "", email: "", owner_password: "",
+  owner_whatsapp: "",  // personal WA for OTP — distinct from WABA business number
 
-  // Step 2
+  // Fulfillment (shown on Details step)
   dine_in: false, takeaway: false, door_delivery: false,
+  store_pickup: false, wholesale: false, installation: false,
   table_reservation: false, table_count: 0,
 
-  // Step 3 — WhatsApp via Embedded Signup (no Meta Developer Console)
+  // WhatsApp via Embedded Signup (no Meta Developer Console)
   whatsapp_number: "", waba_id: "", phone_number_id: "",
   embedded_signup_code: "", display_phone_number: "",
   es_connected: false,
@@ -284,9 +313,9 @@ const makeDefault = () => ({
   has_lunch: true,  lunch_start: "12:00", lunch_end: "15:00",
   has_dinner: true, dinner_start: "19:00", dinner_end: "23:00",
 
-  // Step 4
+  // Catalog
   menu_catalog: [],
-  menu_file: null,  // File object, not sent to API — parsed client-side
+  menu_file: null,
 
   // Internal
   contact_phone: "", manager_phone: "", address_line1: "",
@@ -297,12 +326,10 @@ const makeDefault = () => ({
 
 // ── Validation rules per step ─────────────────────────────────────────────────
 const REQUIRED = {
-  0: ["business_type"],
-  1: ["name", "display_name", "slug", "city", "country_code", "owner_name", "email", "owner_password"],
+  0: ["business_family", "business_vertical", "business_type", "name", "display_name", "slug", "city", "country_code", "owner_name", "email", "owner_password", "owner_whatsapp"],
+  1: ["embedded_signup_code", "waba_id", "phone_number_id"],
   2: [],
-  3: ["embedded_signup_code", "waba_id", "phone_number_id"],
-  4: [],
-  5: [],
+  3: [],
 };
 
 // ── Utility functions ─────────────────────────────────────────────────────────
@@ -374,7 +401,11 @@ const CSS = `
     border-radius: var(--mn-radius);
     box-shadow: var(--mn-shadow);
     padding: 28px 32px;
+    min-height: 560px;
+    display: flex;
+    flex-direction: column;
   }
+  #munafe-registration-root .mn-card-body { flex: 1; }
   #munafe-registration-root .mn-card-title { font-family:'DM Serif Display', serif; font-size:22px; color:var(--mn-text); margin-bottom:4px; }
   #munafe-registration-root .mn-card-sub   { font-size: 13px; color: var(--mn-muted); margin-bottom: 24px; line-height: 1.5; }
 
@@ -455,8 +486,8 @@ const CSS = `
   #munafe-registration-root .mn-workflow-desc  { font-size:11px; color:var(--mn-muted); line-height:1.4; }
 
   /* Business type cards */
-  #munafe-registration-root .mn-lob-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
-  @media(max-width:560px){ #munafe-registration-root .mn-lob-grid { grid-template-columns:repeat(2,1fr); } }
+  #munafe-registration-root .mn-lob-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+  @media(max-width:820px){ #munafe-registration-root .mn-lob-grid { grid-template-columns:repeat(2,1fr); } }
   #munafe-registration-root .mn-lob-card {
     padding:18px 12px; border-radius:10px; border:1.5px solid var(--mn-border);
     cursor:pointer; transition:all .15s; background:var(--mn-white);
@@ -467,6 +498,24 @@ const CSS = `
   #munafe-registration-root .mn-lob-icon { font-size:26px; }
   #munafe-registration-root .mn-lob-label { font-size:12.5px; font-weight:600; color:var(--mn-text); line-height:1.3; }
   #munafe-registration-root .mn-lob-card.sel .mn-lob-label { color:var(--mn-green); }
+  #munafe-registration-root .mn-lob-tagline { font-size:10.5px; color:var(--mn-muted); line-height:1.35; font-weight:400; }
+  #munafe-registration-root .mn-vertical-grid { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+  #munafe-registration-root .mn-vertical-chip {
+    display:inline-flex; align-items:center; gap:6px; padding:8px 12px; border-radius:20px;
+    border:1.5px solid var(--mn-border); background:var(--mn-white); cursor:pointer;
+    font-size:12px; font-weight:600; color:var(--mn-text); transition:all .15s;
+  }
+  #munafe-registration-root .mn-vertical-chip:hover { border-color:var(--mn-green-mid); }
+  #munafe-registration-root .mn-vertical-chip.sel { border-color:var(--mn-green); background:var(--mn-green-lt); color:var(--mn-green); }
+  #munafe-registration-root .mn-also-strip {
+    margin-top:14px; padding:12px 14px; border-radius:10px; background:#f4f1ea; border:1px solid var(--mn-border);
+  }
+  #munafe-registration-root .mn-also-title { font-size:11px; font-weight:700; color:var(--mn-muted); text-transform:uppercase; letter-spacing:.03em; margin-bottom:8px; }
+  #munafe-registration-root .mn-also-chips { display:flex; flex-wrap:wrap; gap:6px; }
+  #munafe-registration-root .mn-also-chip {
+    font-size:11px; padding:4px 9px; border-radius:12px; background:rgba(255,255,255,0.8);
+    color:var(--mn-text); border:1px solid var(--mn-border); opacity:0.85;
+  }
 
   /* Fulfillment cards */
   #munafe-registration-root .mn-fulfill-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
@@ -608,25 +657,103 @@ function Pill({ label, selected, onToggle }) {
   }, label);
 }
 
-// ── Step 0: Business Type ─────────────────────────────────────────────────────
+// ── Step 0: Business Type (family + vertical) ─────────────────────────────────
 
-function Step0({ f, set, errors }) {
-  const e = errors.includes("business_type");
+function BusinessTypePicker({ f, set, errors }) {
+  const familyErr = errors.includes("business_family") || errors.includes("business_type");
+  const verticalErr = errors.includes("business_vertical");
+  const otherErr = errors.includes("business_vertical_other");
+  const familyId = f.business_family || getVertical(f.business_vertical)?.family || '';
+  const family = getFamily(familyId);
+  // The Others family has a single implicit vertical — the merchant's own description.
+  const verts = familyId && !family?.custom ? verticalsForFamily(familyId) : [];
+  const others = familyId ? otherFamilies(familyId) : [];
+  const needsOwnDescription = isCustomVertical(f.business_vertical);
+
+  const pickVertical = (vertical) => {
+    set("business_family", vertical.family);
+    set("business_vertical", vertical.id);
+    set("business_type", vertical.lob_type);
+    set("categories", []);
+    if (!vertical.custom) set("business_vertical_other", "");
+  };
+
+  const pickFamily = (picked) => {
+    if (picked.custom) {
+      const only = customVerticalForFamily(picked.id);
+      if (only) { pickVertical(only); return; }
+    }
+    set("business_family", picked.id);
+    set("business_vertical", "");
+    set("business_vertical_other", "");
+    set("business_type", "");
+    set("categories", []);
+  };
+
   return h(Fragment, null,
-    e && h("div", { className: "mn-alert err" }, "Please choose the type of business you're onboarding."),
+    familyErr && h("div", { className: "mn-alert err", style: { marginBottom: 12 } }, "Please choose a business family."),
     h("div", { className: "mn-lob-grid" },
-      LOB_LIST.map((lob) =>
+      LOB_FAMILIES.map((family) =>
         h("div", {
-          key: lob.id,
-          className: `mn-lob-card${f.business_type === lob.id ? " sel" : ""}`,
-          onClick: () => set("business_type", lob.id),
+          key: family.id,
+          className: `mn-lob-card${familyId === family.id ? " sel" : ""}`,
+          onClick: () => pickFamily(family),
         },
-          h("div", { className: "mn-lob-icon" }, lob.icon),
-          h("div", { className: "mn-lob-label" }, lob.label),
+          h("div", { className: "mn-lob-icon" }, family.icon),
+          h("div", { className: "mn-lob-label" }, family.label),
+          h("div", { className: "mn-lob-tagline" }, family.tagline),
+        )
+      )
+    ),
+    familyId && h("div", { style: { marginTop: 16 } },
+      verts.length > 0 && h(Fragment, null,
+        h("p", { className: "mn-section-title" }, "Your vertical *"),
+        verticalErr && h("div", { className: "mn-alert err", style: { marginBottom: 10 } }, "Please choose the vertical that best matches your business."),
+        h("div", { className: "mn-vertical-grid" },
+          verts.map((vertical) =>
+            h("button", {
+              key: vertical.id,
+              type: "button",
+              className: `mn-vertical-chip${f.business_vertical === vertical.id ? " sel" : ""}`,
+              onClick: () => pickVertical(vertical),
+            }, `${vertical.icon} ${vertical.label}`)
+          )
+        )
+      ),
+      needsOwnDescription && h("div", { style: { marginTop: 12 } },
+        h(Field, {
+          label: "Tell us what your business does *",
+          hint: "We use this to set up the right catalog and ordering flow",
+          error: otherErr ? "required" : "",
+          full: true,
+        },
+          h(Input, {
+            value: f.business_vertical_other,
+            onChange: (v) => set("business_vertical_other", v.slice(0, 160)),
+            placeholder: "e.g. Pet grooming supplies, Tailoring studio, Stationery wholesale",
+            hasError: otherErr,
+          })
+        )
+      ),
+      others.length > 0 && h("div", { className: "mn-also-strip" },
+        h("div", { className: "mn-also-title" }, "Also on Autom8"),
+        h("div", { className: "mn-also-chips" },
+          others.flatMap((family) =>
+            verticalsForFamily(family.id)
+              .filter((vertical) => !vertical.custom)
+              .map((vertical) =>
+                h("span", { key: `${family.id}-${vertical.id}`, className: "mn-also-chip" },
+                  `${vertical.icon} ${vertical.label}`)
+              )
+          )
         )
       )
     )
   );
+}
+
+function Step0({ f, set, errors }) {
+  return h(BusinessTypePicker, { f, set, errors });
 }
 
 // ── Step 1: Core Business Details ─────────────────────────────────────────────
@@ -670,7 +797,7 @@ function Step1({ f, set, errors }) {
     }, 600);
   };
 
-  const cfg = LOB_CONFIGS[f.business_type] || LOB_CONFIGS.restaurant;
+  const cfg = getLobConfig(f);
 
   const toggleCategory = (id) => {
     const cur = f.categories || [];
@@ -678,7 +805,13 @@ function Step1({ f, set, errors }) {
   };
 
   return h(Fragment, null,
-    h("div", { className: "mn-grid" },
+    // Family + vertical (brochure taxonomy)
+    h("div", { className: "mn-section", style: { marginTop: 0, paddingTop: 0, borderTop: "none" } },
+      h("p", { className: "mn-section-title" }, "Business type *"),
+      h(BusinessTypePicker, { f, set, errors })
+    ),
+
+    h("div", { className: "mn-grid", style: { marginTop: 8 } },
 
       // Business Name
       h(Field, { label: "Business Name", error: e("name") ? "required" : "" },
@@ -747,11 +880,22 @@ function Step1({ f, set, errors }) {
           h(Input, { value: f.email, onChange: (v) => set("email", v), placeholder: "you@business.com", hasError: e("email") })
         ),
         h(Field, {
+          label: "Your WhatsApp *",
+          hint: "Personal number for password-reset OTP — not the business WhatsApp (WABA)",
+          error: e("owner_whatsapp") ? "required" : "",
+        },
+          h(Input, {
+            value: f.owner_whatsapp,
+            onChange: (v) => set("owner_whatsapp", String(v).replace(/\D/g, "")),
+            placeholder: "9198XXXXXXXX",
+            hasError: e("owner_whatsapp"),
+          })
+        ),
+        h(Field, {
           label: "Password *",
           error: e("owner_password")
             ? (f.owner_password && String(f.owner_password).length < 8 ? "Min 8 characters" : "required")
             : "",
-          full: true,
         },
           h(Input, { type: "password", value: f.owner_password, onChange: (v) => set("owner_password", v), placeholder: "Min 8 characters", hasError: e("owner_password") })
         ),
@@ -759,7 +903,7 @@ function Step1({ f, set, errors }) {
     ),
 
     // Categories (label & options vary per LOB)
-    h("div", { className: "mn-field mn-field-full", style: { marginTop: 4 } },
+    f.business_type && h("div", { className: "mn-field mn-field-full", style: { marginTop: 4 } },
       h("label", { className: "mn-label" }, cfg.categoryLabel),
       h("div", { className: "mn-pill-group", style: { marginTop: 6 } },
         cfg.categoryOptions.map((c) =>
@@ -787,14 +931,39 @@ function Step1({ f, set, errors }) {
           )
         )
       )
-    )
+    ),
+
+    // Fulfillment (was its own short step)
+    f.business_type && h("div", { className: "mn-section" },
+      h("p", { className: "mn-section-title" }, cfg.fulfillmentLabel || "Fulfillment"),
+      h("div", { className: "mn-fulfill-grid" },
+        cfg.fulfillmentOptions.map((opt) =>
+          h("div", {
+            key: opt.id,
+            className: `mn-fulfill-card${f[opt.id] ? " sel" : ""}`,
+            onClick: () => set(opt.id, !f[opt.id]),
+          },
+            h("div", { className: "mn-fulfill-icon" }, opt.icon),
+            h("div", null,
+              h("div", { className: "mn-fulfill-label" }, opt.label),
+              h("div", { className: "mn-fulfill-desc"  }, opt.desc),
+            )
+          )
+        )
+      ),
+      cfg.showTableCount && f.dine_in && h("div", { className: "mn-field", style: { marginTop: 16, maxWidth: 200 } },
+        h(Field, { label: "Table Count", hint: "Total physical tables" },
+          h(Input, { type: "number", value: f.table_count, onChange: (v) => set("table_count", parseInt(v) || 0) })
+        )
+      )
+    ),
   );
 }
 
 // ── Step 2: Service Fulfillment Matrix ────────────────────────────────────────
 
 function Step2({ f, set }) {
-  const cfg = LOB_CONFIGS[f.business_type] || LOB_CONFIGS.restaurant;
+  const cfg = getLobConfig(f);
   const toggle = (id) => set(id, !f[id]);
   return h(Fragment, null,
     h("div", { className: "mn-fulfill-grid" },
@@ -985,7 +1154,7 @@ function Step3({ f, set, errors }) {
 // ── Step 4: Menu Catalog Upload ───────────────────────────────────────────────
 
 function Step4({ f, set }) {
-  const cfg = LOB_CONFIGS[f.business_type] || LOB_CONFIGS.restaurant;
+  const cfg = getLobConfig(f);
   const [dragOver, setDragOver] = useState(false);
   const [parseStatus, setParseStatus] = useState("");
   const fileInputRef = useRef(null);
@@ -1088,14 +1257,19 @@ function Step5({ form, set, onRedirect }) {
   const [attentionMsg, setAttentionMsg] = useState("");
 
   const country = COUNTRIES.find((c) => c.code === form.country_code);
-  const cfg = LOB_CONFIGS[form.business_type] || LOB_CONFIGS.restaurant;
+  const cfg = getLobConfig(form);
 
   // Drafts never persist the password (security) — after a "Resume" it is
   // empty, so let the user set it right here instead of failing on submit.
   const pwMissing = !form.owner_password || String(form.owner_password).length < 8;
 
   const summaryRows = [
-    ["Business type",   cfg.label],
+    ["Business type",   formatBusinessLabel({
+      business_family: form.business_family,
+      business_vertical: form.business_vertical,
+      business_vertical_other: form.business_vertical_other,
+      lob_type: form.business_type,
+    })],
     ["Business name",   form.display_name || form.name],
     ["Subdomain",       form.slug ? `autom8.works/${form.slug}` : "—"],
     ["Location",        [form.city, country?.label].filter(Boolean).join(", ")],
@@ -1103,7 +1277,8 @@ function Step5({ form, set, onRedirect }) {
     ...(cfg.hasWorkflow ? [["Kitchen flow", form.kitchen_workflow]] : []),
     [cfg.fulfillmentLabel, cfg.fulfillmentOptions.filter((o) => form[o.id]).map((o) => o.label).join(", ") || "—"],
     ["Owner email",     form.email || "—"],
-    ["WhatsApp",        form.es_connected ? (form.whatsapp_number || "Connected") : (form.whatsapp_number || "—")],
+    ["Owner WhatsApp",  form.owner_whatsapp || "—"],
+    ["WhatsApp (WABA)", form.es_connected ? (form.whatsapp_number || "Connected") : (form.whatsapp_number || "—")],
     ["Timezone",        form.timezone],
     ["Payment mode",    form.payment_mode],
     [cfg.catalogStepLabel, form.menu_file?.name || (form.menu_catalog?.length ? `${form.menu_catalog.length} items` : "Not uploaded")],
@@ -1191,9 +1366,17 @@ function Step5({ form, set, onRedirect }) {
 
 // ── Payload builder ───────────────────────────────────────────────────────────
 function buildPayload(form) {
+  const schemaLob = form.business_type
+    || getVertical(form.business_vertical)?.lob_type
+    || 'restaurant';
   return {
-    business_type:    form.business_type, // kept for reference/logging; backend keys off lob_type below
-    lob_type:         form.business_type, // onboarding.js reads body.lob_type — this is the field that actually drives catalog schema selection
+    business_type:    schemaLob, // kept for reference/logging; backend keys off lob_type below
+    lob_type:         schemaLob,
+    business_family:  form.business_family || getVertical(form.business_vertical)?.family || null,
+    business_vertical: form.business_vertical || null,
+    business_vertical_other: isCustomVertical(form.business_vertical)
+      ? String(form.business_vertical_other || '').trim() || null
+      : null,
     name:             form.name,
     display_name:     form.display_name,
     slug:             form.slug,
@@ -1201,16 +1384,20 @@ function buildPayload(form) {
     country_code:     form.country_code,
     currency_code:    form.currency_code,
     categories:       form.categories,
-    kitchen_workflow: form.business_type === "restaurant" ? form.kitchen_workflow : null,
+    kitchen_workflow: schemaLob === "restaurant" || schemaLob === "psl" ? form.kitchen_workflow : null,
     dine_in:          form.dine_in,
-    takeaway:         form.takeaway,
-    door_delivery:    form.door_delivery,
+    takeaway:         form.takeaway || form.store_pickup,
+    door_delivery:    form.door_delivery || form.wholesale,
+    store_pickup:     form.store_pickup,
+    wholesale:        form.wholesale,
+    installation:     form.installation,
     table_reservation:form.table_reservation,
     table_count:      form.table_count,
     owner_name:       form.owner_name,
     email:            form.email,
     owner_password:   form.owner_password,
-    phone:            form.contact_phone || null,
+    owner_whatsapp:   form.owner_whatsapp || null,
+    phone:            form.owner_whatsapp || form.contact_phone || null,
     whatsapp_number:  form.whatsapp_number,
     waba_id:          form.waba_id,
     phone_number_id:  form.phone_number_id,
@@ -1292,9 +1479,15 @@ function MunafeRegistrationForm() {
       const v = form[k];
       return v == null || String(v).trim() === "";
     });
-    if (step === 1) {
+    if (step === 0) {
+      if (isCustomVertical(form.business_vertical) && !String(form.business_vertical_other || "").trim()) {
+        bad.push("business_vertical_other");
+      }
       if (form.owner_password && String(form.owner_password).length < 8 && !bad.includes("owner_password")) {
         bad.push("owner_password");
+      }
+      if (form.owner_whatsapp && String(form.owner_whatsapp).replace(/\D/g, "").length < 10 && !bad.includes("owner_whatsapp")) {
+        bad.push("owner_whatsapp");
       }
       if (form.email && !emailOk(form.email) && !bad.includes("email")) {
         bad.push("email");
@@ -1302,7 +1495,7 @@ function MunafeRegistrationForm() {
     }
     setErrors(bad);
     if (bad.length) return false;
-    if (step === 1 && form.email) {
+    if (step === 0 && form.email) {
       try {
         const res = await fetch(`${API_BASE}/api/v1/email-check/${encodeURIComponent(form.email.trim())}`);
         const data = await res.json();
@@ -1338,13 +1531,12 @@ function MunafeRegistrationForm() {
     setDraftPrompt(null);
   };
 
-  const cfg   = LOB_CONFIGS[form.business_type] || LOB_CONFIGS.restaurant;
-  const STEPS = buildSteps(form.business_type);
+  const cfg   = getLobConfig(form);
+  const familyMeta = getFamily(form.business_family) || getVertical(form.business_vertical);
+  const STEPS = buildSteps(form.business_type || form.business_family);
 
   const stepComponents = [
-    h(Step0, { f: form, set, errors }),
     h(Step1, { f: form, set, errors }),
-    h(Step2, { f: form, set, errors }),
     h(Step3, { f: form, set, errors }),
     h(Step4, { f: form, set }),
     h(Step5, { form, set, onRedirect: () => {} }),
@@ -1355,10 +1547,18 @@ function MunafeRegistrationForm() {
     // ── Header
     h("div", { className: "mn-header" },
       h("div", { className: "mn-header-logo" },
-        h("span", null, form.business_type ? cfg.icon : "🍽️"),
+        h("span", null, (getVertical(form.business_vertical)?.icon || familyMeta?.icon || cfg.icon || "🍽️")),
         h("span", null, "Munafe")
       ),
-      h("p", { className: "mn-header-sub" }, form.business_type ? cfg.tagline : "Multi-LOB commerce engine · Self-service onboarding")
+      h("p", { className: "mn-header-sub" },
+        form.business_vertical || form.business_family
+          ? formatBusinessLabel({
+              business_family: form.business_family,
+              business_vertical: form.business_vertical,
+              business_vertical_other: form.business_vertical_other,
+              lob_type: form.business_type,
+            })
+          : "One platform · Multiple businesses · Self-service onboarding")
     ),
 
     draftPrompt && h("div", { className: "mn-alert info", style: { marginBottom: 16 } },
@@ -1388,14 +1588,12 @@ function MunafeRegistrationForm() {
     h("div", { className: "mn-card" },
       h("h2", { className: "mn-card-title" }, STEPS[step].icon + " " + STEPS[step].label),
       h("p", { className: "mn-card-sub" }, [
-        "Choose the type of business you're setting up on Munafe.",
-        "Tell us about your business and create your owner login.",
-        "Select the fulfillment modes your team manages.",
+        "Choose your business type, fill in details, owner login, and fulfillment options.",
         "Connect WhatsApp with one click — no Meta Developer Console.",
         `Upload your ${cfg.catalogLabel} in Excel or CSV format.`,
         "Review your details, then create your account and start the trial.",
       ][step]),
-      stepComponents[step]
+      h("div", { className: "mn-card-body" }, stepComponents[step])
     ),
 
     // ── Navigation (Back stays available on the review step; submit lives in Step5)

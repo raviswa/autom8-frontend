@@ -74,7 +74,6 @@ function baseFields(row) {
 
 function baseValidate(item, rowNum) {
   const errors = [];
-  if (!item.id) errors.push(`Row ${rowNum}: missing id/SKU`);
   if (!item.name) errors.push(`Row ${rowNum}: missing title/name`);
   if (item.price <= 0) errors.push(`Row ${rowNum} (${item.name || item.id}): price must be > 0`);
   if (item.image_url && !/^https?:\/\//i.test(item.image_url)) {
@@ -188,6 +187,7 @@ export const LOB_SCHEMAS = {
     columnHelp: [
       ['Column guide - Packaged Food / Home Baker'],
       [''],
+      ['id - optional. Leave blank to auto-generate a stable SKU from title + pack_size_label'],
       ['item_type - PRODUCT (default) or BUNDLE (hamper / sampler)'],
       ['variant_group_id - same ID across pack rows for one product (e.g. MANGO-PICKLE)'],
       ['pack_size_label - 250g, 500g, 1kg (pack pills when variant_group_id is set)'],

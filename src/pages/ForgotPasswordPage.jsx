@@ -84,8 +84,8 @@ export default function ForgotPasswordPage() {
         ? `We sent a 6-digit code to the WhatsApp number ${maskedPhone}. Valid for 10 minutes.`
         : 'Enter the 6-digit code we sent on WhatsApp. Valid for 10 minutes.')
       : mode === 'whatsapp'
-        ? 'We will text a code to the contact phone on your restaurant account.'
-        : "Enter your work email and we'll send a reset link.";
+        ? 'We will text a code to the WhatsApp number on your owner/staff account.'
+        : "Enter your login email and we'll send a reset link.";
 
   return (
     <div style={{
@@ -114,8 +114,8 @@ export default function ForgotPasswordPage() {
             <div style={{ textAlign: 'center' }}>
               <div style={{ marginBottom: 20, padding: 16, background: C.successLight, border: `0.5px solid ${C.successBorder}`, borderRadius: 10 }}>
                 <p style={{ fontSize: 13, color: C.successDark, margin: 0, lineHeight: 1.6 }}>
-                  If an account exists for <strong>{email}</strong>, a password reset has been sent.
-                  Check your inbox and spam folder. If nothing arrives, ask your manager to resend from Settings → Staff.
+                  If an account exists for <strong>{email}</strong>, a password reset link has been sent.
+                  Check your inbox and spam folder. If nothing arrives, use WhatsApp OTP below.
                 </p>
               </div>
               <button
