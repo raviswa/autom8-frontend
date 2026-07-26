@@ -2572,6 +2572,71 @@ function TabWhatsApp({ apiClient, showToast, initialPath = null }) {
         </div>
       </div>
 
+      {(() => {
+        const digits = String(form.whatsapp_number || '').replace(/\D/g, '');
+        if (!digits) return null;
+        // No ?text= prefill — customer types their own greeting so we can detect language.
+        const waUrl = `https://wa.me/${digits}`;
+        const qr = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(waUrl)}`;
+        const downloadQr = async () => {
+          try {
+            const resp = await fetch(qr);
+            const blob = await resp.blob();
+            const blobUrl = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = blobUrl;
+            a.download = `whatsapp-checkin-qr-${digits}.png`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(blobUrl);
+          } catch (_err) {
+            window.open(qr, '_blank', 'noopener');
+          }
+        };
+        return (
+          <div style={{ ...CARD, marginBottom: 20 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 8 }}>Customer check-in QR</div>
+            <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 12, lineHeight: 1.5 }}>
+              Print this QR at the counter or table. It opens WhatsApp with an empty chat so the customer can type
+              Hi / வணக்கம் / नमस्ते / … — we detect their language from that greeting and keep using it.
+            </div>
+            <img
+              src={qr}
+              alt="WhatsApp check-in QR"
+              width={180}
+              height={180}
+              style={{ display: 'block', borderRadius: 8, border: `0.5px solid ${C.border}` }}
+            />
+            <div style={{ display: 'flex', gap: 10, marginTop: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              <button
+                type="button"
+                onClick={downloadQr}
+                style={{
+                  fontSize: 12, color: C.gold, background: 'none', border: 'none',
+                  textDecoration: 'underline', cursor: 'pointer', fontWeight: 500, padding: 0,
+                }}
+              >
+                Download QR
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard?.writeText(waUrl);
+                  showToast('WhatsApp link copied');
+                }}
+                style={{
+                  fontSize: 12, color: C.primary, background: 'none', border: 'none',
+                  textDecoration: 'underline', cursor: 'pointer', fontWeight: 500, padding: 0,
+                }}
+              >
+                Copy WhatsApp link
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Three paths */}
       {!isConnected || needsPin ? (
         <div style={{ marginBottom: 20 }}>
