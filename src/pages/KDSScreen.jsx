@@ -269,7 +269,7 @@ function buildKOTFromWSPayload(wsPayload, feedItems) {
     : wsPayload.service_type || 'Walk-in';
 
   return {
-    orderNumber:  orderNum,
+    orderNumber:  formatKitchenOrderNo(orderNum, wsPayload.token_number),
     tableLabel,
     serviceType:  wsPayload.service_type  || wsPayload.source || '',
     customerName: wsPayload.customer_name || '',
@@ -303,7 +303,7 @@ function buildKOTFromFeedItem(item, allItems) {
     : item.service_type || 'Walk-in';
 
   return {
-    orderNumber:  orderNum?.slice(-8) ?? item.id,
+    orderNumber:  formatKitchenOrderNo(orderNum, item.token_number),
     tableLabel,
     serviceType:  item.service_type || '',
     customerName: '',
@@ -357,7 +357,9 @@ function itemServiceLabel(item) {
   if (t.includes('takeaway')) return 'Takeaway';
   if (t.includes('delivery')) return 'Delivery';
   if (t.includes('dine'))     return 'Dine-in';
-  return item.order_item?.order?.order_number?.slice(-6) ?? 'Order';
+  if (item.token_number) return formatTokenDisplay(item.token_number);
+  const kitchenNo = formatKitchenOrderNo(item.order_item?.order?.order_number, item.token_number);
+  return kitchenNo !== '—' ? `Order ${kitchenNo}` : 'Order';
 }
 
 function itemServiceIcon(item) {
@@ -416,6 +418,47 @@ function formatTokenDisplay(tokenId) {
   return raw || '—';
 }
 
+/**
+ * Kitchen-facing order ID — numeric only (never booking UUID hex tails).
+ * ORD-153-2228b7cf → 153 · ORD-153-R2 → 153-2 · ORD-WA-1722… → last digits
+ */
+function formatKitchenOrderNo(orderNumber, tokenNumber) {
+  const raw = String(orderNumber || '').trim();
+  const tokenDigits = String(tokenNumber || '').replace(/^T-/i, '').replace(/\D/g, '');
+
+  // ORD-{token}-R{n} (reorder rounds)
+  let m = raw.match(/^ORD-([^/-]+)-R(\d+)$/i);
+  if (m) {
+    const base = String(m[1]).replace(/\D/g, '');
+    if (base) return `${base}-${m[2]}`;
+  }
+
+  // ORD-{token} or ORD-{token}-{hexBookingId}
+  m = raw.match(/^ORD-([^/-]+)(?:-[a-f0-9]{6,})?$/i);
+  if (m && !/^(B|WA)$/i.test(m[1])) {
+    const base = String(m[1]).replace(/\D/g, '');
+    if (base) return base;
+  }
+
+  // ORD-B-{hex} → decimal digits from hex fragment
+  m = raw.match(/^ORD-B-([a-f0-9]+)$/i);
+  if (m) {
+    try {
+      return BigInt(`0x${m[1]}`).toString().slice(-8);
+    } catch (_) { /* fall through */ }
+  }
+
+  // ORD-WA-{timestamp} or ORD-{timestamp}
+  m = raw.match(/^ORD-(?:WA-)?(\d+)$/i);
+  if (m) return m[1].slice(-8);
+
+  if (tokenDigits) return tokenDigits;
+
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length >= 3) return digits.slice(-8);
+  return '—';
+}
+
 function orderHeaderTitle(item) {
   const tableNum = item.order_item?.order?.table?.table_number;
   if (tableNum) return `TABLE : ${tableNum}`;
@@ -460,7 +503,7 @@ function groupItemsByOrder(items) {
       key,
       items: sorted,
       anchor,
-      orderNumber: orderNum?.slice(-8) ?? formatTokenDisplay(anchor.token_number) ?? anchor.id,
+      orderNumber: formatKitchenOrderNo(orderNum, anchor.token_number),
       serviceType: orderServiceTypeKey(anchor),
       aggregateStatus: aggregateOrderStatus(sorted),
       createdAt: new Date(createdAtMs).toISOString(),
@@ -512,7 +555,7 @@ function SkuPackCard({ group, onAdvanceAll }) {
   const ready = group.items.filter((i) => i.status === 'ready');
   const actionable = pending.length ? pending : packing;
   const orderHints = [...new Set(
-    group.items.map((i) => formatTokenDisplay(i.token_number) || i.order_item?.order?.order_number?.slice(-6)).filter(Boolean),
+    group.items.map((i) => formatTokenDisplay(i.token_number) || formatKitchenOrderNo(i.order_item?.order?.order_number, i.token_number)).filter(Boolean),
   )].slice(0, 8);
 
   let actionLabel = 'All packed';
@@ -645,7 +688,7 @@ function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll, pac
         <ShiprocketStatusBar
           apiClient={apiClient}
           tokenNumber={anchor.token_number}
-          orderNumber={anchor.order_item?.order?.order_number || orderNumber}
+          orderNumber={anchor.order_item?.order?.order_number || null}
           fullyPacked={fullyPacked}
           combinedMode={combinedMode}
         />
@@ -947,8 +990,10 @@ function HistoryView({ apiClient, active, queue = 'cooking' }) {
                 const name = item.order_item?.menu_item?.name
                   ?? item.item_name ?? 'Item';
                 const qty      = item.order_item?.quantity ?? 1;
-                const orderNum = item.order_item?.order?.order_number?.slice(-6)
-                  ?? item.id?.slice?.(0, 6) ?? '—';
+                const orderNum = formatKitchenOrderNo(
+                  item.order_item?.order?.order_number,
+                  item.token_number,
+                );
                 const tokenLabel = formatTokenDisplay(item.token_number);
                 const fulfilledAt = item.updated_at ?? item.created_at;
                 return (
