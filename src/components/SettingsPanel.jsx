@@ -2505,10 +2505,6 @@ function TabWhatsApp({ apiClient, showToast, initialPath = null }) {
 
   if (!form) return <div style={{ padding: 32, textAlign: 'center' }}><Spinner size={28} /></div>;
 
-  // #region agent log
-  fetch('http://127.0.0.1:7380/ingest/982e28a2-86ba-4a90-a485-a232585f9d4f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c76584'},body:JSON.stringify({sessionId:'c76584',runId:'pre-deploy',hypothesisId:'A',location:'SettingsPanel.jsx:TabWhatsApp',message:'TabWhatsApp mounted (new UI)',data:{hasAccountStatusUi:true,hasTemplateLibraryUi:true,isConnected:Boolean(form.waba_id&&form.phone_number_id&&form.access_token),connectPath,initialPath,esEnabled:Boolean(esConfig?.enabled)},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
-
   const hint = (text) => <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4, lineHeight: 1.5 }}>{text}</div>;
   const isConnected = Boolean(form.waba_id && form.phone_number_id && form.access_token);
   const needsPin = Boolean(form.whatsapp_needs_existing_pin || accountStatus?.whatsapp_needs_existing_pin);
@@ -3271,10 +3267,208 @@ const TABS = [
   { id: 'services',   label: '🚀 Services'    },
   { id: 'kitchen',    label: '🍳 Kitchen', ordersLabel: '📦 Orders' },
   { id: 'whatsapp',   label: '💬 WhatsApp'    },
+  { id: 'promotions', label: '🏷️ Promotions' },
   { id: 'staff',      label: '👥 Staff'       },
   // Brand tab — only visible when user is brand_owner (injected below via filteredTabs)
   { id: 'brand',      label: '🔗 Brand',  brandOnly: true },
 ];
+
+// ═════════════════════════════════════════════════════════════════════════════
+// TAB: Promotions (customer webcart promo codes)
+// ═════════════════════════════════════════════════════════════════════════════
+function TabPromotions({ apiClient, showToast }) {
+  const [items, setItems] = useState([]);
+  const [redemptions, setRedemptions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState({
+    code: '',
+    discount_type: 'percent',
+    discount_value: '10',
+    min_order_amount: '',
+    max_redemptions: '',
+  });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [p, r] = await Promise.all([
+        apiClient.get('/api/promotions'),
+        apiClient.get('/api/promotions/redemptions?limit=30'),
+      ]);
+      setItems(p.data.promotions || []);
+      setRedemptions(r.data.redemptions || []);
+    } catch (e) {
+      showToast(e.response?.data?.error || e.message || 'Failed to load promotions', 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [apiClient, showToast]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const create = async (e) => {
+    e.preventDefault();
+    try {
+      await apiClient.post('/api/promotions', {
+        code: form.code,
+        discount_type: form.discount_type,
+        discount_value: Number(form.discount_value),
+        min_order_amount: form.min_order_amount ? Number(form.min_order_amount) : null,
+        max_redemptions: form.max_redemptions ? Number(form.max_redemptions) : null,
+      });
+      setForm({
+        code: '',
+        discount_type: 'percent',
+        discount_value: '10',
+        min_order_amount: '',
+        max_redemptions: '',
+      });
+      showToast('Promo code created');
+      await load();
+    } catch (err) {
+      showToast(err.response?.data?.error || err.message || 'Create failed', 'error');
+    }
+  };
+
+  const toggle = async (promo) => {
+    try {
+      await apiClient.put(`/api/promotions/${promo.id}`, { is_active: !promo.is_active });
+      showToast(promo.is_active ? 'Deactivated' : 'Activated');
+      await load();
+    } catch (err) {
+      showToast(err.response?.data?.error || err.message || 'Update failed', 'error');
+    }
+  };
+
+  return (
+    <div>
+      <div style={{ marginBottom: 16, color: C.textMuted, fontSize: 13 }}>
+        Create promo codes for shoppers on your webcart. These do not discount Autom8 subscription billing.
+      </div>
+
+      <form onSubmit={create} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
+        <input
+          required
+          placeholder="CODE"
+          value={form.code}
+          onChange={(e) => setForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))}
+          style={{ padding: '8px 10px', borderRadius: 8, border: `1px solid ${C.border}`, minWidth: 120 }}
+        />
+        <select
+          value={form.discount_type}
+          onChange={(e) => setForm((f) => ({ ...f, discount_type: e.target.value }))}
+          style={{ padding: '8px 10px', borderRadius: 8, border: `1px solid ${C.border}` }}
+        >
+          <option value="percent">Percent %</option>
+          <option value="flat">Flat ₹</option>
+        </select>
+        <input
+          required
+          type="number"
+          min="0"
+          step="0.01"
+          value={form.discount_value}
+          onChange={(e) => setForm((f) => ({ ...f, discount_value: e.target.value }))}
+          style={{ padding: '8px 10px', borderRadius: 8, border: `1px solid ${C.border}`, width: 100 }}
+        />
+        <input
+          type="number"
+          min="0"
+          placeholder="Min order ₹"
+          value={form.min_order_amount}
+          onChange={(e) => setForm((f) => ({ ...f, min_order_amount: e.target.value }))}
+          style={{ padding: '8px 10px', borderRadius: 8, border: `1px solid ${C.border}`, width: 110 }}
+        />
+        <input
+          type="number"
+          min="1"
+          placeholder="Max uses"
+          value={form.max_redemptions}
+          onChange={(e) => setForm((f) => ({ ...f, max_redemptions: e.target.value }))}
+          style={{ padding: '8px 10px', borderRadius: 8, border: `1px solid ${C.border}`, width: 100 }}
+        />
+        <button type="submit" style={{
+          padding: '8px 14px', borderRadius: 8, border: 'none', background: C.primary,
+          color: '#fff', fontWeight: 600, cursor: 'pointer',
+        }}>
+          Add code
+        </button>
+      </form>
+
+      {loading ? (
+        <div style={{ color: C.textMuted }}>Loading…</div>
+      ) : (
+        <div style={{ overflowX: 'auto', marginBottom: 24 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr>
+                {['Code', 'Type', 'Value', 'Used', 'Active', ''].map((c) => (
+                  <th key={c} style={{ textAlign: 'left', padding: '8px 10px', borderBottom: `1px solid ${C.border}`, color: C.textMuted }}>{c}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((p) => (
+                <tr key={p.id}>
+                  <td style={{ padding: '8px 10px', borderBottom: `1px solid ${C.border}`, fontWeight: 600 }}>{p.code}</td>
+                  <td style={{ padding: '8px 10px', borderBottom: `1px solid ${C.border}` }}>{p.discount_type}</td>
+                  <td style={{ padding: '8px 10px', borderBottom: `1px solid ${C.border}` }}>{p.discount_value}</td>
+                  <td style={{ padding: '8px 10px', borderBottom: `1px solid ${C.border}` }}>
+                    {p.redemption_count || 0}{p.max_redemptions != null ? ` / ${p.max_redemptions}` : ''}
+                  </td>
+                  <td style={{ padding: '8px 10px', borderBottom: `1px solid ${C.border}` }}>{p.is_active ? 'yes' : 'no'}</td>
+                  <td style={{ padding: '8px 10px', borderBottom: `1px solid ${C.border}` }}>
+                    <button type="button" onClick={() => toggle(p)} style={{
+                      fontSize: 12, padding: '4px 10px', borderRadius: 6,
+                      border: `1px solid ${C.border}`, background: '#fff', cursor: 'pointer',
+                    }}>
+                      {p.is_active ? 'Deactivate' : 'Activate'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {!items.length && (
+                <tr>
+                  <td colSpan={6} style={{ padding: 16, color: C.textMuted }}>No promo codes yet.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div style={{ fontWeight: 600, marginBottom: 8 }}>Recent redemptions</div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr>
+              {['When', 'Code', 'Discount', 'Phone'].map((c) => (
+                <th key={c} style={{ textAlign: 'left', padding: '8px 10px', borderBottom: `1px solid ${C.border}`, color: C.textMuted }}>{c}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {redemptions.map((r) => (
+              <tr key={r.id}>
+                <td style={{ padding: '8px 10px', borderBottom: `1px solid ${C.border}` }}>
+                  {r.created_at ? new Date(r.created_at).toLocaleString('en-IN') : '—'}
+                </td>
+                <td style={{ padding: '8px 10px', borderBottom: `1px solid ${C.border}` }}>{r.code_snapshot}</td>
+                <td style={{ padding: '8px 10px', borderBottom: `1px solid ${C.border}` }}>₹{Number(r.discount_amount || 0).toFixed(0)}</td>
+                <td style={{ padding: '8px 10px', borderBottom: `1px solid ${C.border}` }}>{r.customer_phone || '—'}</td>
+              </tr>
+            ))}
+            {!redemptions.length && (
+              <tr>
+                <td colSpan={4} style={{ padding: 16, color: C.textMuted }}>No redemptions yet.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 // ═════════════════════════════════════════════════════════════════════════════
 // TAB: Brand (brand_owner only)
@@ -3539,6 +3733,7 @@ export default function SettingsPanel() {
     services:   <TabServices   apiClient={apiClient} showToast={showToast} refreshSubscription={refreshSubscription} lobType={lobType} />,
     kitchen:    <TabKitchen    apiClient={apiClient} showToast={showToast} paidFeatures={paidFeatures} lobType={lobType} />,
     whatsapp:   <TabWhatsApp   apiClient={apiClient} showToast={showToast} initialPath={searchParams.get('path')} />,
+    promotions: <TabPromotions apiClient={apiClient} showToast={showToast} />,
     staff:      <TabStaff      apiClient={apiClient} showToast={showToast} lobType={lobType} />,
     brand:      <TabBrand      apiClient={apiClient} showToast={showToast} user={user} />,
   };

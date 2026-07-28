@@ -317,6 +317,10 @@ const makeDefault = () => ({
   menu_catalog: [],
   menu_file: null,
 
+  // Referral attribution
+  referral_source: "",
+  referrer_waba: "",
+
   // Internal
   contact_phone: "", manager_phone: "", address_line1: "",
   idempotency_key: (typeof crypto !== "undefined" && crypto.randomUUID)
@@ -326,7 +330,7 @@ const makeDefault = () => ({
 
 // ── Validation rules per step ─────────────────────────────────────────────────
 const REQUIRED = {
-  0: ["business_family", "business_vertical", "business_type", "name", "display_name", "slug", "city", "country_code", "owner_name", "email", "owner_password", "owner_whatsapp"],
+  0: ["business_family", "business_vertical", "business_type", "name", "display_name", "slug", "city", "country_code", "owner_name", "email", "owner_password", "owner_whatsapp", "referral_source"],
   1: ["embedded_signup_code", "waba_id", "phone_number_id"],
   2: [],
   3: [],
@@ -760,8 +764,33 @@ function Step0({ f, set, errors }) {
 
 function Step1({ f, set, errors }) {
   const [slugStatus, setSlugStatus] = useState("idle"); // idle|checking|ok|taken|error
+  const [referrerName, setReferrerName] = useState("");
   const slugTimer = useRef(null);
+  const referrerTimer = useRef(null);
   const e = (k) => errors.includes(k);
+
+  useEffect(() => {
+    clearTimeout(referrerTimer.current);
+    if (f.referral_source !== "existing_owner") {
+      setReferrerName("");
+      return undefined;
+    }
+    const digits = String(f.referrer_waba || "").replace(/\D/g, "");
+    if (digits.length < 10) {
+      setReferrerName("");
+      return undefined;
+    }
+    referrerTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/referrer-lookup?waba=${encodeURIComponent(digits)}`);
+        const data = await res.json();
+        setReferrerName(data.found && data.name ? data.name : "");
+      } catch {
+        setReferrerName("");
+      }
+    }, 500);
+    return () => clearTimeout(referrerTimer.current);
+  }, [f.referral_source, f.referrer_waba]);
 
   const handleCountryChange = (code) => {
     const country = COUNTRIES.find((c) => c.code === code);
@@ -824,7 +853,7 @@ function Step1({ f, set, errors }) {
       ),
 
       // Slug
-      h(Field, { label: "Subdomain / Slug", hint: "Your unique Munafe URL handle", error: e("slug") ? "required" : "", full: true },
+      h(Field, { label: "Subdomain / Slug", hint: "Your unique Autom8 Works URL handle", error: e("slug") ? "required" : "", full: true },
         h("div", { className: `mn-slug-row${e("slug") ? " err" : ""}` },
           h("span", { className: "mn-slug-pre" }, "autom8.works/"),
           h("input", {
@@ -955,6 +984,51 @@ function Step1({ f, set, errors }) {
         h(Field, { label: "Table Count", hint: "Total physical tables" },
           h(Input, { type: "number", value: f.table_count, onChange: (v) => set("table_count", parseInt(v) || 0) })
         )
+      )
+    ),
+
+    // Referral source
+    h("div", { className: "mn-section" },
+      h("p", { className: "mn-section-title" }, "How did you hear about us? *"),
+      h(Field, {
+        label: "Referral source",
+        error: e("referral_source") ? "required" : "",
+        full: true,
+      },
+        h(SelectField, {
+          value: f.referral_source || "",
+          onChange: (v) => {
+            set("referral_source", v);
+            if (v !== "existing_owner") set("referrer_waba", "");
+          },
+          options: [
+            { value: "", label: "Select one…" },
+            { value: "existing_owner", label: "Existing restaurant / LOB owner" },
+            { value: "sales", label: "Autom8 Works sales" },
+            { value: "google", label: "Google / search" },
+            { value: "social", label: "Social media" },
+            { value: "friend", label: "Friend or colleague" },
+            { value: "other", label: "Other" },
+          ],
+        })
+      ),
+      f.referral_source === "existing_owner" && h(Fragment, null,
+        h(Field, {
+          label: "Referrer WhatsApp business number (WABA)",
+          hint: "The existing owner's business WhatsApp number — they get 1 free month if it matches",
+          error: e("referrer_waba") ? "Enter a valid WhatsApp number" : "",
+          full: true,
+        },
+          h(Input, {
+            value: f.referrer_waba || "",
+            onChange: (v) => set("referrer_waba", v),
+            placeholder: "9198XXXXXXXX",
+            hasError: e("referrer_waba"),
+          })
+        ),
+        referrerName && h("p", {
+          style: { marginTop: 6, fontSize: 13, color: "var(--mn-muted)" },
+        }, `Matched referrer: ${referrerName}`)
       )
     ),
   );
@@ -1279,6 +1353,17 @@ function Step5({ form, set, onRedirect }) {
     ["Owner email",     form.email || "—"],
     ["Owner WhatsApp",  form.owner_whatsapp || "—"],
     ["WhatsApp (WABA)", form.es_connected ? (form.whatsapp_number || "Connected") : (form.whatsapp_number || "—")],
+    ["Heard about us",  ({
+      existing_owner: "Existing owner",
+      sales: "Sales",
+      google: "Google / search",
+      social: "Social media",
+      friend: "Friend / colleague",
+      other: "Other",
+    })[form.referral_source] || form.referral_source || "—"],
+    ...(form.referral_source === "existing_owner"
+      ? [["Referrer WABA", form.referrer_waba || "—"]]
+      : []),
     ["Timezone",        form.timezone],
     ["Payment mode",    form.payment_mode],
     [cfg.catalogStepLabel, form.menu_file?.name || (form.menu_catalog?.length ? `${form.menu_catalog.length} items` : "Not uploaded")],
@@ -1417,6 +1502,10 @@ function buildPayload(form) {
     has_dinner:       form.has_dinner,
     cuisines:         form.categories,
     idempotency_key:  form.idempotency_key,
+    referral_source:  form.referral_source || null,
+    referrer_waba:    form.referral_source === "existing_owner"
+      ? (form.referrer_waba || null)
+      : null,
   };
 }
 
@@ -1492,6 +1581,12 @@ function MunafeRegistrationForm() {
       if (form.email && !emailOk(form.email) && !bad.includes("email")) {
         bad.push("email");
       }
+      if (form.referral_source === "existing_owner") {
+        const digits = String(form.referrer_waba || "").replace(/\D/g, "");
+        if (digits.length < 10 && !bad.includes("referrer_waba")) {
+          bad.push("referrer_waba");
+        }
+      }
     }
     setErrors(bad);
     if (bad.length) return false;
@@ -1548,7 +1643,7 @@ function MunafeRegistrationForm() {
     h("div", { className: "mn-header" },
       h("div", { className: "mn-header-logo" },
         h("span", null, (getVertical(form.business_vertical)?.icon || familyMeta?.icon || cfg.icon || "🍽️")),
-        h("span", null, "Munafe")
+        h("span", null, "Autom8 Works")
       ),
       h("p", { className: "mn-header-sub" },
         form.business_vertical || form.business_family

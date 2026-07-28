@@ -38,6 +38,8 @@ export default function BillingPage() {
   const [midForm, setMidForm] = useState({ merchant_id: '', merchant_name: '', partner_referral_code: '' });
   const [midMsg, setMidMsg] = useState('');
   const [midSaving, setMidSaving] = useState(false);
+  const [referralUrl, setReferralUrl] = useState(null);
+  const [referralBusy, setReferralBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -57,6 +59,21 @@ export default function BillingPage() {
           merchant_name: g?.merchant_name || '',
           partner_referral_code: g?.partner_referral_code || '',
         });
+        try {
+          const gw = await apiClient.get('/api/subscription/payment-gateway');
+          setReferralUrl(gw.data?.referral_url || null);
+          const row = gw.data?.gateway;
+          if (row) {
+            setMidForm({
+              merchant_id: row.merchant_id || '',
+              merchant_name: row.merchant_name || '',
+              partner_referral_code: row.partner_referral_code || '',
+            });
+            setSingle((prev) => (prev ? { ...prev, phonepe_merchant: row } : prev));
+          }
+        } catch {
+          setReferralUrl(null);
+        }
       }
     } catch (e) {
       setError(e.response?.data?.error || e.message || 'Failed to load billing');
@@ -110,6 +127,21 @@ export default function BillingPage() {
       setMidMsg(e.response?.data?.error || e.message || 'Could not save PhonePe merchant ID');
     } finally {
       setMidSaving(false);
+    }
+  };
+
+  const startPhonePeReferral = async () => {
+    if (!referralUrl) return;
+    setReferralBusy(true);
+    setMidMsg('');
+    try {
+      window.open(referralUrl, '_blank', 'noopener,noreferrer');
+      await apiClient.post('/api/subscription/payment-gateway/referral-intent');
+      await load();
+    } catch (e) {
+      setMidMsg(e.response?.data?.error || e.message || 'Could not record PhonePe signup intent');
+    } finally {
+      setReferralBusy(false);
     }
   };
 
@@ -268,6 +300,21 @@ export default function BillingPage() {
               <p className="text-xs text-slate-500 mb-3">
                 For partnership tracking only — we never ask for your PhonePe salt key or customer payment details.
               </p>
+              {referralUrl && !String(single.phonepe_merchant?.merchant_id || midForm.merchant_id || '').trim() ? (
+                <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                  <p className="text-xs text-emerald-900 mb-2">
+                    New to PhonePe? Start partner onboarding, then paste your merchant ID below when you have it.
+                  </p>
+                  <button
+                    type="button"
+                    disabled={referralBusy}
+                    onClick={startPhonePeReferral}
+                    className="bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg"
+                  >
+                    {referralBusy ? 'Opening…' : 'Get started →'}
+                  </button>
+                </div>
+              ) : null}
               <div className="grid gap-2 sm:grid-cols-2">
                 <input
                   value={midForm.merchant_id}

@@ -59,6 +59,12 @@ export default function SetupStatusPage() {
 
   const restaurantId = user?.restaurant_id || user?.outlets?.[0]?.id || 'unknown';
   const seenKey = `autom8_setup_seen_${restaurantId}`;
+  const phonepeSkipKey = `autom8_phonepe_referral_skip_${restaurantId}`;
+  const [phonepeSkipped, setPhonepeSkipped] = useState(() => {
+    try { return localStorage.getItem(phonepeSkipKey) === '1'; } catch { return false; }
+  });
+  const [phonepeIntentBusy, setPhonepeIntentBusy] = useState(false);
+  const [linkBusy, setLinkBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -83,12 +89,6 @@ export default function SetupStatusPage() {
   }, [apiClient, seenKey]);
 
   useEffect(() => { load(); }, [load]);
-
-  // #region agent log
-  useEffect(() => {
-    fetch('http://127.0.0.1:7380/ingest/982e28a2-86ba-4a90-a485-a232585f9d4f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c76584'},body:JSON.stringify({sessionId:'c76584',runId:'pre-deploy',hypothesisId:'C',location:'SetupStatusPage.jsx',message:'SetupStatusPage mounted (activation checklist)',data:{hasThreePathsUi:true,restaurantId,loading,hasStatus:Boolean(status),setupComplete:status?.setup_complete??null},timestamp:Date.now()})}).catch(()=>{});
-  }, [restaurantId, loading, status]);
-  // #endregion
 
   const connectWhatsApp = async (existingPin) => {
     setConnecting(true);
@@ -137,12 +137,27 @@ export default function SetupStatusPage() {
   };
 
   const goDashboard = (forceDismiss = false) => {
-    if (forceDismiss || status?.setup_complete) {
+    if (forceDismiss || status?.setup_complete || status?.lifetime) {
       try { sessionStorage.setItem(seenKey, '1'); } catch { /* ignore */ }
     }
     const role = user?.role;
     if (role === 'brand_owner' || role === 'brand_manager') navigate('/dashboard/brand');
     else navigate('/dashboard/owner');
+  };
+
+  const linkExistingWhatsApp = async () => {
+    setLinkBusy(true);
+    setError('');
+    try {
+      await apiClient.post('/api/onboarding/link-existing-waba', {
+        whatsapp_number: status?.linkable_whatsapp_number || undefined,
+      });
+      await load();
+    } catch (e) {
+      setError(e.response?.data?.error || e.message || 'Could not link existing WhatsApp');
+    } finally {
+      setLinkBusy(false);
+    }
   };
 
   if (loading) {
@@ -156,7 +171,6 @@ export default function SetupStatusPage() {
   const sub = status?.subscription || {};
   const needsPin = Boolean(status?.whatsapp_needs_existing_pin);
   const waOk = Boolean(status?.whatsapp_connected) && !needsPin;
-  const onlyWaGap = status && !waOk && status?.catalog_uploaded && status?.fulfillment_configured;
   const isPackaged = ['food_products', 'retail', 'psl', 'b2b', 'jewellery'].includes(
     String(status?.lob_type || '').toLowerCase(),
   );
@@ -173,11 +187,36 @@ export default function SetupStatusPage() {
     : (status?.fulfillment_hint
       || (isPackaged ? 'Enable pickup or delivery in Settings' : 'Enable dine-in, takeaway, or delivery in Settings'));
 
+  const phonepeUrl = status?.phonepe_partner_referral_url || null;
+  const phonepeMerchant = status?.phonepe_merchant || {};
+  const phonepeOk = Boolean(phonepeMerchant.has_merchant_id)
+    || String(phonepeMerchant.status || '').toLowerCase() === 'live';
+  const showPhonepeRow = Boolean(phonepeUrl) && !phonepeSkipped;
+
+  const openPhonePeReferral = async () => {
+    if (!phonepeUrl) return;
+    setPhonepeIntentBusy(true);
+    try {
+      window.open(phonepeUrl, '_blank', 'noopener,noreferrer');
+      await apiClient.post('/api/subscription/payment-gateway/referral-intent');
+      await load();
+    } catch (e) {
+      setError(e.response?.data?.error || e.message || 'Could not record PhonePe signup intent');
+    } finally {
+      setPhonepeIntentBusy(false);
+    }
+  };
+
+  const skipPhonePe = () => {
+    try { localStorage.setItem(phonepeSkipKey, '1'); } catch { /* ignore */ }
+    setPhonepeSkipped(true);
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-10">
       <div className="max-w-lg mx-auto">
         <div className="text-center mb-8">
-          <div className="text-sm font-semibold tracking-wide text-emerald-800 uppercase mb-2">Welcome to Munafe</div>
+          <div className="text-sm font-semibold tracking-wide text-emerald-800 uppercase mb-2">Welcome to Autom8 Works</div>
           <h1 className="text-2xl font-semibold text-slate-900">
             {status?.business_name || 'Your business'} activation
           </h1>
@@ -201,8 +240,8 @@ export default function SetupStatusPage() {
           <CheckRow
             ok={Boolean(status)}
             warn={!status}
-            label="Business details"
-            detail={status ? 'Saved at registration' : 'Business record incomplete'}
+            label="Account created"
+            detail={status ? (status.checklist?.find((c) => c.id === 'account_created')?.detail || 'Your Autom8 business account is ready') : 'Business record incomplete'}
           />
           <CheckRow
             ok={waOk}
@@ -239,6 +278,25 @@ export default function SetupStatusPage() {
                 </div>
               ) : !status?.whatsapp_connected ? (
                 <div>
+                  {status?.whatsapp_linkable ? (
+                    <div className="mb-3">
+                      <button
+                        type="button"
+                        disabled={linkBusy}
+                        onClick={linkExistingWhatsApp}
+                        className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg"
+                      >
+                        {linkBusy
+                          ? 'Linking…'
+                          : `Link existing WhatsApp${status.linkable_whatsapp_number ? ` (${status.linkable_whatsapp_number})` : ''}`}
+                      </button>
+                      {status.linkable_source_name ? (
+                        <div className="text-xs text-slate-500 mt-1">
+                          Already live on Autom8 as {status.linkable_source_name}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {!showWaPaths ? (
                     <button
                       type="button"
@@ -301,18 +359,60 @@ export default function SetupStatusPage() {
               </Link>
             ) : null}
           />
+          {showPhonepeRow ? (
+            <CheckRow
+              ok={phonepeOk}
+              warn={!phonepeOk}
+              label="Accept PhonePe payments from customers"
+              detail={
+                phonepeOk
+                  ? 'PhonePe merchant ID on file'
+                  : 'Optional — open PhonePe partner signup, then paste your MID under Billing'
+              }
+              action={!phonepeOk ? (
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    disabled={phonepeIntentBusy}
+                    onClick={openPhonePeReferral}
+                    className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white text-sm font-semibold py-2 rounded-lg"
+                  >
+                    {phonepeIntentBusy ? 'Opening…' : 'Get started with PhonePe →'}
+                  </button>
+                  <div className="flex flex-wrap gap-3 text-sm">
+                    <Link to="/billing" className="font-semibold text-emerald-800 underline">
+                      Paste MID in Billing
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={skipPhonePe}
+                      className="font-semibold text-slate-600 underline"
+                    >
+                      Skip for now
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <Link to="/billing" className="text-sm font-semibold text-emerald-800 underline">
+                  View in Billing
+                </Link>
+              )}
+            />
+          ) : null}
           <CheckRow
-            ok={sub.status === 'active'}
-            warn={sub.status === 'trial' || sub.status === 'past_due' || !sub.status}
+            ok={status?.lifetime || sub.lifetime || sub.status === 'active'}
+            warn={!status?.lifetime && !sub.lifetime && (sub.status === 'trial' || sub.status === 'past_due' || !sub.status)}
             label="Subscription"
             detail={
-              `₹${sub.price ?? 1000}/month · ${
-                sub.status === 'trial'
-                  ? `Trial${sub.trial_ends_at ? ` ends ${new Date(sub.trial_ends_at).toLocaleDateString()}` : ''}`
-                  : (sub.status || 'unknown')
-              }`
+              status?.lifetime || sub.lifetime
+                ? 'Autom8 Works demo — lifetime access (no subscription billing)'
+                : `₹${sub.price ?? 1000}/month · ${
+                  sub.status === 'trial'
+                    ? `Trial${sub.trial_ends_at ? ` ends ${new Date(sub.trial_ends_at).toLocaleDateString()}` : ''}`
+                    : (sub.status || 'unknown')
+                }`
             }
-            action={(sub.status === 'trial' || sub.status === 'past_due') ? (
+            action={(!status?.lifetime && !sub.lifetime && (sub.status === 'trial' || sub.status === 'past_due')) ? (
               <Link to="/billing" className="text-sm font-semibold text-emerald-800 underline">
                 View billing
               </Link>
@@ -321,7 +421,7 @@ export default function SetupStatusPage() {
         </div>
 
         <div className="flex flex-col gap-3">
-          {status?.setup_complete ? (
+          {(status?.setup_complete || status?.lifetime) ? (
             <button
               type="button"
               onClick={() => goDashboard(true)}
@@ -329,24 +429,27 @@ export default function SetupStatusPage() {
             >
               Go to Dashboard
             </button>
-          ) : onlyWaGap ? (
-            <button
-              type="button"
-              disabled={connecting}
-              onClick={() => { setShowWaPaths(true); }}
-              className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-3 rounded-xl"
-            >
-              {connecting ? 'Connecting…' : 'Finish WhatsApp setup'}
-            </button>
-          ) : (
+          ) : null}
+          {!status?.setup_complete && !status?.lifetime ? (
             <>
-              <button
-                type="button"
-                onClick={load}
-                className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-3 rounded-xl"
-              >
-                Refresh activation status
-              </button>
+              {!waOk ? (
+                <button
+                  type="button"
+                  disabled={connecting}
+                  onClick={() => { setShowWaPaths(true); }}
+                  className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-3 rounded-xl"
+                >
+                  {connecting ? 'Connecting…' : 'Finish WhatsApp setup'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={load}
+                  className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-3 rounded-xl"
+                >
+                  Refresh activation status
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => goDashboard(true)}
@@ -355,7 +458,7 @@ export default function SetupStatusPage() {
                 Continue to dashboard anyway
               </button>
             </>
-          )}
+          ) : null}
           <Link to="/billing" className="text-center text-sm text-slate-500 hover:text-slate-800">
             Subscription & offers
           </Link>
