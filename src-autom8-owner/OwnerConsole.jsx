@@ -112,7 +112,7 @@ function Login({ onLogin }) {
         setErr('Invalid username or password');
         return;
       }
-      await request('GET', '/api/admin/referral-tiers');
+      await request('GET', '/api/admin/ping');
       onLogin(secret.trim());
     } catch (ex) {
       setErr(ex.status === 403 ? 'Invalid username or password' : (ex.message || 'Login failed'));
@@ -125,9 +125,11 @@ function Login({ onLogin }) {
     h('form', { style: styles.loginCard, onSubmit: submit },
       h('h1', { style: styles.h1 }, 'Autom8 Works'),
       h('p', { style: styles.muted }, 'Platform owner console'),
-      h('label', { style: styles.label }, 'Username'),
+      h('label', { style: styles.label, htmlFor: 'platform-username' }, 'Username'),
       h('input', {
         type: 'text',
+        name: 'username',
+        id: 'platform-username',
         autoComplete: 'username',
         value: username,
         onChange: (e) => setUsername(e.target.value),
@@ -136,9 +138,11 @@ function Login({ onLogin }) {
         required: true,
         placeholder: 'autom8.admin',
       }),
-      h('label', { style: styles.label }, 'Password'),
+      h('label', { style: styles.label, htmlFor: 'platform-password' }, 'Password'),
       h('input', {
         type: 'password',
+        name: 'password',
+        id: 'platform-password',
         autoComplete: 'current-password',
         value: secret,
         onChange: (e) => setSecret(e.target.value),
