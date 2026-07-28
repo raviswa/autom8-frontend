@@ -39,7 +39,7 @@ export function AuthProvider({ children }) {
       const refreshTokenValue = localStorage.getItem('refreshToken');
 
       const onLoginPage = typeof window !== 'undefined'
-        && ['/login', '/forgot-password', '/reset-password'].includes(window.location.pathname);
+        && ['/login', '/forgot-password', '/reset-password', '/platform'].includes(window.location.pathname);
 
       if (token && !onLoginPage) {
         try {

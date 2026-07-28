@@ -22,6 +22,7 @@ import BillingPage from './pages/BillingPage';
 import SoftLockPage from './pages/SoftLockPage';
 import SubscriptionStatusBar from './components/SubscriptionStatusBar';
 import SetupProgressBar from './components/SetupProgressBar';
+import OwnerConsole from '../src-autom8-owner/OwnerConsole';
 
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
@@ -190,6 +191,8 @@ function AppRoutes() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
+      {/* Autom8 Works platform owner console (KDS secret; not restaurant JWT) */}
+      <Route path="/platform" element={<OwnerConsole />} />
 
       {/* ── Setup / Billing / Soft-lock ── */}
       <Route

@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { resolveApiBase } from '../src/config/api';
 
 const h = React.createElement;
 const SECRET_KEY = 'autom8_owner_kds_secret';
+const PLATFORM_USERNAME = 'autom8.admin';
 
 const NAV = [
   { id: 'clients', label: 'New Clients' },
@@ -29,7 +31,12 @@ const ALL_FEATURES = [...ORDER_FEATURES, ...INFRA_FEATURES];
 
 function apiBaseFromDom() {
   const el = document.getElementById('autom8-owner-root');
-  return (el && el.dataset.api) || import.meta.env.VITE_API_URL || 'https://api.autom8.works';
+  if (el && el.dataset.api) return String(el.dataset.api).replace(/\/$/, '');
+  try {
+    return String(resolveApiBase() || '').replace(/\/$/, '') || 'https://api.autom8.works';
+  } catch {
+    return 'https://api.autom8.works';
+  }
 }
 
 function useApi(secret) {
@@ -90,6 +97,7 @@ function Shell({ screen, setScreen, onLogout, children }) {
 }
 
 function Login({ onLogin }) {
+  const [username, setUsername] = useState('');
   const [secret, setSecret] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -100,10 +108,14 @@ function Login({ onLogin }) {
     setBusy(true);
     setErr('');
     try {
+      if (username.trim() !== PLATFORM_USERNAME) {
+        setErr('Invalid username or password');
+        return;
+      }
       await request('GET', '/api/admin/referral-tiers');
       onLogin(secret.trim());
     } catch (ex) {
-      setErr(ex.status === 403 ? 'Invalid secret' : (ex.message || 'Login failed'));
+      setErr(ex.status === 403 ? 'Invalid username or password' : (ex.message || 'Login failed'));
     } finally {
       setBusy(false);
     }
@@ -112,20 +124,32 @@ function Login({ onLogin }) {
   return h('div', { style: styles.loginWrap },
     h('form', { style: styles.loginCard, onSubmit: submit },
       h('h1', { style: styles.h1 }, 'Autom8 Works'),
-      h('p', { style: styles.muted }, 'Platform owner console — enter your ops secret.'),
-      h('label', { style: styles.label }, 'AUTOM8_KDS_SECRET'),
+      h('p', { style: styles.muted }, 'Platform owner console'),
+      h('label', { style: styles.label }, 'Username'),
       h('input', {
-        type: 'password',
-        value: secret,
-        onChange: (e) => setSecret(e.target.value),
+        type: 'text',
+        autoComplete: 'username',
+        value: username,
+        onChange: (e) => setUsername(e.target.value),
         style: styles.input,
         autoFocus: true,
         required: true,
+        placeholder: 'autom8.admin',
+      }),
+      h('label', { style: styles.label }, 'Password'),
+      h('input', {
+        type: 'password',
+        autoComplete: 'current-password',
+        value: secret,
+        onChange: (e) => setSecret(e.target.value),
+        style: styles.input,
+        required: true,
+        placeholder: 'AUTOM8_KDS_SECRET',
       }),
       err && h('div', { style: styles.error }, err),
       h('button', {
         type: 'submit',
-        disabled: busy || !secret.trim(),
+        disabled: busy || !username.trim() || !secret.trim(),
         style: styles.primaryBtn,
       }, busy ? 'Checking…' : 'Enter console'),
     ),
