@@ -320,6 +320,9 @@ const makeDefault = () => ({
   // Referral attribution
   referral_source: "",
   referrer_waba: "",
+  signup_source_detail: "",
+  utm_source: "",
+  utm_campaign: "",
 
   // Internal
   contact_phone: "", manager_phone: "", address_line1: "",
@@ -1029,6 +1032,16 @@ function Step1({ f, set, errors }) {
         referrerName && h("p", {
           style: { marginTop: 6, fontSize: 13, color: "var(--mn-muted)" },
         }, `Matched referrer: ${referrerName}`)
+      ),
+      h(Field, {
+        label: "Anything else we should know? (optional)",
+        full: true,
+      },
+        h(Input, {
+          value: f.signup_source_detail || "",
+          onChange: (v) => set("signup_source_detail", v),
+          placeholder: "Campaign name, sales contact, …",
+        })
       )
     ),
   );
@@ -1506,6 +1519,9 @@ function buildPayload(form) {
     referrer_waba:    form.referral_source === "existing_owner"
       ? (form.referrer_waba || null)
       : null,
+    signup_source_detail: form.signup_source_detail || null,
+    utm_source: form.utm_source || null,
+    utm_campaign: form.utm_campaign || null,
   };
 }
 
@@ -1529,6 +1545,23 @@ function MunafeRegistrationForm() {
   useEffect(() => {
     const d = loadDraft();
     if (d?.form) setDraftPrompt(d);
+  }, []);
+
+  // Capture UTM / detail from landing URL once (do not overwrite draft values).
+  useEffect(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const utm_source = sp.get("utm_source");
+      const utm_campaign = sp.get("utm_campaign");
+      const signup_source_detail = sp.get("signup_source_detail") || sp.get("ref_detail");
+      if (!utm_source && !utm_campaign && !signup_source_detail) return;
+      setForm((f) => ({
+        ...f,
+        utm_source: f.utm_source || utm_source || "",
+        utm_campaign: f.utm_campaign || utm_campaign || "",
+        signup_source_detail: f.signup_source_detail || signup_source_detail || "",
+      }));
+    } catch { /* ignore */ }
   }, []);
 
   const set = useCallback((k, v) => {

@@ -3,14 +3,24 @@ import { resolveApiBase } from '../src/config/api';
 
 const h = React.createElement;
 const SECRET_KEY = 'autom8_owner_kds_secret';
-const PLATFORM_USERNAME = 'autom8.admin';
+const ROLE_KEY = 'autom8_owner_role';
+const USER_KEY = 'autom8_owner_username';
+
+const PLATFORM_USERS = {
+  'autom8.admin': 'super_admin',
+  'autom8.support': 'support_readonly',
+};
 
 const NAV = [
-  { id: 'clients', label: 'New Clients' },
+  { id: 'tenants', label: 'Tenants' },
+  { id: 'churn', label: 'Churn' },
+  { id: 'billing', label: 'Billing' },
+  { id: 'referrals', label: 'Referrals' },
   { id: 'failures', label: 'Registration Failures' },
   { id: 'phonepe', label: 'PhonePe Partnership' },
   { id: 'offers', label: 'Offer Codes' },
   { id: 'paid', label: 'Paid Features' },
+  { id: 'wa_cost', label: 'WhatsApp Cost' },
 ];
 
 const ORDER_FEATURES = [
@@ -28,6 +38,15 @@ const INFRA_FEATURES = [
   'analytics',
 ];
 const ALL_FEATURES = [...ORDER_FEATURES, ...INFRA_FEATURES];
+
+const SOURCE_LABELS = {
+  existing_owner: 'Referral',
+  google: 'Organic / ads',
+  social: 'Organic / ads',
+  sales: 'Outreach',
+  friend: 'Referral',
+  other: 'Other',
+};
 
 function apiBaseFromDom() {
   const el = document.getElementById('autom8-owner-root');
@@ -72,12 +91,12 @@ function fmtDate(iso) {
   }
 }
 
-function Shell({ screen, setScreen, onLogout, children }) {
+function Shell({ screen, setScreen, onLogout, role, children }) {
   return h('div', { style: styles.app },
     h('aside', { style: styles.sidebar },
       h('div', { style: styles.brand },
         h('div', { style: styles.brandTitle }, 'Autom8 Works'),
-        h('div', { style: styles.brandSub }, 'Owner console'),
+        h('div', { style: styles.brandSub }, role === 'support_readonly' ? 'Support console' : 'Owner console'),
       ),
       h('nav', { style: styles.nav },
         NAV.map((n) => h('button', {
@@ -85,7 +104,7 @@ function Shell({ screen, setScreen, onLogout, children }) {
           type: 'button',
           style: {
             ...styles.navBtn,
-            ...(screen === n.id ? styles.navBtnActive : {}),
+            ...(screen === n.id || (screen === 'tenant_detail' && n.id === 'tenants') ? styles.navBtnActive : {}),
           },
           onClick: () => setScreen(n.id),
         }, n.label)),
@@ -108,12 +127,22 @@ function Login({ onLogin }) {
     setBusy(true);
     setErr('');
     try {
-      if (username.trim() !== PLATFORM_USERNAME) {
+      const expectedRole = PLATFORM_USERS[username.trim()];
+      if (!expectedRole) {
         setErr('Invalid username or password');
         return;
       }
-      await request('GET', '/api/admin/ping');
-      onLogin(secret.trim());
+      const data = await request('GET', '/api/admin/ping');
+      const role = data.role || expectedRole;
+      if (expectedRole === 'super_admin' && role !== 'super_admin') {
+        setErr('Invalid username or password');
+        return;
+      }
+      if (expectedRole === 'support_readonly' && role !== 'support_readonly') {
+        setErr('Invalid username or password');
+        return;
+      }
+      onLogin(secret.trim(), role, username.trim());
     } catch (ex) {
       setErr(ex.status === 403 ? 'Invalid username or password' : (ex.message || 'Login failed'));
     } finally {
@@ -136,7 +165,7 @@ function Login({ onLogin }) {
         style: styles.input,
         autoFocus: true,
         required: true,
-        placeholder: 'autom8.admin',
+        placeholder: 'autom8.admin or autom8.support',
       }),
       h('label', { style: styles.label, htmlFor: 'platform-password' }, 'Password'),
       h('input', {
@@ -148,7 +177,7 @@ function Login({ onLogin }) {
         onChange: (e) => setSecret(e.target.value),
         style: styles.input,
         required: true,
-        placeholder: 'AUTOM8_KDS_SECRET',
+        placeholder: 'Matching platform secret',
       }),
       err && h('div', { style: styles.error }, err),
       h('button', {
@@ -160,8 +189,11 @@ function Login({ onLogin }) {
   );
 }
 
-function ClientsScreen({ api }) {
+function TenantsScreen({ api, onOpenTenant }) {
   const [q, setQ] = useState('');
+  const [lob, setLob] = useState('');
+  const [status, setStatus] = useState('');
+  const [source, setSource] = useState('');
   const [page, setPage] = useState(1);
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
@@ -173,26 +205,56 @@ function ClientsScreen({ api }) {
     try {
       const qs = new URLSearchParams({ page: String(page), limit: '25' });
       if (q.trim()) qs.set('q', q.trim());
+      if (lob) qs.set('lob_type', lob);
+      if (status) qs.set('status', status);
+      if (source) qs.set('referral_source', source);
       setData(await api.request('GET', `/api/admin/tenants?${qs}`));
     } catch (ex) {
       setErr(ex.message);
     } finally {
       setLoading(false);
     }
-  }, [api, page, q]);
+  }, [api, page, q, lob, status, source]);
 
   useEffect(() => { load(); }, [load]);
 
   return h('div', null,
-    h('h2', { style: styles.h2 }, 'New Clients'),
-    h('p', { style: styles.muted }, 'Newest restaurant / LOB tenants first.'),
+    h('h2', { style: styles.h2 }, 'Tenants'),
+    h('p', { style: styles.muted }, 'Roster with activation risk, signup source, and MRR.'),
     h('div', { style: styles.toolbar },
       h('input', {
-        style: { ...styles.input, maxWidth: 280 },
+        style: { ...styles.input, maxWidth: 220 },
         placeholder: 'Search name, email, WABA…',
         value: q,
         onChange: (e) => { setPage(1); setQ(e.target.value); },
       }),
+      h('select', {
+        style: { ...styles.input, maxWidth: 140 },
+        value: lob,
+        onChange: (e) => { setPage(1); setLob(e.target.value); },
+      },
+        h('option', { value: '' }, 'All LOBs'),
+        ['restaurant', 'food_products', 'retail', 'jewellery', 'psl', 'b2b'].map((v) =>
+          h('option', { key: v, value: v }, v)),
+      ),
+      h('select', {
+        style: { ...styles.input, maxWidth: 140 },
+        value: status,
+        onChange: (e) => { setPage(1); setStatus(e.target.value); },
+      },
+        h('option', { value: '' }, 'All status'),
+        ['active', 'at_risk', 'churned', 'suspended'].map((v) =>
+          h('option', { key: v, value: v }, v)),
+      ),
+      h('select', {
+        style: { ...styles.input, maxWidth: 160 },
+        value: source,
+        onChange: (e) => { setPage(1); setSource(e.target.value); },
+      },
+        h('option', { value: '' }, 'All sources'),
+        Object.keys(SOURCE_LABELS).map((v) =>
+          h('option', { key: v, value: v }, SOURCE_LABELS[v] + ` (${v})`)),
+      ),
       h('button', { type: 'button', style: styles.secondaryBtn, onClick: load }, 'Refresh'),
     ),
     err && h('div', { style: styles.error }, err),
@@ -201,22 +263,28 @@ function ClientsScreen({ api }) {
       h('table', { style: styles.table },
         h('thead', null,
           h('tr', null,
-            ['Created', 'Business', 'Email', 'WABA', 'LOB', 'WA', 'Catalog', 'Sub'].map((c) =>
+            ['Created', 'Business', 'Source', 'LOB', 'Status', 'Idle', 'Orders', 'MRR', 'WA', 'Sub'].map((c) =>
               h('th', { key: c, style: styles.th }, c)),
           ),
         ),
         h('tbody', null,
-          (data.items || []).map((t) => h('tr', { key: t.id },
+          (data.items || []).map((t) => h('tr', {
+            key: t.id,
+            style: { cursor: 'pointer' },
+            onClick: () => onOpenTenant(t.id),
+          },
             h('td', { style: styles.td }, fmtDate(t.created_at)),
             h('td', { style: styles.td },
               h('div', { style: { fontWeight: 600 } }, t.display_name || t.name),
               h('div', { style: styles.mono }, t.id.slice(0, 8) + '…'),
             ),
-            h('td', { style: styles.td }, t.email || '—'),
-            h('td', { style: styles.td }, t.whatsapp_number || '—'),
+            h('td', { style: styles.td }, SOURCE_LABELS[t.referral_source] || t.referral_source || '—'),
             h('td', { style: styles.td }, t.lob_type || '—'),
+            h('td', { style: styles.td }, t.status_label || '—'),
+            h('td', { style: styles.td }, t.idle_days != null ? `${t.idle_days}d` : '—'),
+            h('td', { style: styles.td }, t.lifetime_orders ?? 0),
+            h('td', { style: styles.td }, t.mrr ? `₹${t.mrr}` : '—'),
             h('td', { style: styles.td }, t.whatsapp_connected ? '✓' : '○'),
-            h('td', { style: styles.td }, t.catalog_item_count),
             h('td', { style: styles.td }, t.subscription?.status || '—'),
           )),
         ),
@@ -237,6 +305,330 @@ function ClientsScreen({ api }) {
         onClick: () => setPage((p) => p + 1),
       }, 'Next'),
     ),
+  );
+}
+
+function TenantDetailScreen({ api, tenantId, role, onBack }) {
+  const isSuper = role === 'super_admin';
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState('');
+  const [msg, setMsg] = useState('');
+  const [reason, setReason] = useState('');
+  const [days, setDays] = useState('30');
+  const [fssai, setFssai] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setErr('');
+    try {
+      setData(await api.request('GET', `/api/admin/tenants/${tenantId}`));
+    } catch (ex) {
+      setErr(ex.message);
+    }
+  }, [api, tenantId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const act = async (path, body = {}) => {
+    setBusy(true);
+    setErr('');
+    setMsg('');
+    try {
+      const res = await api.request('POST', path, { reason: reason.trim() || undefined, ...body });
+      setMsg(res.login_url ? `Impersonate link ready` : 'Done');
+      if (res.login_url) {
+        window.open(res.login_url, '_blank', 'noopener,noreferrer');
+      }
+      setReason('');
+      await load();
+    } catch (ex) {
+      setErr(ex.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!data && !err) return h('div', { style: styles.muted }, 'Loading…');
+  const t = data?.tenant || {};
+  const events = data?.activation_events || [];
+
+  return h('div', null,
+    h('button', { type: 'button', style: styles.secondaryBtn, onClick: onBack }, '← Back to tenants'),
+    h('h2', { style: { ...styles.h2, marginTop: 16 } }, t.display_name || t.name || 'Tenant'),
+    h('p', { style: styles.muted }, t.id),
+    err && h('div', { style: styles.error }, err),
+    msg && h('div', { style: styles.ok }, msg),
+    data && h('div', { style: { display: 'grid', gap: 16, gridTemplateColumns: '1fr 1fr' } },
+      h('div', { style: styles.panel },
+        h('h3', { style: styles.h3 }, 'Attribution'),
+        h('div', null, `Source: ${SOURCE_LABELS[t.referral_source] || t.referral_source || '—'}`),
+        h('div', null, `Detail: ${t.signup_source_detail || '—'}`),
+        h('div', null, `UTM: ${t.utm_source || '—'} / ${t.utm_campaign || '—'}`),
+        h('div', null, `Email: ${t.email || '—'}`),
+        h('div', null, `LOB: ${t.lob_type || '—'}`),
+        h('div', null, `FSSAI: ${t.fssai_license || '—'}`),
+        h('div', null, `WA: ${data.whatsapp?.connected ? 'connected' : 'not connected'}`),
+        h('div', null, `Activity: ${data.activity?.status_label || '—'} · idle ${data.activity?.idle_days ?? '—'}d · orders ${data.activity?.lifetime_orders ?? 0}`),
+        h('div', null, `Sub: ${data.subscription?.status || '—'} · soft-lock ${data.soft_locked ? 'yes' : 'no'}`),
+      ),
+      h('div', { style: styles.panel },
+        h('h3', { style: styles.h3 }, 'Activation timeline'),
+        events.length === 0 && h('div', { style: styles.muted }, 'No events yet'),
+        events.map((ev) => h('div', { key: ev.id, style: { marginBottom: 8, fontSize: 12 } },
+          h('strong', null, ev.event_type),
+          ' · ',
+          fmtDate(ev.occurred_at),
+        )),
+      ),
+    ),
+    h('div', { style: { ...styles.panel, marginTop: 16 } },
+      h('h3', { style: styles.h3 }, 'Actions'),
+      h('label', { style: styles.label }, 'Reason (required for most writes)'),
+      h('input', {
+        style: { ...styles.input, maxWidth: 420, marginBottom: 12 },
+        value: reason,
+        onChange: (e) => setReason(e.target.value),
+        placeholder: 'Why are you doing this?',
+      }),
+      h('div', { style: styles.toolbar },
+        h('button', {
+          type: 'button',
+          style: styles.primaryBtn,
+          disabled: busy,
+          onClick: () => act(`/api/admin/tenants/${tenantId}/impersonate`, { reason: reason || 'support' }),
+        }, 'Impersonate (magic link)'),
+        isSuper && h('button', {
+          type: 'button', style: styles.secondaryBtn, disabled: busy || !reason.trim(),
+          onClick: () => act(`/api/admin/tenants/${tenantId}/suspend`),
+        }, 'Suspend'),
+        isSuper && h('button', {
+          type: 'button', style: styles.secondaryBtn, disabled: busy || !reason.trim(),
+          onClick: () => act(`/api/admin/tenants/${tenantId}/reactivate`),
+        }, 'Reactivate'),
+        isSuper && h('input', {
+          style: { ...styles.input, maxWidth: 80 },
+          value: days,
+          onChange: (e) => setDays(e.target.value),
+          placeholder: 'days',
+        }),
+        isSuper && h('button', {
+          type: 'button', style: styles.secondaryBtn, disabled: busy || !reason.trim(),
+          onClick: () => act(`/api/admin/tenants/${tenantId}/extend-trial`, { days: Number(days) }),
+        }, 'Extend trial'),
+        isSuper && h('button', {
+          type: 'button', style: styles.secondaryBtn, disabled: busy || !reason.trim(),
+          onClick: () => act(`/api/admin/tenants/${tenantId}/referral-credit`, { days: Number(days) || 30 }),
+        }, 'Referral credit'),
+        isSuper && h('button', {
+          type: 'button', style: styles.secondaryBtn, disabled: busy || !reason.trim(),
+          onClick: () => act(`/api/admin/tenants/${tenantId}/churn/miss-you`),
+        }, 'Send miss-you'),
+        isSuper && h('button', {
+          type: 'button', style: styles.secondaryBtn, disabled: busy || !reason.trim(),
+          onClick: () => act(`/api/admin/tenants/${tenantId}/churn/cancel`),
+        }, 'Cancel churn seq'),
+        isSuper && h('button', {
+          type: 'button', style: styles.secondaryBtn, disabled: busy || !reason.trim(),
+          onClick: () => act(`/api/admin/tenants/${tenantId}/force-wa-refresh`),
+        }, 'Force WA refresh flag'),
+      ),
+      isSuper && h('div', { style: { ...styles.toolbar, marginTop: 8 } },
+        h('input', {
+          style: { ...styles.input, maxWidth: 220 },
+          value: fssai,
+          onChange: (e) => setFssai(e.target.value),
+          placeholder: 'FSSAI license',
+        }),
+        h('button', {
+          type: 'button',
+          style: styles.secondaryBtn,
+          disabled: busy || !reason.trim() || !fssai.trim(),
+          onClick: () => act(`/api/admin/tenants/${tenantId}/fssai-override`, { fssai_license: fssai.trim() }),
+        }, 'FSSAI override'),
+      ),
+      !isSuper && h('p', { style: styles.muted }, 'Support role: view + impersonate only.'),
+    ),
+  );
+}
+
+function ChurnScreen({ api, onOpenTenant }) {
+  const [queue, setQueue] = useState([]);
+  const [counts, setCounts] = useState({});
+  const [err, setErr] = useState('');
+
+  const load = useCallback(async () => {
+    setErr('');
+    try {
+      const [q, s] = await Promise.all([
+        api.request('GET', '/api/admin/churn/queue'),
+        api.request('GET', '/api/admin/churn/feedback/summary'),
+      ]);
+      setQueue(q.items || []);
+      setCounts(s.counts || {});
+    } catch (ex) {
+      setErr(ex.message);
+    }
+  }, [api]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const maxCount = Math.max(1, ...Object.values(counts).map(Number));
+
+  return h('div', null,
+    h('h2', { style: styles.h2 }, 'Churn win-back'),
+    h('p', { style: styles.muted }, 'Idle tenants past LOB thresholds, outreach status, and feedback reasons.'),
+    err && h('div', { style: styles.error }, err),
+    h('button', { type: 'button', style: styles.secondaryBtn, onClick: load }, 'Refresh'),
+    h('div', { style: { ...styles.panel, marginTop: 16 } },
+      h('h3', { style: styles.h3 }, 'Feedback reasons'),
+      Object.keys(counts).length === 0 && h('div', { style: styles.muted }, 'No feedback yet'),
+      Object.entries(counts).map(([reason, n]) => h('div', {
+        key: reason,
+        style: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 },
+      },
+        h('div', { style: { width: 140, fontSize: 12 } }, reason),
+        h('div', {
+          style: {
+            height: 10, borderRadius: 4, background: '#059669',
+            width: `${Math.max(8, (n / maxCount) * 240)}px`,
+          },
+        }),
+        h('span', { style: styles.mono }, String(n)),
+      )),
+    ),
+    h('div', { style: { ...styles.tableWrap, marginTop: 16 } },
+      h('table', { style: styles.table },
+        h('thead', null,
+          h('tr', null,
+            ['Business', 'LOB', 'Idle', 'Orders', 'Outreach', 'Feedback'].map((c) =>
+              h('th', { key: c, style: styles.th }, c)),
+          ),
+        ),
+        h('tbody', null,
+          queue.map((row) => h('tr', {
+            key: row.tenant_id,
+            style: { cursor: 'pointer' },
+            onClick: () => onOpenTenant(row.tenant_id),
+          },
+            h('td', { style: styles.td }, row.name),
+            h('td', { style: styles.td }, row.lob_type),
+            h('td', { style: styles.td }, `${row.idle_days}d / ${row.idle_threshold_days}d`),
+            h('td', { style: styles.td }, row.lifetime_orders),
+            h('td', { style: styles.td }, (row.outreach || []).map((o) => o.outreach_type).join(', ') || '—'),
+            h('td', { style: styles.td }, (row.feedback || []).map((f) => f.reason).join(', ') || '—'),
+          )),
+        ),
+      ),
+    ),
+  );
+}
+
+function BillingScreen({ api, onOpenTenant }) {
+  const [items, setItems] = useState([]);
+  const [err, setErr] = useState('');
+
+  const load = useCallback(async () => {
+    setErr('');
+    try {
+      const data = await api.request('GET', '/api/admin/billing/at-risk');
+      setItems(data.items || []);
+    } catch (ex) {
+      setErr(ex.message);
+    }
+  }, [api]);
+
+  useEffect(() => { load(); }, [load]);
+
+  return h('div', null,
+    h('h2', { style: styles.h2 }, 'Billing'),
+    h('p', { style: styles.muted }, 'Soft-locked and past_due / overdue subscriptions.'),
+    err && h('div', { style: styles.error }, err),
+    h('button', { type: 'button', style: styles.secondaryBtn, onClick: load }, 'Refresh'),
+    h('div', { style: { ...styles.tableWrap, marginTop: 16 } },
+      h('table', { style: styles.table },
+        h('thead', null,
+          h('tr', null,
+            ['Business', 'Status', 'Soft lock', 'Renews / trial', 'MRR'].map((c) =>
+              h('th', { key: c, style: styles.th }, c)),
+          ),
+        ),
+        h('tbody', null,
+          items.map((row) => h('tr', {
+            key: row.tenant_id,
+            style: { cursor: 'pointer' },
+            onClick: () => onOpenTenant(row.tenant_id),
+          },
+            h('td', { style: styles.td }, row.name),
+            h('td', { style: styles.td }, row.status || '—'),
+            h('td', { style: styles.td }, row.soft_locked ? 'yes' : 'no'),
+            h('td', { style: styles.td }, fmtDate(row.renews_at || row.trial_ends_at)),
+            h('td', { style: styles.td }, row.mrr ? `₹${row.mrr}` : '—'),
+          )),
+        ),
+      ),
+    ),
+  );
+}
+
+function ReferralsScreen({ api }) {
+  const [items, setItems] = useState([]);
+  const [tiers, setTiers] = useState([]);
+  const [err, setErr] = useState('');
+
+  const load = useCallback(async () => {
+    setErr('');
+    try {
+      const [list, tierData] = await Promise.all([
+        api.request('GET', '/api/admin/referrals'),
+        api.request('GET', '/api/admin/referral-tiers'),
+      ]);
+      setItems(list.referrals || list.items || []);
+      setTiers(tierData.tiers || []);
+    } catch (ex) {
+      setErr(ex.message);
+    }
+  }, [api]);
+
+  useEffect(() => { load(); }, [load]);
+
+  return h('div', null,
+    h('h2', { style: styles.h2 }, 'Referrals'),
+    h('p', { style: styles.muted }, 'Referral ledger and active bonus tiers.'),
+    err && h('div', { style: styles.error }, err),
+    h('button', { type: 'button', style: styles.secondaryBtn, onClick: load }, 'Refresh'),
+    h('div', { style: { ...styles.panel, marginTop: 16 } },
+      h('h3', { style: styles.h3 }, 'Tiers'),
+      (tiers || []).length === 0 && h('div', { style: styles.muted }, 'No tiers configured'),
+      (tiers || []).map((t) => h('div', { key: t.id || t.tier_order, style: { fontSize: 12, marginBottom: 4 } },
+        `#${t.tier_order} · ≥${t.min_cumulative_count} · ${t.bonus_days} days`,
+      )),
+    ),
+    h('div', { style: { ...styles.tableWrap, marginTop: 16 } },
+      h('table', { style: styles.table },
+        h('thead', null,
+          h('tr', null,
+            ['Created', 'Referrer', 'Referred', 'Status', 'Bonus days'].map((c) =>
+              h('th', { key: c, style: styles.th }, c)),
+          ),
+        ),
+        h('tbody', null,
+          (items || []).map((r) => h('tr', { key: r.id },
+            h('td', { style: styles.td }, fmtDate(r.created_at)),
+            h('td', { style: styles.td }, h('span', { style: styles.mono }, (r.referrer_restaurant_id || '').slice(0, 8))),
+            h('td', { style: styles.td }, `${r.referred_type || ''} ${(r.referred_id || '').slice(0, 8)}`),
+            h('td', { style: styles.td }, r.status || '—'),
+            h('td', { style: styles.td }, r.bonus_days_snapshot ?? r.bonus_days ?? '—'),
+          )),
+        ),
+      ),
+    ),
+  );
+}
+
+function WaCostScreen() {
+  return h('div', null,
+    h('h2', { style: styles.h2 }, 'WhatsApp cost'),
+    h('p', { style: styles.muted }, 'Coming soon — Meta usage metrics are not wired yet.'),
   );
 }
 
@@ -560,16 +952,34 @@ export default function OwnerConsole() {
   const [secret, setSecret] = useState(() => {
     try { return sessionStorage.getItem(SECRET_KEY) || ''; } catch { return ''; }
   });
-  const [screen, setScreen] = useState('clients');
+  const [role, setRole] = useState(() => {
+    try { return sessionStorage.getItem(ROLE_KEY) || 'super_admin'; } catch { return 'super_admin'; }
+  });
+  const [screen, setScreen] = useState('tenants');
+  const [tenantId, setTenantId] = useState(null);
   const api = useApi(secret);
 
-  const onLogin = (s) => {
-    try { sessionStorage.setItem(SECRET_KEY, s); } catch { /* ignore */ }
+  const onLogin = (s, r) => {
+    try {
+      sessionStorage.setItem(SECRET_KEY, s);
+      sessionStorage.setItem(ROLE_KEY, r);
+    } catch { /* ignore */ }
     setSecret(s);
+    setRole(r);
   };
   const onLogout = () => {
-    try { sessionStorage.removeItem(SECRET_KEY); } catch { /* ignore */ }
+    try {
+      sessionStorage.removeItem(SECRET_KEY);
+      sessionStorage.removeItem(ROLE_KEY);
+      sessionStorage.removeItem(USER_KEY);
+    } catch { /* ignore */ }
     setSecret('');
+    setRole('super_admin');
+  };
+
+  const openTenant = (id) => {
+    setTenantId(id);
+    setScreen('tenant_detail');
   };
 
   useEffect(() => {
@@ -582,13 +992,25 @@ export default function OwnerConsole() {
   if (!secret) return h(Login, { onLogin });
 
   let body = null;
-  if (screen === 'clients') body = h(ClientsScreen, { api });
+  if (screen === 'tenants') body = h(TenantsScreen, { api, onOpenTenant: openTenant });
+  else if (screen === 'tenant_detail') {
+    body = h(TenantDetailScreen, {
+      api,
+      tenantId,
+      role,
+      onBack: () => setScreen('tenants'),
+    });
+  }
+  else if (screen === 'churn') body = h(ChurnScreen, { api, onOpenTenant: openTenant });
+  else if (screen === 'billing') body = h(BillingScreen, { api, onOpenTenant: openTenant });
+  else if (screen === 'referrals') body = h(ReferralsScreen, { api });
   else if (screen === 'failures') body = h(FailuresScreen, { api });
   else if (screen === 'phonepe') body = h(PhonePeScreen, { api });
   else if (screen === 'offers') body = h(OffersScreen, { api });
   else if (screen === 'paid') body = h(PaidFeaturesScreen, { api });
+  else if (screen === 'wa_cost') body = h(WaCostScreen);
 
-  return h(Shell, { screen, setScreen, onLogout }, body);
+  return h(Shell, { screen, setScreen, onLogout, role }, body);
 }
 
 const styles = {
@@ -613,7 +1035,11 @@ const styles = {
   main: { flex: 1, padding: '28px 32px', overflow: 'auto' },
   h1: { margin: '0 0 8px', fontSize: 24, color: '#f8fafc' },
   h2: { margin: '0 0 8px', fontSize: 22, color: '#f8fafc' },
+  h3: { margin: '0 0 10px', fontSize: 15, color: '#cbd5e1' },
   muted: { color: '#94a3b8', fontSize: 13, marginBottom: 16 },
+  panel: {
+    background: '#020617', border: '1px solid #1e293b', borderRadius: 12, padding: 16, fontSize: 13,
+  },
   label: { display: 'block', fontSize: 12, color: '#94a3b8', marginBottom: 6 },
   input: {
     width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8,
