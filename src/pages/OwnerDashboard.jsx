@@ -713,20 +713,27 @@ function WABAPanel({ info }) {
   if (info === undefined) return (
     <div style={{ background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "center", color: C.textMuted, fontSize: 13 }}>Loading...</div>
   );
-  if (info === null) return (
+
+  const waDigits = info?.whatsapp_number ? String(info.whatsapp_number).replace(/\D/g, "") : "";
+  const connected = Boolean(info && (info.waba_id || waDigits.length >= 10));
+
+  if (!info || !connected) return (
     <div style={{ background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: "20px 24px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>WhatsApp Business</span>
-        <span style={{ fontSize: 11, background: C.dangerLight, color: C.danger, padding: "2px 8px", borderRadius: 6 }}>Not configured</span>
+        <span style={{ fontSize: 11, background: C.dangerLight, color: C.danger, padding: "2px 8px", borderRadius: 6 }}>Not connected</span>
       </div>
+      {info?.name || info?.display_name ? (
+        <div style={{ fontSize: 13, color: C.text, marginBottom: 12 }}>
+          Outlet: <strong>{info.display_name || info.name}</strong>
+        </div>
+      ) : null}
       <div style={{ fontSize: 12, color: C.textMuted, lineHeight: 1.7 }}>
         <div style={{ fontWeight: 500, color: C.text, marginBottom: 8 }}>How to connect WhatsApp:</div>
         <div>1. Open <Link to="/settings?tab=whatsapp" style={{ color: C.primary, fontWeight: 600 }}>Settings → WhatsApp</Link></div>
         <div>2. Click <strong>Connect WhatsApp</strong> (Meta Embedded Signup — no Developer Console)</div>
-        <div>3. Complete business verification and add your phone number</div>
-        <div>4. Add a payment method in WhatsApp Manager when prompted</div>
-        <div>5. Send <strong>Hi</strong> to your number to test the ordering bot</div>
-        <div style={{ marginTop: 8 }}>Advanced: you can still paste WABA ID / Phone Number ID / token under Advanced credentials.</div>
+        <div>3. Or use <Link to="/setup" style={{ color: C.primary, fontWeight: 600 }}>Setup</Link> → Link existing WhatsApp (demo)</div>
+        <div>4. Send <strong>Hi</strong> to your number to test the ordering bot</div>
       </div>
     </div>
   );
@@ -736,8 +743,8 @@ function WABAPanel({ info }) {
         <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>WhatsApp Business</span>
         <span style={{ fontSize: 11, background: C.successLight, color: C.successDark, padding: "2px 8px", borderRadius: 6 }}>● Connected</span>
       </div>
-      {row("Business name",   info.name)}
-      {row("Phone number",    info.whatsapp_number ? `+${info.whatsapp_number}` : null)}
+      {row("Business name",   info.display_name || info.name)}
+      {row("Phone number",    waDigits ? `+${waDigits}` : null)}
       {row("WABA ID",         info.waba_id)}
       {row("Business type",   info.lob_type || null)}
       {row("Manager phone",   info.manager_phone ? `+${info.manager_phone}` : null)}
@@ -746,7 +753,7 @@ function WABAPanel({ info }) {
         row("Dining duration", info.dining_duration_minutes ? `${info.dining_duration_minutes} min` : null)}
       {row("Payment mode",    info.payment_mode)}
       <div style={{ marginTop: 12, padding: "8px 12px", background: C.surfaceBg, borderRadius: 8, fontSize: 12, color: C.textMuted }}>
-        📲 Test ordering bot: send <strong>&ldquo;Hi&rdquo;</strong> to <strong>+{info.whatsapp_number}</strong>
+        📲 Test ordering bot: send <strong>&ldquo;Hi&rdquo;</strong> to <strong>+{waDigits}</strong>
       </div>
     </div>
   );
