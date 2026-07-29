@@ -577,16 +577,22 @@ function ReferralsScreen({ api }) {
 
   const load = useCallback(async () => {
     setErr('');
+    const errors = [];
     try {
-      const [list, tierData] = await Promise.all([
-        api.request('GET', '/api/admin/referrals'),
-        api.request('GET', '/api/admin/referral-tiers'),
-      ]);
+      const list = await api.request('GET', '/api/admin/referrals');
       setItems(list.referrals || list.items || []);
+    } catch (ex) {
+      errors.push(`Referrals: ${ex.message}`);
+      setItems([]);
+    }
+    try {
+      const tierData = await api.request('GET', '/api/admin/referral-tiers');
       setTiers(tierData.tiers || []);
     } catch (ex) {
-      setErr(ex.message);
+      errors.push(`Tiers: ${ex.message}`);
+      setTiers([]);
     }
+    if (errors.length) setErr(errors.join(' · '));
   }, [api]);
 
   useEffect(() => { load(); }, [load]);
