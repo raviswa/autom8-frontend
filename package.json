@@ -4,6 +4,7 @@
   "description": "Autom8 Restaurant Management System - Frontend",
   "type": "module",
   "scripts": {
+    "preinstall": "node scripts/debugBuildDeps.mjs",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
