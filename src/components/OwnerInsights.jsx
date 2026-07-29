@@ -380,8 +380,6 @@ export default function OwnerInsights({ apiClient, startISO, endISO, rangeLabel,
           <SectionHeader title="Top customers by spend" sub="From invoiced grand totals" />
           <CustomerLeaderboard rows={customers?.topBySpend} sortBy="spend" />
         </div>
-      </div>          <CustomerLeaderboard rows={customers?.topBySpend} sortBy="spend" />
-        </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
