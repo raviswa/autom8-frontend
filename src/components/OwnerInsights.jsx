@@ -320,17 +320,17 @@ export default function OwnerInsights({ apiClient, startISO, endISO, rangeLabel,
       <div style={{ marginBottom: 16 }}>
         <h2 style={{ fontSize: 16, fontWeight: 500, color: "#111", margin: 0 }}>Insights</h2>
         <p style={{ fontSize: 12, color: "#888", margin: "4px 0 0" }}>
-          Actionable analytics for staffing, menu, and WhatsApp retention · invoiced revenue only · {rangeLabel}
+          Actionable analytics for staffing, menu, and WhatsApp retention · paid revenue only · {rangeLabel}
         </p>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, marginBottom: 12 }}>
         <div style={CARD}>
-          <SectionHeader title="Returning customers %" sub="Weekly trend (invoiced guests)" />
+          <SectionHeader title="Returning customers %" sub="Weekly trend (paid guests)" />
           <RepeatTrendChart trend={repeatTrend} />
         </div>
         <div style={CARD}>
-          <SectionHeader title="Visit frequency" sub="Based on phone numbers on invoiced orders" />
+          <SectionHeader title="Visit frequency" sub="Based on phone numbers on paid orders" />
           <div style={{ fontSize: 28, fontWeight: 500, color: "#111" }}>
             {customers?.avgDaysBetweenVisits != null ? `${customers.avgDaysBetweenVisits} days` : "—"}
           </div>
@@ -377,7 +377,7 @@ export default function OwnerInsights({ apiClient, startISO, endISO, rangeLabel,
           <CustomerLeaderboard rows={customers?.topByVisits} sortBy="visits" />
         </div>
         <div style={CARD}>
-          <SectionHeader title="Top customers by spend" sub="From invoiced grand totals" />
+          <SectionHeader title="Top customers by spend" sub="From paid collection totals" />
           <CustomerLeaderboard rows={customers?.topBySpend} sortBy="spend" />
         </div>
       </div>
@@ -427,7 +427,7 @@ export default function OwnerInsights({ apiClient, startISO, endISO, rangeLabel,
 
       {menuQuadrant?.items?.length > 0 || (Array.isArray(menuQuadrant) && menuQuadrant.length > 0) ? (
         <div style={CARD}>
-          <SectionHeader title="Menu engineering quadrant" sub="Stars · Hidden gems · Fillers · Dead weight (invoiced)" />
+          <SectionHeader title="Menu engineering quadrant" sub="Stars · Hidden gems · Fillers · Dead weight (paid)" />
           <MenuQuadrantChart data={menuQuadrant} />
         </div>
       ) : null}
