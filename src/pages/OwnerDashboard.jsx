@@ -209,6 +209,40 @@ function Tooltip({ text, children }) {
   );
 }
 
+// ─── Invoiced collections summary (replaces broken revenue chart) ─────────────
+function InvoicedCollectionsSummary({ kpi, meta }) {
+  const incomplete = meta?.incompleteTokens ?? kpi?.incompleteTokens;
+  return (
+    <div style={{ background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: "16px 20px", marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+        <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>Invoiced collections</span>
+        <span style={{ fontSize: 11, color: C.textMuted }}>Accounting source of truth · Zoho / Tally</span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 10, marginBottom: 10 }}>
+        <div>
+          <div style={{ fontSize: 11, color: C.textMuted }}>Invoiced revenue</div>
+          <div style={{ fontSize: 20, fontWeight: 500, color: C.text }}>{kpi ? fmtINR(kpi.totalRevenue) : "—"}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 11, color: C.textMuted }}>Invoices</div>
+          <div style={{ fontSize: 20, fontWeight: 500, color: C.text }}>{kpi?.totalOrders ?? "—"}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 11, color: C.textMuted }}>AOV (invoiced)</div>
+          <div style={{ fontSize: 20, fontWeight: 500, color: C.text }}>{kpi ? `₹${kpi.aov}` : "—"}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 11, color: C.textMuted }}>Non-invoiced tokens</div>
+          <div style={{ fontSize: 20, fontWeight: 500, color: C.text }}>{incomplete != null ? incomplete : "—"}</div>
+        </div>
+      </div>
+      <div style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.5 }}>
+        Only orders with a generated receipt/invoice are counted. Incomplete WhatsApp sessions and unpaid tokens are excluded from revenue.
+      </div>
+    </div>
+  );
+}
+
 function MetricCard({ icon, label, value, sub, badge, neutral, tooltip }) {
   return (
     <div style={{ background: C.surfaceBg, borderRadius: 12, padding: "14px 16px", border: `0.5px solid ${C.border}` }}>
@@ -685,21 +719,24 @@ function useWABAInfo(apiClient) {
 }
 
 function useWAOrders(apiClient, startISO, endISO) {
-  const [orders, setOrders] = useState(null);
+  const [state, setState] = useState({ orders: null, meta: null });
   useEffect(() => {
     if (!apiClient) return;
-    setOrders(null);
+    setState({ orders: null, meta: null });
     (async () => {
       try {
         const res = await apiClient.get('/api/dashboard/wa-orders', { params: { start: startISO, end: endISO } });
-        setOrders(res.data?.orders ?? []);
+        setState({
+          orders: res.data?.orders ?? [],
+          meta: res.data?.meta ?? null,
+        });
       } catch (err) {
         console.error('[useWAOrders] failed:', err?.response?.status, err?.response?.data || err.message);
-        setOrders([]);
+        setState({ orders: [], meta: null });
       }
     })();
   }, [apiClient, startISO, endISO]);
-  return orders;
+  return state;
 }
 
 // ─── WABA Info Panel ──────────────────────────────────────────────────────────
@@ -768,7 +805,7 @@ function formatPartySize(order) {
   return String(order.party_size);
 }
 
-function WAOrdersTable({ orders, rangeLabel }) {
+function WAOrdersTable({ orders, rangeLabel, meta }) {
   const [search, setSearch] = useState("");
   const filtered = useMemo(() => {
     if (!orders) return null;
@@ -779,7 +816,8 @@ function WAOrdersTable({ orders, rangeLabel }) {
       const phone = (o.customers?.phone || "").toLowerCase();
       const svc   = (o.service_type || o.event_type || "").toLowerCase();
       const token = String(o.token_number || "").toLowerCase();
-      return name.includes(q) || phone.includes(q) || svc.includes(q) || token.includes(q);
+      const inv   = String(o.invoice_number || "").toLowerCase();
+      return name.includes(q) || phone.includes(q) || svc.includes(q) || token.includes(q) || inv.includes(q);
     });
   }, [orders, search]);
 
@@ -791,16 +829,17 @@ function WAOrdersTable({ orders, rangeLabel }) {
       Phone:      o.customers?.phone || "—",
       Service:    o.service_type || "—",
       Token:      o.token_number || "—",
+      Invoice:    o.invoice_number || "—",
       Party_Size: o.party_size || "—",
       Amount:     o.total_amount != null ? `₹${o.total_amount}` : "—",
-      Status:     o.status || "—",
+      Status:     o.status || "invoiced",
     }));
-    exportToCSV(rows, `whatsapp-orders-${rangeLabel.replace(/[^a-z0-9]/gi, "-")}.csv`);
+    exportToCSV(rows, `invoiced-orders-${rangeLabel.replace(/[^a-z0-9]/gi, "-")}.csv`);
   };
 
   const statusColor = (s) => {
     if (!s) return "#888";
-    if (["completed","confirmed","paid"].includes(s)) return "#3B6D11";
+    if (["completed","confirmed","paid","invoiced"].includes(s)) return "#3B6D11";
     if (["cancelled","failed"].includes(s)) return "#A32D2D";
     if (["pending","awaiting","takeaway","seated"].includes(s)) return "#BA7517";
     return "#555";
@@ -810,26 +849,30 @@ function WAOrdersTable({ orders, rangeLabel }) {
     <div style={{ background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "20px 24px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
         <div>
-          <span style={{ fontSize: 14, fontWeight: 500, color: "#111" }}>WhatsApp orders</span>
-          {filtered != null && <span style={{ fontSize: 11, color: "#aaa", marginLeft: 8 }}>{filtered.length} total · {rangeLabel}</span>}
+          <span style={{ fontSize: 14, fontWeight: 500, color: "#111" }}>Invoiced orders</span>
+          {filtered != null && <span style={{ fontSize: 11, color: "#aaa", marginLeft: 8 }}>{filtered.length} invoiced · {rangeLabel}</span>}
+          {meta?.totalRevenue != null && (
+            <span style={{ fontSize: 11, color: "#3B6D11", marginLeft: 8 }}>
+              {fmtINR(meta.totalRevenue)} collected
+            </span>
+          )}
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, phone, token..." style={{ fontSize: 12, padding: "5px 10px", borderRadius: 8, border: "0.5px solid #E0E0DC", outline: "none", width: 200 }} />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, phone, invoice..." style={{ fontSize: 12, padding: "5px 10px", borderRadius: 8, border: "0.5px solid #E0E0DC", outline: "none", width: 200 }} />
           <button onClick={handleExport} disabled={!filtered?.length} style={{ fontSize: 12, padding: "5px 12px", borderRadius: 8, border: "0.5px solid #E0E0DC", background: filtered?.length ? "#F7F7F5" : "#fafafa", color: filtered?.length ? "#111" : "#aaa", cursor: filtered?.length ? "pointer" : "default" }}>⬇ Export CSV</button>
         </div>
       </div>
-      {/* Note about amounts: per-phone aggregation until token_id FK is added to orders */}
-      <div style={{ fontSize: 11, color: "#aaa", marginBottom: 10, padding: "6px 10px", background: "#F7F7F5", borderRadius: 8 }}>
-        💡 Amounts are matched per WhatsApp session (token). When an order has no direct link, we match by phone and nearest visit time (up to 7 days).
+      <div style={{ fontSize: 11, color: "#888", marginBottom: 10, padding: "6px 10px", background: "#F7F7F5", borderRadius: 8 }}>
+        Showing only orders with a generated invoice/receipt. Incomplete or unpaid sessions are hidden.
       </div>
       {orders === null && <div style={{ textAlign: "center", padding: "24px 0", fontSize: 13, color: "#aaa" }}>Loading...</div>}
-      {orders !== null && filtered?.length === 0 && <div style={{ textAlign: "center", padding: "24px 0", fontSize: 13, color: "#aaa" }}>No orders in this period</div>}
+      {orders !== null && filtered?.length === 0 && <div style={{ textAlign: "center", padding: "24px 0", fontSize: 13, color: "#aaa" }}>No invoiced orders in this period</div>}
       {filtered?.length > 0 && (
         <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: 300, borderRadius: 8, border: "0.5px solid #F0F0EE" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead style={{ position: "sticky", top: 0, background: "#fff", zIndex: 1 }}>
               <tr style={{ borderBottom: "0.5px solid #E8E8E5" }}>
-                {["Date & Time","Name","Phone","Service","Token","Party (dine-in)","Amount","Status"].map(h => (
+                {["Date & Time","Name","Phone","Service","Token","Invoice","Party","Amount","Status"].map(h => (
                   <th key={h} style={{ textAlign: "left", color: "#aaa", fontWeight: 400, fontSize: 11, padding: "8px 8px 8px 0", whiteSpace: "nowrap", background: "#fff" }}>{h}</th>
                 ))}
               </tr>
@@ -842,6 +885,7 @@ function WAOrdersTable({ orders, rangeLabel }) {
                   <td style={{ padding: "7px 8px 7px 0", color: "#555", whiteSpace: "nowrap" }}>{o.customers?.phone ? `+${o.customers.phone}` : "—"}</td>
                   <td style={{ padding: "7px 8px 7px 0", color: "#555", whiteSpace: "nowrap", textTransform: "capitalize" }}>{(o.service_type || "—").replace(/_/g, " ")}</td>
                   <td style={{ padding: "7px 8px 7px 0", color: "#555", fontFamily: "monospace", fontSize: 11 }}>{o.token_number || "—"}</td>
+                  <td style={{ padding: "7px 8px 7px 0", color: "#555", fontFamily: "monospace", fontSize: 11 }}>{o.invoice_number || "—"}</td>
                   <td style={{ padding: "7px 8px 7px 0", color: "#555", textAlign: "center", fontSize: 11 }}>{formatPartySize(o)}</td>
                   <td style={{ padding: "7px 8px 7px 0", fontWeight: 500, color: "#111", whiteSpace: "nowrap" }}>
                     {o.total_amount != null && o.total_amount > 0
@@ -849,7 +893,7 @@ function WAOrdersTable({ orders, rangeLabel }) {
                       : <span style={{ color: "#aaa" }}>—</span>}
                   </td>
                   <td style={{ padding: "7px 8px 7px 0" }}>
-                    <span style={{ fontSize: 11, fontWeight: 500, color: statusColor(o.status), background: statusColor(o.status) + "18", padding: "2px 7px", borderRadius: 5, textTransform: "capitalize" }}>{o.status || "—"}</span>
+                    <span style={{ fontSize: 11, fontWeight: 500, color: statusColor(o.status), background: statusColor(o.status) + "18", padding: "2px 7px", borderRadius: 5, textTransform: "capitalize" }}>{o.status || "invoiced"}</span>
                   </td>
                 </tr>
               ))}
@@ -983,13 +1027,12 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
   // Analytics data (date-range filtered) — single insights API with line-item backfill
   const insightsPack  = useInsightsPack(apiClient, startISO, endISO, preset);
   const kpi           = useKpiData(insightsPack);
-  const chartData     = useChartData(insightsPack);
   const menuItems     = useMenuItems(insightsPack);
   const itemPerf      = useItemPerformance(apiClient, startISO, endISO, preset);
   const cohorts       = useCustomerCohorts(apiClient);
   const cancelStats   = useCancelStats(apiClient, restaurantId, startISO, endISO);
   const wabaInfo      = useWABAInfo(apiClient);
-  const waOrders      = useWAOrders(apiClient, startISO, endISO);
+  const { orders: waOrders, meta: waMeta } = useWAOrders(apiClient, startISO, endISO);
 
   // Live data (always current, not date-range)
   const tableSnapshot = useTables(restaurantId);
@@ -1000,10 +1043,10 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
     : { today: "Today", yesterday: "Yesterday", "7d": "Last 7 days", "30d": "Last 30 days" }[preset];
 
   const row1 = [
-    { icon: "₹",  label: "Total revenue",  value: kpi ? fmtINR(kpi.totalRevenue) : "—", sub: "selected period" },
-    { icon: "🛒", label: "Orders",          value: kpi?.totalOrders ?? "—",               sub: "selected period" },
-    { icon: "🧾", label: "Avg order value", value: kpi ? `₹${kpi.aov}` : "—",             sub: "selected period", tooltip: "Total revenue ÷ orders. Excludes cancelled orders." },
-    { icon: "👥", label: "Total covers",    value: kpi?.totalCovers ?? "—",                neutral: true, sub: "selected period", tooltip: "Total orders placed. Each order = 1 cover." },
+    { icon: "₹",  label: "Total revenue",  value: kpi ? fmtINR(kpi.totalRevenue) : "—", sub: "invoiced only", tooltip: "Sum of invoice grand totals in the selected period. Source of truth for Zoho / Tally." },
+    { icon: "🛒", label: "Invoiced orders", value: kpi?.totalOrders ?? "—",               sub: "receipts generated", tooltip: "Count of orders that have an invoice/receipt." },
+    { icon: "🧾", label: "Avg order value", value: kpi ? `₹${kpi.aov}` : "—",             sub: "invoiced only", tooltip: "Invoiced revenue ÷ invoiced order count." },
+    { icon: "👥", label: "Total covers",    value: kpi?.totalCovers ?? "—",                neutral: true, sub: "invoiced only", tooltip: "One cover per invoiced order." },
   ];
   const row2 = [
     { icon: "🔄", label: "Table turns",     value: kpi && tableSnapshot.tables?.length ? (kpi.totalOrders / tableSnapshot.tables.length).toFixed(1) : "—", sub: "selected period", tooltip: "Total orders ÷ tables." },
@@ -1181,20 +1224,25 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
               {analyticsRow2.map((m, i) => <MetricCard key={i} {...m} />)}
             </div>
 
-            {/* Revenue chart */}
-            {chartData && chartData.labels?.length > 0 && <RevenueChart labels={chartData.labels} revenue={chartData.revenue} orders={chartData.orders} covers={chartData.covers} preset={preset} />}
-            {chartData && chartData.labels?.length === 0 && <div style={{ background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: "32px 20px", marginBottom: 12, textAlign: "center", fontSize: 13, color: C.textMuted }}>No orders in this period</div>}
-            {!chartData && <div style={{ background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: "32px 20px", marginBottom: 12, textAlign: "center", fontSize: 13, color: C.textMuted }}>Loading chart...</div>}
+            {/* Invoiced collections summary (replaces broken revenue chart) */}
+            <InvoicedCollectionsSummary kpi={kpi} meta={insightsPack?.meta || waMeta} />
 
-            {/* Menu items + WABA panel */}
+            {/* Menu items + WABA panel — hide empty top-menu when no invoiced line items */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12, marginBottom: 12 }}>
-              <TopMenuItems items={menuItems} />
+              {menuItems?.length > 0
+                ? <TopMenuItems items={menuItems} />
+                : (
+                  <div style={{ background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: "16px 20px" }}>
+                    <div style={{ fontSize: 14, fontWeight: 500, color: C.text, marginBottom: 8 }}>Top menu items</div>
+                    <div style={{ fontSize: 12, color: C.textMuted }}>No invoiced line items in this period yet.</div>
+                  </div>
+                )}
               <WABAPanel info={wabaInfo} />
             </div>
 
-            {/* WA orders (full width) */}
+            {/* Invoiced orders (full width) */}
             <div style={{ marginBottom: 12 }}>
-              <WAOrdersTable orders={waOrders} rangeLabel={rangeLabel} />
+              <WAOrdersTable orders={waOrders} rangeLabel={rangeLabel} meta={waMeta} />
             </div>
 
             {/* Session outcomes + Cancel stats */}

@@ -313,47 +313,24 @@ export default function OwnerInsights({ apiClient, startISO, endISO, rangeLabel,
   }
   if (!data) return null;
 
-  const { revenueHeatmap, serviceSplit, repeatTrend, customers, stockOutages, comboPatterns, menuQuadrant } = data;
+  const { repeatTrend, customers, stockOutages, comboPatterns, menuQuadrant } = data;
 
   return (
     <div style={{ marginTop: 24 }}>
       <div style={{ marginBottom: 16 }}>
         <h2 style={{ fontSize: 16, fontWeight: 500, color: "#111", margin: 0 }}>Insights</h2>
         <p style={{ fontSize: 12, color: "#888", margin: "4px 0 0" }}>
-          Actionable analytics for staffing, menu, and WhatsApp retention · {rangeLabel}
+          Actionable analytics for staffing, menu, and WhatsApp retention · invoiced revenue only · {rangeLabel}
         </p>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 12, marginBottom: 12 }}>
-        <div style={CARD}>
-          <SectionHeader
-            title="Hourly revenue heatmap"
-            sub={revenueHeatmap?.aggregation === "order_count"
-              ? "Last 7 days · darker = more orders (totals sparsely captured)"
-              : "Last 7 days · darker = more revenue"}
-          />
-          <RevenueHeatmap data={revenueHeatmap} />
-        </div>
-        <div style={CARD}>
-          <SectionHeader title="Revenue by service type" sub="Dine-in vs takeaway vs delivery" />
-          <DonutChart
-            channels={serviceSplit?.channels}
-            whatsappPct={serviceSplit?.whatsappPct}
-            whatsappRevenue={serviceSplit?.whatsappRevenue}
-            whatsappOrderCount={serviceSplit?.whatsappOrderCount}
-            mode={serviceSplit?.mode}
-            metricLabel={serviceSplit?.metricLabel}
-          />
-        </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, marginBottom: 12 }}>
         <div style={CARD}>
-          <SectionHeader title="Returning customers %" sub="Weekly trend" />
+          <SectionHeader title="Returning customers %" sub="Weekly trend (invoiced guests)" />
           <RepeatTrendChart trend={repeatTrend} />
         </div>
         <div style={CARD}>
-          <SectionHeader title="Visit frequency" sub="Based on phone numbers captured on orders" />
+          <SectionHeader title="Visit frequency" sub="Based on phone numbers on invoiced orders" />
           <div style={{ fontSize: 28, fontWeight: 500, color: "#111" }}>
             {customers?.avgDaysBetweenVisits != null ? `${customers.avgDaysBetweenVisits} days` : "—"}
           </div>
@@ -400,8 +377,10 @@ export default function OwnerInsights({ apiClient, startISO, endISO, rangeLabel,
           <CustomerLeaderboard rows={customers?.topByVisits} sortBy="visits" />
         </div>
         <div style={CARD}>
-          <SectionHeader title="Top customers by spend" sub="WhatsApp-identified guests" />
+          <SectionHeader title="Top customers by spend" sub="From invoiced grand totals" />
           <CustomerLeaderboard rows={customers?.topBySpend} sortBy="spend" />
+        </div>
+      </div>          <CustomerLeaderboard rows={customers?.topBySpend} sortBy="spend" />
         </div>
       </div>
 
@@ -448,10 +427,12 @@ export default function OwnerInsights({ apiClient, startISO, endISO, rangeLabel,
         </div>
       </div>
 
-      <div style={CARD}>
-        <SectionHeader title="Menu engineering quadrant" sub="Stars · Hidden gems · Fillers · Dead weight" />
-        <MenuQuadrantChart data={menuQuadrant} />
-      </div>
+      {menuQuadrant?.items?.length > 0 || (Array.isArray(menuQuadrant) && menuQuadrant.length > 0) ? (
+        <div style={CARD}>
+          <SectionHeader title="Menu engineering quadrant" sub="Stars · Hidden gems · Fillers · Dead weight (invoiced)" />
+          <MenuQuadrantChart data={menuQuadrant} />
+        </div>
+      ) : null}
     </div>
   );
 }
