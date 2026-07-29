@@ -377,7 +377,7 @@ async function downloadCatalogTemplate(apiClient, showToast, currentMenuItems = 
         item.prep_time_fixed ?? 5,
         item.batch_size ?? 1,
         item.time_per_batch ?? 10,
-        item.kitchen_station || 'assembly',
+        item.kitchen_station || '',
         item.packing_time ?? 1,
         item.holds_well ?? 'FALSE',
         item.fulfillment_section || 'main',
@@ -402,7 +402,7 @@ async function downloadCatalogTemplate(apiClient, showToast, currentMenuItems = 
         item.prep_time_fixed ?? 5,
         item.batch_size ?? 1,
         item.time_per_batch ?? 10,
-        item.kitchen_station || 'assembly',
+        item.kitchen_station || '',
         item.packing_time ?? 1,
         item.holds_well ? 'TRUE' : 'FALSE',
         item.fulfillment_section || 'main',
@@ -1679,16 +1679,32 @@ const fetchRestaurantMeta = useCallback(async () => {
         if (rawRows.length === 0) { setUploadErrors(['The selected sheet appears to be empty.']); setUploadStatus('idle'); return; }
         const mapped = rawRows.map(schema.mapRow).filter((row) => row.id || row.name);
         const existingByProduct = new Map(menuItems.map((item) => [catalogProductKey(item), item]));
+        const existingByRetailer = new Map(
+          menuItems
+            .filter((item) => item.retailer_id)
+            .map((item) => [normalizeCatalogKey(item.retailer_id), item]),
+        );
         const usedIds = new Set(menuItems.map((item) => normalizeCatalogKey(item.retailer_id)).filter(Boolean));
         const nonEmpty = mapped.map((row) => {
+          const existing = existingByProduct.get(catalogProductKey(row));
+          if (existing) {
+            // Keep stable id on product match — never force a colliding Excel id
+            usedIds.add(normalizeCatalogKey(existing.retailer_id));
+            return { ...row, id: existing.retailer_id, _generated_id: false };
+          }
           if (row.id) {
+            const taken = existingByRetailer.get(normalizeCatalogKey(row.id));
+            if (taken) {
+              const id = deriveCatalogId(row, usedIds);
+              usedIds.add(normalizeCatalogKey(id));
+              return { ...row, id, _generated_id: true };
+            }
             usedIds.add(normalizeCatalogKey(row.id));
             return row;
           }
-          const existing = existingByProduct.get(catalogProductKey(row));
-          const id = existing?.retailer_id || deriveCatalogId(row, usedIds);
+          const id = deriveCatalogId(row, usedIds);
           usedIds.add(normalizeCatalogKey(id));
-          return { ...row, id, _generated_id: !existing };
+          return { ...row, id, _generated_id: true };
         });
         const duplicateIds = new Set();
         const seenIds = new Set();
@@ -1697,13 +1713,16 @@ const fetchRestaurantMeta = useCallback(async () => {
           if (seenIds.has(key)) duplicateIds.add(key);
           seenIds.add(key);
         });
-        setUploadRows(nonEmpty);
-        setUploadErrors([
-          ...nonEmpty.flatMap((row, index) => schema.validateRow(row, index + 1)),
-          ...nonEmpty.flatMap((row, index) => duplicateIds.has(normalizeCatalogKey(row.id))
-            ? [`Row ${index + 1} (${row.id}): duplicate item ID in this file`]
-            : []),
-        ]);
+        // Auto-fix remaining in-file duplicates
+        const deduped = nonEmpty.map((row) => {
+          const key = normalizeCatalogKey(row.id);
+          if (!duplicateIds.has(key)) return row;
+          const id = deriveCatalogId(row, usedIds);
+          usedIds.add(normalizeCatalogKey(id));
+          return { ...row, id, _generated_id: true };
+        });
+        setUploadRows(deduped);
+        setUploadErrors(deduped.flatMap((row, index) => schema.validateRow(row, index + 1)));
         setUploadStatus('preview');
       } catch(err) { setUploadErrors([`Could not read the file: ${err.message}`]); setUploadStatus('idle'); }
     };
@@ -3816,12 +3835,12 @@ const fetchRestaurantMeta = useCallback(async () => {
                     <thead>
                       <tr style={{ borderBottom: `0.5px solid ${C.border}`, background: C.surfaceBg }}>
                         {(showMenuSlotColumn
-                          ? ["Name", "Category", "Slot", "Price", "Image", "In stock", "Special today"]
+                          ? ["Name", "Category", "Station", "Slot", "Price", "Image", "In stock", "Special today"]
                           : isPackagedLob
-                            ? ["Name", "Category", "Price", "Discount", "Image", "In stock", "Special / Promo"]
-                            : ["Name", "Category", "Price", "Image", "In stock", "Special today"]
+                            ? ["Name", "Category", "Station", "Price", "Discount", "Image", "In stock", "Special / Promo"]
+                            : ["Name", "Category", "Station", "Price", "Image", "In stock", "Special today"]
                         ).map((h, i) => (
-                          <th key={h} style={{ padding: "10px 14px", textAlign: i >= 2 ? "right" : "left", fontSize: 11, fontWeight: 500, color: C.textMuted }}>{h}</th>
+                          <th key={h} style={{ padding: "10px 14px", textAlign: i >= 3 ? "right" : "left", fontSize: 11, fontWeight: 500, color: C.textMuted }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -3830,7 +3849,7 @@ const fetchRestaurantMeta = useCallback(async () => {
                         <React.Fragment key={cat}>
                           <tr style={{ background: C.surfaceBg }}>
                             <td
-                              colSpan={showMenuSlotColumn || isPackagedLob ? 7 : 6}
+                              colSpan={showMenuSlotColumn || isPackagedLob ? 8 : 7}
                               style={{ padding: "8px 14px", fontSize: 11, fontWeight: 600, color: C.textSub, letterSpacing: '0.04em', textTransform: 'uppercase' }}
                             >
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
@@ -3899,6 +3918,28 @@ const fetchRestaurantMeta = useCallback(async () => {
                               <span style={{ fontSize: 10, background: C.primaryLight, color: C.primaryDark, padding: "2px 8px", borderRadius: 20, fontWeight: 500 }}>
                                 {displayMenuCategory(item.category)}
                               </span>
+                            </td>
+                            <td style={{ padding: "10px 14px" }}>
+                              {item.kitchen_station
+                                ? (
+                                  <span style={{
+                                    fontSize: 10,
+                                    fontFamily: 'ui-monospace, monospace',
+                                    background: ['sweets_counter', 'packing', 'dispatch'].includes(String(item.kitchen_station).toLowerCase())
+                                      ? '#ecfdf5'
+                                      : C.surfaceBg,
+                                    color: ['sweets_counter', 'packing', 'dispatch'].includes(String(item.kitchen_station).toLowerCase())
+                                      ? '#047857'
+                                      : C.textSub,
+                                    padding: "2px 8px",
+                                    borderRadius: 20,
+                                    fontWeight: 500,
+                                  }}
+                                  >
+                                    {item.kitchen_station}
+                                  </span>
+                                )
+                                : <span style={{ color: C.textMuted }}>—</span>}
                             </td>
                             {showMenuSlotColumn && (
                               <td style={{ padding: "10px 14px" }}>

@@ -326,7 +326,8 @@ export default function MenuPage() {
           return;
         }
         const mapped = rawRows.map(schema.mapRow);
-        const nonEmpty = mapped.filter(r => r.id || r.name);
+        // Leave blank ids blank — backend autogenerates / conflict-resolves.
+        const nonEmpty = mapped.filter(r => r.name || r.title);
         setUploadRows(nonEmpty);
         setUploadErrors(nonEmpty.flatMap((r, i) => schema.validateRow(r, i + 1)));
         setUploadStatus('preview');
