@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "eslint src",
+    "lint": "eslint src/ src-autom8-owner/ src-register/",
+    "lint:fix": "eslint --fix src/ src-autom8-owner/ src-register/",
     "start": "serve -s dist -l 3000",
     "build:register": "npx vite build --config vite.register.config.js",
     "build:autom8-owner": "npx vite build --config vite.autom8-owner.config.js && node -e \"require('fs').copyFileSync('src-autom8-owner/index.html','dist-autom8-owner/index.html')\""
@@ -28,8 +29,14 @@
     "zustand": "^4.4.1"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@vitejs/plugin-react": "^4.2.0",
     "autoprefixer": "^10.4.16",
+    "eslint": "^10.8.0",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^17.8.0",
     "postcss": "^8.4.31",
     "tailwindcss": "^3.3.6",
     "vite": "^5.0.0"
