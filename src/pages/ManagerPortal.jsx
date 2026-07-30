@@ -3610,8 +3610,8 @@ const fetchRestaurantMeta = useCallback(async () => {
 
                 <p style={{ fontSize: 12, color: C.textMuted, margin: "4px 0 0" }}>
                   {isPackagedLob
-                    ? <>Record new production batches without Excel, or safely merge product details from a file. Existing stock is preserved by default.</>
-                    : <>Pull from Meta or safely merge product details from Excel. Existing items and availability are preserved by default.</>}
+                    ? <>Packaged Food template: product details + optional <code style={{ fontSize: 11 }}>current_stock</code>. Prefer <strong>Record new batch</strong> for production. This is not the restaurant menu template.</>
+                    : <>Restaurant template: use <code style={{ fontSize: 11 }}>is_available</code> TRUE/FALSE only (no stock qty column). Different from Packaged Food — prepared dishes are toggled in/out of stock, not batch-counted in Excel.</>}
                 </p>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -3647,8 +3647,24 @@ const fetchRestaurantMeta = useCallback(async () => {
                 <strong>Meta catalog:</strong>{' '}
                 {metaLastSync ? `Last sync ${new Date(metaLastSync).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}` : 'Not synced yet'}
               </div>
-              <span style={{ fontSize: 11, color: C.textMuted }}>Excel merges by stable item ID · existing stock stays unchanged</span>
+              <span style={{ fontSize: 11, color: C.textMuted }}>
+                Restaurant Excel · <code style={{ fontSize: 10 }}>is_available</code> TRUE marks items in stock · no food-products stock column
+              </span>
             </div>
+            )}
+
+            {!isPackagedLob && (
+              <AlertBanner type="info">
+                <strong>Restaurant vs Packaged Food:</strong> Your outlet uses the restaurant menu template.
+                Set <code style={{ fontSize: 11 }}>is_available</code> to TRUE (no separate <code style={{ fontSize: 11 }}>is_stocked</code> column).
+                Packaged Food / Home Baker templates use <code style={{ fontSize: 11 }}>current_stock</code> and Record batch — do not use those columns here.
+              </AlertBanner>
+            )}
+            {isPackagedLob && (
+              <AlertBanner type="info">
+                <strong>Packaged Food template:</strong> Use <code style={{ fontSize: 11 }}>current_stock</code> or Record batch for jar quantities.
+                This is not the restaurant menu file (restaurants use <code style={{ fontSize: 11 }}>is_available</code> only).
+              </AlertBanner>
             )}
 
 {user?.role === 'manager' && !allowManagerUpload ? (
