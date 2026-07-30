@@ -377,6 +377,16 @@ export default function BrandDashboard() {
               Settings
             </button>
             <button
+              onClick={() => navigate('/account')}
+              style={{
+                fontSize: 12, fontWeight: 500, padding: '6px 12px', borderRadius: 8,
+                border: `0.5px solid ${C.primaryBorder}`, background: C.primaryLight,
+                color: C.primaryDark, cursor: 'pointer',
+              }}
+            >
+              My Account
+            </button>
+            <button
               onClick={logout}
               style={{
                 fontSize: 12, fontWeight: 500, padding: '6px 12px', borderRadius: 8,

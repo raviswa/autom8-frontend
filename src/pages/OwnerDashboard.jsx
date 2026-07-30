@@ -1099,6 +1099,7 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
         { to: "/dashboard/menu",    label: "Catalog",  chip: CHIP_SECONDARY },
         { to: "/settings?tab=kitchen#scheduled-ordering", label: "Order hours", chip: CHIP_PRIMARY },
         { to: "/settings",          label: "Settings", chip: CHIP_SECONDARY },
+        { to: "/account",           label: "My Account", chip: CHIP_SECONDARY },
       ]
     : [
         { to: "/dashboard/manager", label: "Manager", chip: CHIP_PRIMARY },
@@ -1108,6 +1109,7 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
         { to: "/dashboard/menu",    label: "Menu",     chip: CHIP_SECONDARY },
         { to: "/settings?tab=kitchen#scheduled-ordering", label: "Kitchen hours", chip: CHIP_PRIMARY },
         { to: "/settings",          label: "Settings", chip: CHIP_SECONDARY },
+        { to: "/account",           label: "My Account", chip: CHIP_SECONDARY },
       ];
 
   const packagedRow2 = [

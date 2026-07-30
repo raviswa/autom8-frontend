@@ -6,6 +6,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { loadFacebookSdk, launchWhatsAppEmbeddedSignup } from '../helpers/metaEmbeddedSignup';
 import { formatBusinessLabel } from '../config/lobTaxonomy';
+import { requestStepUpToken, stepUpHeaders } from '../components/StepUpOtpModal';
 
 function CheckRow({ ok, warn, label, detail, action }) {
   const icon = ok ? '✓' : warn ? '⚠' : '○';
@@ -102,13 +103,18 @@ export default function SetupStatusPage() {
         configId: cfg.configId,
         solutionId: cfg.solutionId || undefined,
       });
+      const stepTok = await requestStepUpToken({ purpose: 'whatsapp_bind', title: 'Verify to connect WhatsApp' });
+      if (!stepTok) {
+        setConnecting(false);
+        return;
+      }
       const complete = await apiClient.post('/api/whatsapp/embedded-signup/complete', {
         code: session.code,
         waba_id: session.waba_id,
         phone_number_id: session.phone_number_id,
         display_phone_number: session.display_phone_number || null,
         existing_pin: existingPin || pin || undefined,
-      });
+      }, { headers: stepUpHeaders(stepTok) });
       if (complete.data?.whatsapp_needs_existing_pin) {
         setPinMsg('WhatsApp linked — enter the existing 2FA PIN to finish.');
         setWaPath('existing');
@@ -125,7 +131,9 @@ export default function SetupStatusPage() {
     setPinBusy(true);
     setPinMsg('');
     try {
-      await apiClient.post('/api/whatsapp/embedded-signup/register-pin', { pin });
+      const stepTok = await requestStepUpToken({ purpose: 'whatsapp_bind', title: 'Verify to finish WhatsApp PIN' });
+      if (!stepTok) { setPinBusy(false); return; }
+      await apiClient.post('/api/whatsapp/embedded-signup/register-pin', { pin }, { headers: stepUpHeaders(stepTok) });
       setPinMsg('PIN accepted — WhatsApp registration finished.');
       setPin('');
       await load();
@@ -149,9 +157,11 @@ export default function SetupStatusPage() {
     setLinkBusy(true);
     setError('');
     try {
+      const stepTok = await requestStepUpToken({ purpose: 'whatsapp_bind', title: 'Verify to link WhatsApp' });
+      if (!stepTok) { setLinkBusy(false); return; }
       await apiClient.post('/api/onboarding/link-existing-waba', {
         whatsapp_number: status?.linkable_whatsapp_number || undefined,
-      });
+      }, { headers: stepUpHeaders(stepTok) });
       await load();
     } catch (e) {
       setError(e.response?.data?.error || e.message || 'Could not link existing WhatsApp');

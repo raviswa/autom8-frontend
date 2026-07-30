@@ -321,6 +321,37 @@ const requestInterceptor = apiClient.interceptors.request.use(
     }
   }, []);
 
+  const requestStepUpOtp = useCallback(async (purpose, phone) => {
+    setError(null);
+    try {
+      const response = await apiClient.post('/api/auth/step-up/request', {
+        purpose,
+        phone: phone || undefined,
+      });
+      return response.data;
+    } catch (err) {
+      const message = err.response?.data?.error || 'Could not send WhatsApp code';
+      setError(message);
+      throw new Error(message);
+    }
+  }, []);
+
+  const verifyStepUpOtp = useCallback(async (purpose, code, phone) => {
+    setError(null);
+    try {
+      const response = await apiClient.post('/api/auth/step-up/verify', {
+        purpose,
+        code,
+        phone: phone || undefined,
+      });
+      return response.data;
+    } catch (err) {
+      const message = err.response?.data?.error || 'Could not verify code';
+      setError(message);
+      throw new Error(message);
+    }
+  }, []);
+
   const completePasswordReset = useCallback(async (password) => {
     setError(null);
     try {
@@ -352,6 +383,8 @@ const requestInterceptor = apiClient.interceptors.request.use(
     requestPasswordReset,
     requestWhatsAppOtp,
     verifyWhatsAppOtp,
+    requestStepUpOtp,
+    verifyStepUpOtp,
     completePasswordReset,
     supabaseClient: supabase,
     apiClient

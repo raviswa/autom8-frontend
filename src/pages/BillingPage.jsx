@@ -177,9 +177,14 @@ export default function BillingPage() {
             <h1 className="text-2xl font-semibold text-slate-900">Subscription & billing</h1>
             <p className="text-sm text-slate-500 mt-1">₹1000 / month per WhatsApp number</p>
           </div>
-          <Link to={isBrand ? '/dashboard/brand' : '/dashboard/owner'} className="text-sm text-emerald-800 font-semibold">
-            ← Dashboard
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link to={isBrand ? '/dashboard/brand' : '/dashboard/owner'} className="text-sm text-emerald-800 font-semibold">
+              ← Dashboard
+            </Link>
+            <Link to="/account" className="text-sm text-emerald-800 font-semibold">
+              My Account
+            </Link>
+          </div>
         </div>
 
         {error && (

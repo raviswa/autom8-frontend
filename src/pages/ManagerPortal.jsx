@@ -426,48 +426,75 @@ async function downloadCatalogTemplate(apiClient, showToast, currentMenuItems = 
     }
   }
 
-  // Packaged / retail: export live rows into the LOB schema columns when possible.
-  if (['food_products', 'retail', 'psl', 'b2b', 'jewellery'].includes(schema.id) && (currentMenuItems || []).length > 0) {
+  // Packaged / retail: prefer server template export (includes low_stock_alert_units).
+  if (['food_products', 'retail', 'psl', 'b2b', 'jewellery'].includes(schema.id)) {
     const headers = schema.templateHeaders;
-    const rows = currentMenuItems.map((item) => {
-      const map = {
-        id: item.retailer_id || item.id || '',
-        title: item.name || '',
-        description: item.description || '',
-        price: Number(item.price) || 0,
-        category: exportCategoryForTemplate(item.category),
-        image_link: item.image_url || '',
-        is_available: (item.is_stocked ?? item.is_available ?? true) ? 'TRUE' : 'FALSE',
-        item_type: item.item_type || 'PRODUCT',
-        variant_group_id: item.variant_group_id || '',
-        pack_size_label: item.pack_size_label || item.size_label || '',
-        weight_grams: item.weight_grams ?? '',
-        current_stock: item.current_stock ?? '',
-        availability_status: item.availability_status || '',
-        launch_at: item.launch_at || '',
-        deposit_amount: item.deposit_amount ?? '',
-        shelf_life_days: item.shelf_life_days ?? '',
-        made_on_date: item.made_on_date || '',
-        ingredients: item.ingredients || '',
-        allergens: item.allergens || '',
-        bundle_components: Array.isArray(item.meta?.bundle_components)
-          ? item.meta.bundle_components.map(c => `${c.retailer_id}:${c.qty || 1}`).join(',')
-          : '',
-        image_url_2: item.image_url_2 || '',
-        image_url_3: item.image_url_3 || '',
-        image_url_4: item.image_url_4 || '',
-        image_url_5: item.image_url_5 || '',
-        discount_percent: item.discount_percent || '',
-        discount_days: daysLeftForExport(item.discount_ends_at),
-        condition: item.condition || '',
-        original_mrp: item.original_mrp ?? '',
-        warranty_days: item.warranty_days ?? '',
-        colour: item.colour || '',
-      };
-      return headers.map(h => (map[h] != null ? map[h] : ''));
+    const rowFromApiItem = (item) => headers.map((h) => {
+      if (h === 'id') return item.id || item.retailer_id || '';
+      if (h === 'title') return item.title || item.name || '';
+      if (h === 'image_link') return item.image_link || item.image_url || '';
+      const v = item[h];
+      return v != null ? v : '';
     });
-    writeAndDownload(rows, rows.length, 'live catalog');
-    return;
+
+    try {
+      showToast('Preparing template from live catalog…');
+      const res = await apiClient.get('/api/catalog/feed/template');
+      const apiItems = res.data?.items ?? [];
+      if (apiItems.length > 0) {
+        writeAndDownload(apiItems.map(rowFromApiItem), apiItems.length, res.data?.source || 'live catalog');
+        return;
+      }
+      if (res.data?.source === 'examples' && (schema.templateExamples || []).length) {
+        writeAndDownload(schema.templateExamples, schema.templateExamples.length, 'example template');
+        return;
+      }
+    } catch (err) {
+      console.warn('[template-dl] packaged API failed:', err.message);
+    }
+
+    if ((currentMenuItems || []).length > 0) {
+      const rows = currentMenuItems.map((item) => {
+        const map = {
+          id: item.retailer_id || item.id || '',
+          title: item.name || '',
+          description: item.description || '',
+          price: Number(item.price) || 0,
+          category: exportCategoryForTemplate(item.category),
+          image_link: item.image_url || '',
+          is_available: (item.is_stocked ?? item.is_available ?? true) ? 'TRUE' : 'FALSE',
+          item_type: item.item_type || 'PRODUCT',
+          variant_group_id: item.variant_group_id || '',
+          pack_size_label: item.pack_size_label || item.size_label || '',
+          weight_grams: item.weight_grams ?? '',
+          current_stock: item.current_stock ?? '',
+          availability_status: item.availability_status || '',
+          launch_at: item.launch_at || '',
+          deposit_amount: item.deposit_amount ?? '',
+          shelf_life_days: item.shelf_life_days ?? '',
+          made_on_date: item.made_on_date || '',
+          ingredients: item.ingredients || '',
+          allergens: item.allergens || '',
+          bundle_components: Array.isArray(item.meta?.bundle_components)
+            ? item.meta.bundle_components.map(c => `${c.retailer_id}:${c.qty || 1}`).join(',')
+            : '',
+          image_url_2: item.image_url_2 || '',
+          image_url_3: item.image_url_3 || '',
+          image_url_4: item.image_url_4 || '',
+          image_url_5: item.image_url_5 || '',
+          discount_percent: item.discount_percent || '',
+          discount_days: daysLeftForExport(item.discount_ends_at),
+          low_stock_alert_units: item.low_stock_alert_units ?? 5,
+          condition: item.condition || '',
+          original_mrp: item.original_mrp ?? '',
+          warranty_days: item.warranty_days ?? '',
+          colour: item.colour || '',
+        };
+        return headers.map(h => (map[h] != null ? map[h] : ''));
+      });
+      writeAndDownload(rows, rows.length, 'local snapshot');
+      return;
+    }
   }
 
   writeAndDownload(schema.templateExamples, schema.templateExamples.length, 'example template — fill in your items');
@@ -681,6 +708,8 @@ export default function ManagerPortal() {
   const [batchMadeOn,    setBatchMadeOn]    = useState(todayDateStr());
   const [batchQuantities,setBatchQuantities]= useState({});
   const [batchSaving,    setBatchSaving]    = useState(false);
+  const [stockAlerts,    setStockAlerts]    = useState([]);
+  const [dismissedStockAlertIds, setDismissedStockAlertIds] = useState(() => new Set());
   const [togglingSpecialId, setTogglingSpecialId] = useState(null);
   const [menuSearch,     setMenuSearch]     = useState('');
   const [menuCategory,   setMenuCategory]   = useState('all');
@@ -761,6 +790,14 @@ export default function ManagerPortal() {
     }
   }, [apiClient]);
   const fetchMenuItems = useCallback(async () => { try { const r = await apiClient.get('/api/menu-items?ignore_slot=true'); setMenuItems(r.data.items || r.data || []); } catch(e) {} }, [apiClient]);
+  const fetchStockAlerts = useCallback(async () => {
+    try {
+      const r = await apiClient.get('/api/menu-items/stock-alerts');
+      setStockAlerts(r.data?.alerts || []);
+    } catch (_) {
+      setStockAlerts([]);
+    }
+  }, [apiClient]);
   const fetchCategorySlots = useCallback(async () => {
     try {
       const r = await apiClient.get('/api/catalog/menu-categories/slots');
@@ -855,6 +892,18 @@ const fetchRestaurantMeta = useCallback(async () => {
     }, 8000);
     return () => { clearInterval(full); clearInterval(quick); };
   }, [fetchData, fetchTokens, fetchTables, fetchOrders, fetchKdsFeed, fetchScheduledBoard]);
+
+  // Packaged LOBs: poll today's low-stock / sold-out alerts for Menu banner.
+  useEffect(() => {
+    const packaged = ['food_products', 'retail', 'psl', 'b2b', 'jewellery'].includes(String(lobType || '').toLowerCase());
+    if (!packaged) {
+      setStockAlerts([]);
+      return undefined;
+    }
+    fetchStockAlerts();
+    const t = setInterval(fetchStockAlerts, 60000);
+    return () => clearInterval(t);
+  }, [lobType, fetchStockAlerts]);
 
   // Packaged LOBs: no queue / tables / scheduled — default to active orders.
   useEffect(() => {
@@ -1443,6 +1492,7 @@ const fetchRestaurantMeta = useCallback(async () => {
       setBatchQuantities({});
       const notified = res.data?.waitlist_notified || 0;
       showToast(`Batch recorded — ${res.data?.items_updated || lines.length} items · ${res.data?.units_added || 0} units${notified ? ` · notified ${notified}` : ''}`);
+      fetchStockAlerts();
     } catch (err) {
       showToast(err.response?.data?.error || 'Failed to record batch');
     } finally {
@@ -2454,6 +2504,16 @@ const fetchRestaurantMeta = useCallback(async () => {
                 }}
               >
                 👥 Team
+              </Link>
+              <Link
+                to="/account"
+                style={{
+                  fontSize: 12, fontWeight: 500, color: C.primaryDark, textDecoration: 'none',
+                  padding: '6px 12px', borderRadius: 8, border: `0.5px solid ${C.primaryBorder}`,
+                  background: C.primaryLight,
+                }}
+              >
+                My Account
               </Link>
               {!isPackagedLob && <Btn onClick={() => openNewOrderModal(null)}>+ New order</Btn>}
               <Btn variant="danger" onClick={logout}>Logout</Btn>
@@ -3665,6 +3725,107 @@ const fetchRestaurantMeta = useCallback(async () => {
                 <strong>Packaged Food template:</strong> Use <code style={{ fontSize: 11 }}>current_stock</code> or Record batch for jar quantities.
                 This is not the restaurant menu file (restaurants use <code style={{ fontSize: 11 }}>is_available</code> only).
               </AlertBanner>
+            )}
+
+            {isPackagedLob && stockAlerts.filter((a) => !dismissedStockAlertIds.has(a.id)).length > 0 && (
+              <div style={{
+                ...CARD,
+                padding: '12px 16px',
+                border: `0.5px solid ${C.warningBorder}`,
+                background: C.warningLight,
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: C.warningDark, marginBottom: 8 }}>
+                  Stock alerts today
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {stockAlerts
+                    .filter((a) => !dismissedStockAlertIds.has(a.id))
+                    .slice(0, 8)
+                    .map((alert) => {
+                      const item = menuItems.find((m) => m.id === alert.menu_item_id);
+                      const levelLabel = alert.alert_level === 'sold_out' ? 'Sold out' : 'Low stock';
+                      return (
+                        <div
+                          key={alert.id}
+                          style={{
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: 8,
+                            fontSize: 12,
+                            color: C.text,
+                          }}
+                        >
+                          <div>
+                            <strong>{levelLabel}:</strong> {alert.name}
+                            {alert.current_stock != null ? ` · ${alert.current_stock} left` : ''}
+                          </div>
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            {item && (item.is_stocked ?? item.is_available) && (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  await toggleAvailability(item);
+                                  setDismissedStockAlertIds((prev) => new Set(prev).add(alert.id));
+                                  fetchStockAlerts();
+                                }}
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  padding: '5px 10px',
+                                  borderRadius: 6,
+                                  border: `0.5px solid ${C.dangerBorder}`,
+                                  background: C.cardBg,
+                                  color: C.dangerDark,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                Mark unavailable
+                              </button>
+                            )}
+                            {item && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  restockBatch(item);
+                                  setDismissedStockAlertIds((prev) => new Set(prev).add(alert.id));
+                                }}
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  padding: '5px 10px',
+                                  borderRadius: 6,
+                                  border: `0.5px solid ${C.primary}`,
+                                  background: C.primary,
+                                  color: '#fff',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                Extend / Record batch
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setDismissedStockAlertIds((prev) => new Set(prev).add(alert.id))}
+                              style={{
+                                fontSize: 11,
+                                padding: '5px 10px',
+                                borderRadius: 6,
+                                border: `0.5px solid ${C.border}`,
+                                background: C.cardBg,
+                                color: C.textMuted,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Dismiss
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
             )}
 
 {user?.role === 'manager' && !allowManagerUpload ? (

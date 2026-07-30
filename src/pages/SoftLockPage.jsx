@@ -42,7 +42,8 @@ export default function SoftLockPage() {
         <p className="text-sm text-slate-500 leading-relaxed mb-6">
           Your trial or billing period ended and the grace window is over.
           Renew for ₹1000/month per WhatsApp number to take orders again.
-          You can still open Settings and export data.
+          Your WhatsApp number stays linked to this account while you are paused —
+          this is not account deletion. You can still open Settings, Billing, and My Account.
         </p>
         {subscription?.days_until_due != null && (
           <p className="text-xs text-slate-400 mb-4">
@@ -60,6 +61,9 @@ export default function SoftLockPage() {
         </button>
         <Link to="/billing" className="block text-sm font-semibold text-emerald-800 mb-2">
           Open billing details
+        </Link>
+        <Link to="/account" className="block text-sm font-semibold text-emerald-800 mb-2">
+          My Account
         </Link>
         <Link to="/settings" className="block text-sm text-slate-500">
           Settings (read-only access)

@@ -19,6 +19,7 @@ import FeatureWall from './pages/FeatureWall';
 import NotFound from './pages/NotFound';
 import SetupStatusPage from './pages/SetupStatusPage';
 import BillingPage from './pages/BillingPage';
+import AccountPage from './pages/AccountPage';
 import SoftLockPage from './pages/SoftLockPage';
 import SubscriptionStatusBar from './components/SubscriptionStatusBar';
 import SetupProgressBar from './components/SetupProgressBar';
@@ -47,6 +48,7 @@ import StatementsPage from './pages/supply/StatementsPage';
 import SupplyAnalytics from './pages/supply/SupplyAnalytics';
 import SupplySettings from './pages/supply/SupplySettings';
 import OrderForm from './pages/supply/OrderForm';
+import { StepUpOtpHost } from './components/StepUpOtpModal';
 
 export const kotRef = React.createRef();
 
@@ -210,6 +212,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute allowedRoles={['owner', 'brand_owner', 'brand_manager', 'manager']}>
             <BillingPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/account"
+        element={
+          <ProtectedRoute allowedRoles={['owner', 'brand_owner', 'brand_manager', 'manager']}>
+            <AccountPage />
           </ProtectedRoute>
         }
       />
@@ -409,6 +419,7 @@ export default function App() {
         <SubscriptionProvider>
           <WebSocketProvider>
             <KOTPrintTemplate ref={kotRef} />
+            <StepUpOtpHost />
             <AppRoutes />
           </WebSocketProvider>
         </SubscriptionProvider>

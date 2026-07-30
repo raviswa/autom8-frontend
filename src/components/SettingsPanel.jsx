@@ -20,6 +20,12 @@ import { MENU_SLOT_OPTIONS, normalizeMenuSlots, toggleMenuSlot } from '../helper
 import { loadFacebookSdk, launchWhatsAppEmbeddedSignup } from '../helpers/metaEmbeddedSignup';
 import BrandHeader from './BrandHeader';
 import {
+  requestStepUpToken,
+  requestOwnerPhoneStepUpTokens,
+  stepUpHeaders,
+  stepUpDualHeaders,
+} from './StepUpOtpModal';
+import {
   LOB_FAMILIES,
   getFamily,
   verticalsForFamily,
@@ -2476,6 +2482,11 @@ function TabWhatsApp({ apiClient, showToast, initialPath = null }) {
         webhook_secret:   int.webhook_secret ?? '',
         lob_type:         d.lob_type || 'restaurant',
         whatsapp_needs_existing_pin: Boolean(d.whatsapp_needs_existing_pin || statusRes.data?.whatsapp_needs_existing_pin),
+        _loaded_wa:       d.whatsapp_number  ?? '',
+        _loaded_waba:     d.waba_id          ?? '',
+        _loaded_mgr:      d.manager_phone    ?? '',
+        _loaded_pnid:     int.phone_number_id ?? '',
+        _loaded_token:    int.access_token   ?? '',
       });
       if (statusRes.data) setAccountStatus(statusRes.data);
       if (int.phone_number_id && int.access_token && initialPath !== 'advanced') setShowAdvanced(false);
@@ -2529,13 +2540,18 @@ function TabWhatsApp({ apiClient, showToast, initialPath = null }) {
       if (!session.waba_id || !session.phone_number_id) {
         throw new Error('Signup finished but WABA / Phone Number ID was missing. Try again or use Advanced fields.');
       }
+      const stepTok = await requestStepUpToken({ purpose: 'whatsapp_bind', title: 'Verify to connect WhatsApp' });
+      if (!stepTok) {
+        setConnecting(false);
+        return;
+      }
       const r = await apiClient.post('/api/whatsapp/embedded-signup/complete', {
         code: session.code,
         waba_id: session.waba_id,
         phone_number_id: session.phone_number_id,
         display_phone_number: session.display_phone_number || null,
         existing_pin: withExistingPinFlow && pin.length === 6 ? pin : undefined,
-      });
+      }, { headers: stepUpHeaders(stepTok) });
       await loadForm();
       setSaved(true);
       if (r.data?.whatsapp_needs_existing_pin) {
@@ -2557,7 +2573,9 @@ function TabWhatsApp({ apiClient, showToast, initialPath = null }) {
     if (pin.length !== 6) return showToast('Enter the 6-digit WhatsApp PIN', 'error');
     setPinBusy(true);
     try {
-      await apiClient.post('/api/whatsapp/embedded-signup/register-pin', { pin });
+      const stepTok = await requestStepUpToken({ purpose: 'whatsapp_bind', title: 'Verify to finish WhatsApp PIN' });
+      if (!stepTok) { setPinBusy(false); return; }
+      await apiClient.post('/api/whatsapp/embedded-signup/register-pin', { pin }, { headers: stepUpHeaders(stepTok) });
       setPin('');
       await loadForm();
       showToast('PIN accepted — WhatsApp registration finished');
@@ -2573,20 +2591,41 @@ function TabWhatsApp({ apiClient, showToast, initialPath = null }) {
     if (!form.whatsapp_number) return showToast('WhatsApp number is required', 'error');
     setSaving(true);
     try {
+      const waFieldsChanged = String(form.whatsapp_number || '') !== String(form._loaded_wa || '')
+        || String(form.waba_id || '') !== String(form._loaded_waba || '');
+      const credsChanged = String(form.phone_number_id || '') !== String(form._loaded_pnid || '')
+        || (form.access_token && form.access_token !== form._loaded_token);
+      const mgrChanged = String(form.manager_phone || '').replace(/\D/g, '')
+        !== String(form._loaded_mgr || '').replace(/\D/g, '');
+
+      let meHeaders = {};
+      if (waFieldsChanged) {
+        const tok = await requestStepUpToken({ purpose: 'whatsapp_bind', title: 'Verify to update WhatsApp' });
+        if (!tok) { setSaving(false); return; }
+        meHeaders = stepUpHeaders(tok);
+      } else if (mgrChanged) {
+        const tok = await requestStepUpToken({ purpose: 'change_manager_phone', title: 'Verify manager phone change' });
+        if (!tok) { setSaving(false); return; }
+        meHeaders = stepUpHeaders(tok);
+      }
+
       await apiClient.put('/api/restaurants/me', {
         whatsapp_number: form.whatsapp_number,
         waba_id:         form.waba_id        || null,
         manager_phone:   form.manager_phone  || null,
         sweets_counter_phone: form.sweets_counter_phone || null,
-      });
-      if (form.phone_number_id || form.access_token) {
+      }, { headers: meHeaders });
+
+      if (credsChanged) {
+        const tok = await requestStepUpToken({ purpose: 'whatsapp_bind', title: 'Verify integration credentials' });
+        if (!tok) { setSaving(false); return; }
         await apiClient.put('/api/restaurants/integration', {
           provider:       'meta',
           channel:        'whatsapp',
           phone_number_id: form.phone_number_id || null,
           access_token:   form.access_token    || null,
           webhook_secret:  form.webhook_secret  || null,
-        });
+        }, { headers: stepUpHeaders(tok) });
       }
       setSaved(true);
       showToast('WhatsApp settings saved');
@@ -3013,6 +3052,7 @@ function TabStaff({ apiClient, showToast, lobType = 'restaurant' }) {
       phone:           emp.phone           ?? '',
       whatsapp_number: emp.whatsapp_number ?? '',
       role:            emp.role            ?? '',
+      email:           emp.email           ?? '',
     });
     setShowForm(false); // close add form if open
   };
@@ -3030,12 +3070,39 @@ function TabStaff({ apiClient, showToast, lobType = 'restaurant' }) {
       : null;
     setEditSaving(true);
     try {
-      await apiClient.put(`/api/staff/${emp.id}`, {
+      const elevating = editForm.role !== emp.role && ['manager', 'owner'].includes(editForm.role);
+      const ownerPhoneChanging = emp.role === 'owner'
+        && String(editForm.phone || '').replace(/\D/g, '') !== String(emp.phone || '').replace(/\D/g, '');
+      const ownerEmailChanging = emp.role === 'owner'
+        && editForm.email !== undefined
+        && String(editForm.email || '').trim().toLowerCase() !== String(emp.email || '').toLowerCase();
+
+      let headers = {};
+      if (ownerPhoneChanging) {
+        const dual = await requestOwnerPhoneStepUpTokens(editForm.phone);
+        if (!dual) { setEditSaving(false); return; }
+        headers = stepUpDualHeaders(dual.old, dual.new);
+      } else if (ownerEmailChanging) {
+        const tok = await requestStepUpToken({ purpose: 'change_owner_email', title: 'Verify owner email change' });
+        if (!tok) { setEditSaving(false); return; }
+        headers = stepUpHeaders(tok);
+      } else if (elevating) {
+        const tok = await requestStepUpToken({ purpose: 'staff_elevate', title: 'Verify staff promotion' });
+        if (!tok) { setEditSaving(false); return; }
+        headers = stepUpHeaders(tok);
+      }
+
+      const payload = {
         full_name:       editForm.full_name.trim(),
         phone:           editForm.phone           || null,
         whatsapp_number: normalizedWa,
         role:            editForm.role,
-      });
+      };
+      if (emp.role === 'owner' && editForm.email !== undefined) {
+        payload.email = editForm.email.trim().toLowerCase();
+      }
+
+      await apiClient.put(`/api/staff/${emp.id}`, payload, { headers });
       showToast(`${editForm.full_name} updated`);
       cancelEdit();
       await load();
@@ -3081,7 +3148,11 @@ function TabStaff({ apiClient, showToast, lobType = 'restaurant' }) {
     const note = window.prompt(`Reason for removing ${emp.full_name}?`, 'Left the team');
     if (note === null) return;
     try {
-      const res = await apiClient.put(`/api/staff/${emp.id}/terminate`, { termination_note: note || 'Left the team' });
+      const tok = await requestStepUpToken({ purpose: 'staff_terminate', title: 'Verify to remove staff' });
+      if (!tok) return;
+      const res = await apiClient.put(`/api/staff/${emp.id}/terminate`, { termination_note: note || 'Left the team' }, {
+        headers: stepUpHeaders(tok),
+      });
       if (res.data?.manager_phone_cleared) {
         setManagerPhone('');
         showToast(`${emp.full_name} removed. Manager phone cleared — set a new one under Settings → WhatsApp.`, 'error');
@@ -3095,7 +3166,11 @@ function TabStaff({ apiClient, showToast, lobType = 'restaurant' }) {
   const sendPasswordReset = async (emp) => {
     setResetSending(emp.id);
     try {
-      const res = await apiClient.post(`/api/staff/${emp.id}/send-password-reset`);
+      const tok = await requestStepUpToken({ purpose: 'staff_password_reset', title: 'Verify password reset' });
+      if (!tok) { setResetSending(null); return; }
+      const res = await apiClient.post(`/api/staff/${emp.id}/send-password-reset`, {}, {
+        headers: stepUpHeaders(tok),
+      });
       showToast(res.data?.message ?? `Reset email sent to ${emp.email}`);
     } catch (e) {
       showToast(e.response?.data?.error ?? 'Failed to send reset email', 'error');
@@ -3305,7 +3380,18 @@ function TabStaff({ apiClient, showToast, lobType = 'restaurant' }) {
                       <div>
                         <Label>Phone</Label>
                         <Input value={editForm.phone} onChange={v => setEF('phone', v)} placeholder="9876543210" />
+                        {emp.role === 'owner' && (
+                          <div style={{ fontSize: 11, color: C.textMuted, marginTop: 3 }}>
+                            Personal WhatsApp for OTP — changing it requires codes to old then new number.
+                          </div>
+                        )}
                       </div>
+                      {emp.role === 'owner' && (
+                        <div>
+                          <Label>Login email</Label>
+                          <Input value={editForm.email || ''} onChange={v => setEF('email', v)} placeholder="owner@example.com" />
+                        </div>
+                      )}
                       <div>
                         <Label required={NOTIFY_ROLES.includes(editForm.role)}>
                           WhatsApp number
