@@ -30,6 +30,8 @@ import DateRangeApply, { formatDateDMY } from '../components/DateRangeApply';
 import BrandHeader from '../components/BrandHeader';
 import { formatBusinessLabel } from '../config/lobTaxonomy';
 import { MENU_SLOT_OPTIONS, normalizeMenuSlots, toggleMenuSlot } from '../helpers/menuSlots';
+import { ACTIVE_ORDER_STATUSES } from '../helpers/orderStatuses';
+import { formatKitchenOrderNo } from '../helpers/orderDisplay';
 import {
   JOURNEY_STAGES,
   stageToStepperKey,
@@ -65,8 +67,6 @@ const TOKEN_STATUS = {
   takeaway:         { bg: C.primaryLight,  color: C.primaryDark,  avatarBg: "#E6F1FB", avatarColor: C.primaryDark  },
   pending_approval: { bg: C.accentLight,   color: C.accentDark,   avatarBg: "#EEEDFE", avatarColor: C.accentDark   },
 };
-
-const ACTIVE_ORDER_STATUSES = ['pending', 'confirmed', 'in_progress', 'ready'];
 
 const SLOT_LABEL_TO_DB = {
   'morning tiffin': 'morning_tiffin',
@@ -1045,11 +1045,36 @@ const fetchRestaurantMeta = useCallback(async () => {
     if (!window.confirm(`${nextOpen ? 'Open' : 'Close'} the kitchen? Customers will ${nextOpen ? 'be able to' : 'not be able to'} order via WhatsApp.`)) return;
     setKitchenToggling(true);
     try {
-      await apiClient.post('/api/catalog/kitchen-toggle', { open: nextOpen });
-      showToast(nextOpen ? 'Kitchen is now open' : 'Kitchen is now closed');
+      const res = await apiClient.post('/api/catalog/kitchen-toggle', { open: nextOpen });
+      const data = res.data || {};
+      if (typeof data.is_open === 'boolean' && data.is_open !== nextOpen) {
+        showToast(
+          data.error
+            || (nextOpen
+              ? 'Kitchen could not open — check stocked menu items'
+              : 'Kitchen could not close'),
+        );
+      } else {
+        showToast(
+          data.is_open
+            ? (data.force_open ? 'Kitchen is now open (manual override)' : 'Kitchen is now open')
+            : 'Kitchen is now closed',
+        );
+      }
+      if (data && typeof data.is_open === 'boolean') {
+        setKitchenStatus((prev) => ({
+          ...(prev || {}),
+          ...data,
+          is_open: data.is_open,
+          force_open: !!data.force_open,
+          available_items: data.available_items ?? prev?.available_items,
+        }));
+      }
       await Promise.all([fetchKitchenStatus(), fetchMenuItems()]);
     } catch (e) {
-      showToast(e.response?.data?.error || `Failed to ${label}`);
+      const errMsg = e.response?.data?.error || `Failed to ${label}`;
+      showToast(errMsg);
+      await fetchKitchenStatus().catch(() => {});
     } finally {
       setKitchenToggling(false);
     }
@@ -1965,7 +1990,7 @@ const fetchRestaurantMeta = useCallback(async () => {
               {freeTableModal.order ? (
                 <>
                   <div style={{ background: C.surfaceBg, borderRadius: 8, padding: "10px 12px", fontSize: 12, color: C.textSub, marginBottom: 4 }}>
-                    <div style={{ fontWeight: 500, color: C.text, marginBottom: 4 }}>Order #{freeTableModal.order.order_number?.slice(-4)}</div>
+                    <div style={{ fontWeight: 500, color: C.text, marginBottom: 4 }}>Order #{formatKitchenOrderNo(freeTableModal.order.order_number, freeTableModal.order.token_number)}</div>
                     <div>Status: <span style={{ fontWeight: 500, textTransform: "capitalize" }}>{freeTableModal.order.status}</span></div>
                     <div>Amount: <span style={{ fontWeight: 500 }}>₹{freeTableModal.order.total_amount?.toFixed(2) ?? "—"}</span></div>
                   </div>
@@ -2061,7 +2086,7 @@ const fetchRestaurantMeta = useCallback(async () => {
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 50 }}>
           <div style={{ ...CARD, maxWidth: 500, width: "100%", padding: 0, overflow: "hidden" }}>
             <div style={{ background: C.primaryLight, borderBottom: `0.5px solid ${C.primaryBorder}`, padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <h3 style={{ fontSize: 15, fontWeight: 500, color: C.primaryDark, margin: 0 }}>Order #{selectedOrder.order_number?.slice(-4)}</h3>
+              <h3 style={{ fontSize: 15, fontWeight: 500, color: C.primaryDark, margin: 0 }}>Order #{formatKitchenOrderNo(selectedOrder.order_number, selectedOrder.token_number)}</h3>
               <button onClick={() => setSelectedOrder(null)} style={{ fontSize: 18, background: "none", border: "none", cursor: "pointer", color: C.textMuted }}>✕</button>
             </div>
             <div style={{ padding: "20px 24px" }}>
@@ -2311,9 +2336,11 @@ const fetchRestaurantMeta = useCallback(async () => {
                   disabled={kitchenToggling}
                   title={
                     kitchenStatus.is_open
-                      ? (isPackagedLob
-                        ? 'Ordering is open — WhatsApp customers can order. Tap to close.'
-                        : 'Kitchen is open — WhatsApp customers can order. Tap to close.')
+                      ? (kitchenStatus.force_open
+                        ? 'Manual open active — WhatsApp customers can order. Tap to close.'
+                        : (isPackagedLob
+                          ? 'Ordering is open — WhatsApp customers can order. Tap to close.'
+                          : 'Kitchen is open — WhatsApp customers can order. Tap to close.'))
                       : (isPackagedLob
                         ? `Ordering is closed${kitchenStatus.schedule_open ? '' : ` · schedule resumes ${kitchenStatus.next_open_label}`}. Tap to open.`
                         : `Kitchen is closed${kitchenStatus.schedule_open ? '' : ` · schedule resumes ${kitchenStatus.next_open_label}`}. Tap to open.`)
@@ -2421,7 +2448,9 @@ const fetchRestaurantMeta = useCallback(async () => {
                   hint: kitchenStatus
                     ? (kitchenStatus.is_open
                       ? [
-                          kitchenStatus.current_slot_label ? `${kitchenStatus.current_slot_label} menu live` : 'Manual override active',
+                          kitchenStatus.force_open
+                            ? 'Manual open — meal-slot filter paused'
+                            : (kitchenStatus.current_slot_label ? `${kitchenStatus.current_slot_label} menu live` : 'Accepting WhatsApp orders'),
                           kitchenStatus.takeaway_ready_range ? `Takeaway ${kitchenStatus.takeaway_ready_range}` : null,
                           kitchenStatus.delivery_ready_range ? `Delivery ${kitchenStatus.delivery_ready_range}` : null,
                         ].filter(Boolean).join(' · ')
@@ -3023,7 +3052,7 @@ const fetchRestaurantMeta = useCallback(async () => {
                     )}
 
                     {token && <div style={{ fontSize: 10, color: s.text, background: `${s.text}18`, padding: "2px 7px", borderRadius: 6 }}>Token: {token.id}</div>}
-                    {order  && <div style={{ fontSize: 10, color: s.text, background: `${s.text}18`, padding: "2px 7px", borderRadius: 6 }}>Order: {order.order_number?.slice(-4)}</div>}
+                    {order  && <div style={{ fontSize: 10, color: s.text, background: `${s.text}18`, padding: "2px 7px", borderRadius: 6 }}>Order: {formatKitchenOrderNo(order.order_number, order.token_number)}</div>}
 
                     {/* Action buttons */}
                     <div style={{ width: "100%", marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
@@ -3350,7 +3379,7 @@ const fetchRestaurantMeta = useCallback(async () => {
                   <div key={order.id} style={{ ...CARD }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                       <Pill label="Dine-in" variant="teal" />
-                      <span style={{ fontSize: 14, fontWeight: 500 }}>Order #{order.order_number?.slice(-4)}</span>
+                      <span style={{ fontSize: 14, fontWeight: 500 }}>Order #{formatKitchenOrderNo(order.order_number, order.token_number)}</span>
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 16, alignItems: "start" }}>
                       <div>

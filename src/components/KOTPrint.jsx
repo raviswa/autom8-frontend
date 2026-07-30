@@ -47,6 +47,7 @@ import React, {
   useCallback,
   useState,
 } from 'react';
+import { formatKitchenOrderNo } from '../helpers/orderDisplay';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -284,7 +285,7 @@ function ConsolidatedTicket({ order, kotNumber }) {
       )}
 
       <div className="kot-copy-label">** Kitchen Copy **</div>
-      <div className="kot-footer">Order #{String(order.orderNumber ?? '').slice(-6)}</div>
+      <div className="kot-footer">Order #{formatKitchenOrderNo(order.orderNumber, order.tokenNumber)}</div>
     </div>
   );
 }
@@ -335,7 +336,7 @@ function IndividualTicket({ item, order, kotNumber, itemIndex, totalItems }) {
       </div>
 
       <div className="kot-copy-label">** Kitchen Copy **</div>
-      <div className="kot-footer">Order #{String(order.orderNumber ?? '').slice(-6)}</div>
+      <div className="kot-footer">Order #{formatKitchenOrderNo(order.orderNumber, order.tokenNumber)}</div>
     </div>
   );
 }
@@ -385,7 +386,7 @@ function CancellationTicket({ order, kotNumber, itemsToCancelLabel }) {
 
       <div className="kot-cancel-stamp" style={{ fontSize: 14 }}>DO NOT SERVE</div>
       <div className="kot-copy-label">** Kitchen Copy **</div>
-      <div className="kot-footer">Order #{String(order.orderNumber ?? '').slice(-6)}</div>
+      <div className="kot-footer">Order #{formatKitchenOrderNo(order.orderNumber, order.tokenNumber)}</div>
     </div>
   );
 }
@@ -589,7 +590,7 @@ const styles = {
 // The `order` object passed to all print functions should look like:
 //
 // {
-//   orderNumber:  'ORD-2026-0042',   // string; last 6 chars shown on ticket
+//   orderNumber:  'ORD-153-2228b7cf',  // formatted via formatKitchenOrderNo → 153
 //   tableNumber:  7,                 // number | null
 //   tableSection: 'Rooftop',         // string | null
 //   serviceType:  'Dine-in',         // 'Dine-in' | 'Takeaway' | 'Delivery'

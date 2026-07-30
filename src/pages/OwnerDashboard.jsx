@@ -11,6 +11,7 @@ import { Link } from "react-router-dom";
 import OwnerInsights from "../components/OwnerInsights";
 import BrandHeader from "../components/BrandHeader";
 import { formatBusinessLabel } from "../config/lobTaxonomy";
+import { ACTIVE_ORDER_STATUSES } from "../helpers/orderStatuses";
 import { C } from "../theme/brand";
 
 // ── Export to CSV ─────────────────────────────────────────────────────────────
@@ -598,7 +599,6 @@ function CustomerCohortsPanel({ data }) {
 
 function useTables(restaurantId) {
   const [snapshot, setSnapshot] = useState({ tables: [], takeawayActive: 0, queueWaiting: 0 });
-  const ACTIVE_ORDER_STATUSES = ['pending', 'confirmed', 'in_progress'];
   const fetchTables = useCallback(async () => {
     if (!restaurantId) return;
     const [{ data: rawTables }, { data: orders }, { data: tokens }] = await Promise.all([
