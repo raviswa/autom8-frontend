@@ -1814,8 +1814,11 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
           <SectionTitle>Shipping &amp; courier</SectionTitle>
           {/* TODO(jewellery): high-value parcels need insured courier options — not modeled yet */}
           <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 12, lineHeight: 1.5 }}>
-            Default is Shiprocket live rates by parcel weight. Switch to your own courier if you have a contracted rate card
+            Default is Shiprocket live rates by parcel weight. Requires business postal code (pickup pin) above,
+            plus Shiprocket API User email and password. Outstation flat charge is used only when a live quote fails.
+            Switch to your own courier if you have a contracted rate card
             (by weight slab and zone: local, within state, metro, non-metro, special).
+            Shiprocket shipments are created after packing is marked ready — not at payment confirmation.
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
