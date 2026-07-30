@@ -1351,10 +1351,42 @@ const fetchRestaurantMeta = useCallback(async () => {
     const newValue = !(item.is_stocked ?? item.is_available);
     try {
       await apiClient.put(`/api/menu-items/${item.id}/availability`, { is_available: newValue });
-      setMenuItems(prev => prev.map(m => m.id === item.id ? { ...m, is_stocked: newValue, is_available: newValue } : m));
+      setMenuItems(prev => prev.map(m => m.id === item.id ? {
+        ...m,
+        is_stocked: newValue,
+        is_available: newValue,
+        current_stock: newValue && (m.current_stock == null || Number(m.current_stock) <= 0)
+          ? (isPackagedLob ? Math.max(1, Number(m.current_stock) || 1) : null)
+          : m.current_stock,
+      } : m));
       showToast(newValue ? `${item.name} is back in stock` : `${item.name} marked out of stock`);
     } catch(err) { showToast(err.response?.data?.error || `Failed to update ${item.name}`); }
     finally { setTogglingId(null); }
+  };
+
+  const markAllMenuStocked = async () => {
+    if (isPackagedLob) {
+      showToast('Use Record batch for packaged stock quantities');
+      return;
+    }
+    const outCount = menuItems.filter((m) => !m.archived_at && !(m.is_stocked ?? m.is_available)).length;
+    if (!outCount) {
+      showToast('All active items are already in stock');
+      return;
+    }
+    if (!window.confirm(
+      `Mark all ${outCount}+ active menu items in stock?\n\n`
+      + 'Prepared restaurant dishes use an on/off toggle (no batch quantity). '
+      + 'Sweets/savories that need jar counts should use Record batch afterwards.',
+    )) return;
+    try {
+      const res = await apiClient.post('/api/menu-items/mark-all-stocked');
+      await fetchMenuItems();
+      await fetchKitchenStatus().catch(() => {});
+      showToast(`Marked ${res.data?.marked ?? outCount} items in stock — you can Open kitchen now`);
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to mark items in stock');
+    }
   };
 
   const restockBatch = async (item) => {
@@ -3701,22 +3733,28 @@ const fetchRestaurantMeta = useCallback(async () => {
               <option value="archive">Archive</option>
             </select>
           </label>
-          <label style={{ fontSize: 10, color: C.textMuted }}>
-            Existing stock quantities
-            <select
-              value={stockPolicy}
-              onChange={(event) => setStockPolicy(event.target.value)}
-              style={{ display: 'block', width: '100%', marginTop: 4, padding: '7px 9px', borderRadius: 8, border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.text }}
-            >
-              <option value="leave">Leave unchanged (recommended)</option>
-              <option value="add">Add file quantity</option>
-              <option value="replace">Replace with file quantity</option>
-            </select>
-          </label>
+          {isPackagedLob ? (
+            <label style={{ fontSize: 10, color: C.textMuted }}>
+              Existing stock quantities
+              <select
+                value={stockPolicy}
+                onChange={(event) => setStockPolicy(event.target.value)}
+                style={{ display: 'block', width: '100%', marginTop: 4, padding: '7px 9px', borderRadius: 8, border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.text }}
+              >
+                <option value="leave">Leave unchanged (recommended)</option>
+                <option value="add">Add file quantity</option>
+                <option value="replace">Replace with file quantity</option>
+              </select>
+            </label>
+          ) : (
+            <div style={{ fontSize: 10, color: C.textMuted, paddingTop: 18 }}>
+              Stock: left unchanged. Prepared dishes use the In stock toggle; use Record batch only for sweets/savories with jar counts.
+            </div>
+          )}
         </div>
-        {stockPolicy !== 'leave' && (
+        {isPackagedLob && stockPolicy !== 'leave' && (
           <AlertBanner type="warn">
-            This file will {stockPolicy === 'add' ? 'add to' : 'replace'} existing stock quantities. Use Record new batch for normal production receipts.
+            This file will {stockPolicy === 'add' ? 'add to' : 'replace'} existing stock quantities. Use Record new batch for normal production receipts. Blank stock cells are left unchanged.
           </AlertBanner>
         )}
         <div style={{ ...CARD, padding: 0, overflowX: "auto" }}>
@@ -3822,7 +3860,14 @@ const fetchRestaurantMeta = useCallback(async () => {
         ({filteredMenuItems.length}{filteredMenuItems.length !== menuItems.length ? ` of ${menuItems.length}` : ''} items)
       </span>
     </div>
-    <span style={{ fontSize: 11, color: C.textMuted }}>Toggle to mark in/out of stock instantly</span>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+      <span style={{ fontSize: 11, color: C.textMuted }}>Toggle to mark in/out of stock instantly</span>
+      {!isPackagedLob && menuItems.some((m) => !m.archived_at && !(m.is_stocked ?? m.is_available)) && (
+        <Btn variant="secondary" onClick={markAllMenuStocked} style={{ fontSize: 11 }}>
+          Mark all in stock
+        </Btn>
+      )}
+    </div>
   </div>
 
   {menuItems.length > 0 && (
