@@ -484,6 +484,12 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
         instagram_handle: d.instagram_handle ?? '',
         instagram_user_id: d.instagram_user_id ?? '',
         logo_url:      d.logo_url      ?? '',
+        about_enabled: !!d.about_enabled,
+        about_note: d.about_note ?? '',
+        inception_date: d.inception_date
+          ? String(d.inception_date).slice(0, 7)
+          : '',
+        social_links: Array.isArray(d.social_links) ? d.social_links : [],
         restaurant_type:   d.restaurant_type ?? 'restaurant',
         lob_type:          d.lob_type ?? 'restaurant',   // ← add this line
         business_family:   d.business_family ?? '',
@@ -841,6 +847,90 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
       {form.logo_url && (
         <img src={form.logo_url} alt="Logo preview" style={{ marginTop: 8, height: 48, borderRadius: 6, border: `0.5px solid ${C.border}` }} onError={e => e.target.style.display = 'none'} />
       )}
+
+      <SectionTitle>About Us on webcart</SectionTitle>
+      <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 12, lineHeight: 1.45 }}>
+        Optional trust tab for customers. Off by default. Contact, address, logo, website, Instagram, and FSSAI come from the fields above — only filled fields appear, and the tab stays hidden if everything is blank.
+      </div>
+      <ToggleRow
+        label="Show About tab on customer webcart"
+        checked={!!form.about_enabled}
+        onToggle={() => set('about_enabled', !form.about_enabled)}
+      />
+      {isRestaurantLob(lobType || form.lob_type) && (
+        <div style={{ marginTop: 12, marginBottom: 4 }}>
+          <Label>Instagram handle (optional)</Label>
+          <Input
+            value={form.instagram_handle || ''}
+            onChange={v => set('instagram_handle', v)}
+            placeholder="@ammas.kitchen"
+          />
+        </div>
+      )}
+      <div style={{ ...grid2, marginTop: 12, marginBottom: 12 }}>
+        <div>
+          <Label>In business since</Label>
+          <input
+            type="month"
+            value={form.inception_date || ''}
+            onChange={e => set('inception_date', e.target.value)}
+            style={{
+              width: '100%', padding: '8px 10px', borderRadius: 8,
+              border: `0.5px solid ${C.border}`, fontSize: 13, background: C.cardBg, color: C.text,
+            }}
+          />
+          <p style={{ fontSize: 11, color: C.textMuted, margin: '6px 0 0' }}>
+            Shown as “X years in business” (updates automatically).
+          </p>
+        </div>
+        <div>
+          <Label>Short note ({(form.about_note || '').length}/150)</Label>
+          <Input
+            value={form.about_note || ''}
+            onChange={v => set('about_note', String(v || '').slice(0, 150))}
+            placeholder="Family kitchen in T. Nagar since 2012"
+          />
+        </div>
+      </div>
+      <Label>Extra social links</Label>
+      <div style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 8px', lineHeight: 1.4 }}>
+        Website and Instagram above are included automatically. Add YouTube, Facebook, or others here.
+      </div>
+      {(form.social_links || []).map((row, idx) => (
+        <div key={idx} style={{ display: 'grid', gridTemplateColumns: '140px 1fr auto', gap: 8, marginBottom: 8 }}>
+          <Input
+            value={row.platform || ''}
+            onChange={v => {
+              const next = [...(form.social_links || [])];
+              next[idx] = { ...next[idx], platform: v };
+              set('social_links', next);
+            }}
+            placeholder="youtube"
+          />
+          <Input
+            value={row.url || ''}
+            onChange={v => {
+              const next = [...(form.social_links || [])];
+              next[idx] = { ...next[idx], url: v };
+              set('social_links', next);
+            }}
+            placeholder="https://…"
+          />
+          <Btn
+            variant="secondary"
+            onClick={() => set('social_links', (form.social_links || []).filter((_, i) => i !== idx))}
+          >
+            Remove
+          </Btn>
+        </div>
+      ))}
+      <Btn
+        variant="secondary"
+        onClick={() => set('social_links', [...(form.social_links || []), { platform: '', url: '' }])}
+        style={{ marginBottom: 8 }}
+      >
+        + Add social link
+      </Btn>
 
       {isRestaurantLob(lobType || form.lob_type) && (
       <>
