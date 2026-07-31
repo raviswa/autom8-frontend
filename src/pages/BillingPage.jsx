@@ -181,9 +181,6 @@ export default function BillingPage() {
             <Link to={isBrand ? '/dashboard/brand' : '/dashboard/owner'} className="text-sm text-emerald-800 font-semibold">
               ← Dashboard
             </Link>
-            <Link to="/account" className="text-sm text-emerald-800 font-semibold">
-              My Account
-            </Link>
           </div>
         </div>
 

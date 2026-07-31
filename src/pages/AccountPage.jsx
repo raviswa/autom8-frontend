@@ -1,13 +1,19 @@
 // ============================================================================
-// MY ACCOUNT — profile, plan, business links, logout, delete account
+// MY ACCOUNT — profile, WhatsApp, plan, business links, logout, delete account
 // ============================================================================
-import React, { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useSubscription } from '../contexts/SubscriptionContext';
 import BrandHeader from '../components/BrandHeader';
+import WhatsAppAccountPanel from '../components/WhatsAppAccountPanel';
 import { C, FONTS } from '../theme/brand';
-import { requestStepUpToken, stepUpHeaders } from '../components/StepUpOtpModal';
+import {
+  requestStepUpToken,
+  requestOwnerPhoneStepUpTokens,
+  stepUpHeaders,
+  stepUpDualHeaders,
+} from '../components/StepUpOtpModal';
 
 const ROLE_LABEL = {
   owner: 'Owner',
@@ -82,10 +88,21 @@ const linkChip = {
   background: C.primaryLight,
 };
 
+const fieldStyle = {
+  width: '100%',
+  padding: '10px 12px',
+  borderRadius: 8,
+  border: `0.5px solid ${C.border}`,
+  fontSize: 14,
+  boxSizing: 'border-box',
+  fontFamily: FONTS.body,
+};
+
 export default function AccountPage() {
   const { user, apiClient, logout } = useAuth();
   const { subscription } = useSubscription();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [account, setAccount] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -98,12 +115,25 @@ export default function AccountPage() {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
 
+  const [editPhone, setEditPhone] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileMsg, setProfileMsg] = useState('');
+  const [profileErr, setProfileErr] = useState('');
+
+  const [toast, setToast] = useState({ msg: '', type: 'success' });
+  const toastTimer = useRef(null);
+  const waSectionRef = useRef(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
       const res = await apiClient.get('/api/account');
       setAccount(res.data);
+      const u = res.data?.user;
+      setEditPhone(u?.phone || '');
+      setEditEmail(u?.email || '');
     } catch (e) {
       setError(e.response?.data?.error || e.message || 'Failed to load account');
       setAccount(null);
@@ -114,6 +144,23 @@ export default function AccountPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    if (searchParams.get('tab') !== 'whatsapp') return;
+    const t = window.setTimeout(() => {
+      waSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 200);
+    return () => window.clearTimeout(t);
+  }, [searchParams, loading]);
+
+  const showToast = useCallback((msg, type = 'success') => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ msg, type });
+    toastTimer.current = setTimeout(() => {
+      setToast({ msg: '', type: 'success' });
+      toastTimer.current = null;
+    }, 3500);
+  }, []);
+
   const profile = account?.user || user;
   const restaurant = account?.restaurant;
   const canDelete = Boolean(account?.can_delete_account);
@@ -123,6 +170,8 @@ export default function AccountPage() {
   const roleLabel = ROLE_LABEL[profile?.role] || profile?.role || '—';
   const plan = planSummary(subscription);
   const businessName = restaurant?.display_name || restaurant?.name || 'your business';
+  const isOwner = profile?.role === 'owner';
+  const showWhatsApp = ['owner', 'manager'].includes(profile?.role);
 
   const resetDeleteFlow = () => {
     setDeleteStep(null);
@@ -135,6 +184,54 @@ export default function AccountPage() {
   const handleLogout = async () => {
     await logout();
     navigate('/login', { replace: true });
+  };
+
+  const handleSaveProfile = async () => {
+    if (!isOwner || !profile?.id) return;
+    setProfileSaving(true);
+    setProfileMsg('');
+    setProfileErr('');
+    try {
+      const phoneChanged = String(editPhone || '').replace(/\D/g, '') !== String(profile.phone || '').replace(/\D/g, '');
+      const emailChanged = String(editEmail || '').trim().toLowerCase() !== String(profile.email || '').trim().toLowerCase();
+      if (!phoneChanged && !emailChanged) {
+        setProfileMsg('No changes to save');
+        setProfileSaving(false);
+        return;
+      }
+
+      let headers = {};
+      if (phoneChanged) {
+        const dual = await requestOwnerPhoneStepUpTokens(editPhone);
+        if (!dual) { setProfileSaving(false); return; }
+        headers = { ...headers, ...stepUpDualHeaders(dual.old, dual.new) };
+      }
+      if (emailChanged) {
+        const tok = await requestStepUpToken({ purpose: 'change_owner_email', title: 'Verify owner email change' });
+        if (!tok) { setProfileSaving(false); return; }
+        headers = { ...headers, ...stepUpHeaders(tok) };
+      }
+
+      const payload = {};
+      if (phoneChanged) payload.phone = editPhone;
+      if (emailChanged) payload.email = editEmail.trim().toLowerCase();
+
+      await apiClient.put(`/api/staff/${profile.id}`, payload, { headers });
+      setProfileMsg('Profile updated');
+      await load();
+      // Keep localStorage user in sync for header/email displays
+      try {
+        const raw = localStorage.getItem('userData');
+        if (raw) {
+          const next = { ...JSON.parse(raw), ...(payload.email ? { email: payload.email } : {}), ...(payload.phone !== undefined ? { phone: payload.phone } : {}) };
+          localStorage.setItem('userData', JSON.stringify(next));
+        }
+      } catch { /* ignore */ }
+    } catch (e) {
+      setProfileErr(e.response?.data?.error || e.message || 'Could not update profile');
+    } finally {
+      setProfileSaving(false);
+    }
   };
 
   const handleDelete = async () => {
@@ -174,7 +271,21 @@ export default function AccountPage() {
 
   return (
     <div style={{ minHeight: '100vh', background: C.pageBg, fontFamily: FONTS.body }}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      {toast.msg && (
+        <div style={{
+          position: 'fixed', bottom: 24, right: 24, zIndex: 100,
+          background: toast.type === 'error' ? '#7F1D1D' : toast.type === 'warning' ? '#92400E' : '#1A1A18',
+          color: '#fff', fontSize: 12, fontWeight: 500,
+          padding: '10px 16px', borderRadius: 10,
+          boxShadow: '0 4px 20px rgba(0,0,0,.25)',
+        }}>
+          {toast.msg}
+        </div>
+      )}
+
       <BrandHeader
+        brandTo={homePath}
         title="My Account"
         subtitle={businessName !== 'your business' ? businessName : (profile?.email || '')}
         right={
@@ -195,7 +306,7 @@ export default function AccountPage() {
         }
       />
 
-      <div style={{ maxWidth: 640, margin: '0 auto', padding: '24px 16px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ maxWidth: showWhatsApp ? 860 : 640, margin: '0 auto', padding: '24px 16px', display: 'flex', flexDirection: 'column', gap: 16 }}>
         {loading && (
           <p style={{ color: C.textMuted, fontSize: 14 }}>Loading account…</p>
         )}
@@ -211,7 +322,9 @@ export default function AccountPage() {
             Profile
           </h2>
           <p style={{ margin: '6px 0 14px', fontSize: 13, color: C.textMuted }}>
-            Signed-in user (read-only for now)
+            {isOwner
+              ? 'Your personal phone (OTP) and login email. Business WhatsApp is below.'
+              : 'Signed-in user details'}
           </p>
           <dl style={{ margin: 0, display: 'grid', gap: 10, fontSize: 14 }}>
             <div>
@@ -219,20 +332,71 @@ export default function AccountPage() {
               <dd style={{ margin: 0, color: C.text, fontWeight: 500 }}>{profile?.full_name || '—'}</dd>
             </div>
             <div>
-              <dt style={{ fontSize: 11, color: C.textMuted, marginBottom: 2 }}>Email</dt>
-              <dd style={{ margin: 0, color: C.text, fontWeight: 500 }}>{profile?.email || '—'}</dd>
-            </div>
-            {profile?.phone && (
-              <div>
-                <dt style={{ fontSize: 11, color: C.textMuted, marginBottom: 2 }}>Phone</dt>
-                <dd style={{ margin: 0, color: C.text, fontWeight: 500 }}>{profile.phone}</dd>
-              </div>
-            )}
-            <div>
               <dt style={{ fontSize: 11, color: C.textMuted, marginBottom: 2 }}>Role</dt>
               <dd style={{ margin: 0, color: C.text, fontWeight: 500 }}>{roleLabel}</dd>
             </div>
           </dl>
+
+          {isOwner ? (
+            <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 11, color: C.textMuted, marginBottom: 4 }}>
+                  Personal phone (WhatsApp OTP)
+                </label>
+                <input
+                  type="text"
+                  value={editPhone}
+                  onChange={(e) => setEditPhone(e.target.value)}
+                  placeholder="919876543210"
+                  style={fieldStyle}
+                />
+                <p style={{ margin: '4px 0 0', fontSize: 11, color: C.textMuted }}>
+                  Changing phone requires codes on the old number, then the new one.
+                </p>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 11, color: C.textMuted, marginBottom: 4 }}>
+                  Login email
+                </label>
+                <input
+                  type="email"
+                  value={editEmail}
+                  onChange={(e) => setEditEmail(e.target.value)}
+                  placeholder="owner@example.com"
+                  style={fieldStyle}
+                />
+              </div>
+              {profileErr && <p style={{ margin: 0, fontSize: 13, color: C.dangerDark }}>{profileErr}</p>}
+              {profileMsg && <p style={{ margin: 0, fontSize: 13, color: C.successDark }}>{profileMsg}</p>}
+              <button
+                type="button"
+                disabled={profileSaving}
+                onClick={handleSaveProfile}
+                style={{
+                  alignSelf: 'flex-start',
+                  fontSize: 13, fontWeight: 600, padding: '8px 14px', borderRadius: 8,
+                  border: 'none', background: C.primary, color: '#fff',
+                  cursor: profileSaving ? 'wait' : 'pointer',
+                  opacity: profileSaving ? 0.7 : 1,
+                }}
+              >
+                {profileSaving ? 'Saving…' : 'Save login details'}
+              </button>
+            </div>
+          ) : (
+            <dl style={{ margin: '12px 0 0', display: 'grid', gap: 10, fontSize: 14 }}>
+              <div>
+                <dt style={{ fontSize: 11, color: C.textMuted, marginBottom: 2 }}>Email</dt>
+                <dd style={{ margin: 0, color: C.text, fontWeight: 500 }}>{profile?.email || '—'}</dd>
+              </div>
+              {profile?.phone && (
+                <div>
+                  <dt style={{ fontSize: 11, color: C.textMuted, marginBottom: 2 }}>Phone</dt>
+                  <dd style={{ margin: 0, color: C.text, fontWeight: 500 }}>{profile.phone}</dd>
+                </div>
+              )}
+            </dl>
+          )}
         </section>
 
         {/* Plan */}
@@ -247,13 +411,31 @@ export default function AccountPage() {
           <Link to="/billing" style={linkChip}>Plan & billing →</Link>
         </section>
 
+        {/* WhatsApp */}
+        {showWhatsApp && (
+          <section ref={waSectionRef} id="whatsapp" style={card}>
+            <h2 style={{ margin: 0, fontFamily: FONTS.heading, fontSize: 18, color: C.text, fontWeight: 600 }}>
+              WhatsApp
+            </h2>
+            <p style={{ margin: '6px 0 16px', fontSize: 13, color: C.textMuted, lineHeight: 1.5 }}>
+              Business number connection, Embedded Signup, manager alert phone, and templates live here.
+              Kitchen hours and catalog stay in Settings. First-time activation may also start from Setup.
+            </p>
+            <WhatsAppAccountPanel
+              apiClient={apiClient}
+              showToast={showToast}
+              initialPath={searchParams.get('path')}
+            />
+          </section>
+        )}
+
         {/* Business & settings */}
         <section style={card}>
           <h2 style={{ margin: 0, fontFamily: FONTS.heading, fontSize: 18, color: C.text, fontWeight: 600 }}>
             Business
           </h2>
           <p style={{ margin: '6px 0 14px', fontSize: 13, color: C.textMuted }}>
-            Outlet details, WhatsApp, team, and kitchen settings live in Settings.
+            Outlet profile, team, kitchen hours, tables, and services.
           </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             <Link to="/settings?tab=restaurant" style={linkChip}>Business details</Link>

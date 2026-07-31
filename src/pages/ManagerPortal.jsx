@@ -2406,6 +2406,7 @@ const fetchRestaurantMeta = useCallback(async () => {
 
       {/* ── Header ───────────────────────────────────────────────────────── */}
 <BrandHeader
+  brandTo="/account"
   title="Manager portal"
   subtitle={`${businessLabel} · ${isPackagedLob
     ? 'Manage catalog, packing and delivery orders'
@@ -2504,16 +2505,6 @@ const fetchRestaurantMeta = useCallback(async () => {
                 }}
               >
                 👥 Team
-              </Link>
-              <Link
-                to="/account"
-                style={{
-                  fontSize: 12, fontWeight: 500, color: C.primaryDark, textDecoration: 'none',
-                  padding: '6px 12px', borderRadius: 8, border: `0.5px solid ${C.primaryBorder}`,
-                  background: C.primaryLight,
-                }}
-              >
-                My Account
               </Link>
               {!isPackagedLob && <Btn onClick={() => openNewOrderModal(null)}>+ New order</Btn>}
               <Btn variant="danger" onClick={logout}>Logout</Btn>

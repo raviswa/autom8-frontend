@@ -767,9 +767,9 @@ function WABAPanel({ info }) {
       ) : null}
       <div style={{ fontSize: 12, color: C.textMuted, lineHeight: 1.7 }}>
         <div style={{ fontWeight: 500, color: C.text, marginBottom: 8 }}>How to connect WhatsApp:</div>
-        <div>1. Open <Link to="/settings?tab=whatsapp" style={{ color: C.primary, fontWeight: 600 }}>Settings → WhatsApp</Link></div>
-        <div>2. Click <strong>Connect WhatsApp</strong> (Meta Embedded Signup — no Developer Console)</div>
-        <div>3. Or use <Link to="/setup" style={{ color: C.primary, fontWeight: 600 }}>Setup</Link> → Link existing WhatsApp (demo)</div>
+        <div>1. Finish first-time connect on <Link to="/setup" style={{ color: C.primary, fontWeight: 600 }}>Setup</Link></div>
+        <div>2. Or open <Link to="/account?tab=whatsapp" style={{ color: C.primary, fontWeight: 600 }}>My Account → WhatsApp</Link> (logo) to connect / manage</div>
+        <div>3. Click <strong>Connect WhatsApp</strong> (Meta Embedded Signup — no Developer Console)</div>
         <div>4. Send <strong>Hi</strong> to your number to test the ordering bot</div>
       </div>
     </div>
@@ -791,6 +791,11 @@ function WABAPanel({ info }) {
       {row("Payment mode",    info.payment_mode)}
       <div style={{ marginTop: 12, padding: "8px 12px", background: C.surfaceBg, borderRadius: 8, fontSize: 12, color: C.textMuted }}>
         📲 Test ordering bot: send <strong>&ldquo;Hi&rdquo;</strong> to <strong>+{waDigits}</strong>
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <Link to="/account?tab=whatsapp" style={{ fontSize: 12, fontWeight: 600, color: C.primary }}>
+          Manage WhatsApp →
+        </Link>
       </div>
     </div>
   );
@@ -1099,7 +1104,6 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
         { to: "/dashboard/menu",    label: "Catalog",  chip: CHIP_SECONDARY },
         { to: "/settings?tab=kitchen#scheduled-ordering", label: "Order hours", chip: CHIP_PRIMARY },
         { to: "/settings",          label: "Settings", chip: CHIP_SECONDARY },
-        { to: "/account",           label: "My Account", chip: CHIP_SECONDARY },
       ]
     : [
         { to: "/dashboard/manager", label: "Manager", chip: CHIP_PRIMARY },
@@ -1109,7 +1113,6 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
         { to: "/dashboard/menu",    label: "Menu",     chip: CHIP_SECONDARY },
         { to: "/settings?tab=kitchen#scheduled-ordering", label: "Kitchen hours", chip: CHIP_PRIMARY },
         { to: "/settings",          label: "Settings", chip: CHIP_SECONDARY },
-        { to: "/account",           label: "My Account", chip: CHIP_SECONDARY },
       ];
 
   const packagedRow2 = [
@@ -1123,6 +1126,7 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
   return (
     <div style={{ minHeight: "100vh", background: C.pageBg }}>
       <BrandHeader
+        brandTo="/account"
         title="Owner dashboard"
         subtitle={`${businessName} · ${businessLabel} · ${dateStr}`}
         right={

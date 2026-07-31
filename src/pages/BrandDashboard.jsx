@@ -362,6 +362,7 @@ export default function BrandDashboard() {
   return (
     <div style={{ minHeight: '100vh', background: C.pageBg }}>
       <BrandHeader
+        brandTo="/account"
         title={user?.brand?.name ?? 'Brand dashboard'}
         subtitle={user?.role === 'brand_owner' ? 'Brand Owner' : 'Brand Manager'}
         right={
@@ -375,16 +376,6 @@ export default function BrandDashboard() {
               }}
             >
               Settings
-            </button>
-            <button
-              onClick={() => navigate('/account')}
-              style={{
-                fontSize: 12, fontWeight: 500, padding: '6px 12px', borderRadius: 8,
-                border: `0.5px solid ${C.primaryBorder}`, background: C.primaryLight,
-                color: C.primaryDark, cursor: 'pointer',
-              }}
-            >
-              My Account
             </button>
             <button
               onClick={logout}

@@ -332,8 +332,8 @@ export default function SetupStatusPage() {
                       />
                       <PathCard
                         title="3. Advanced — paste credentials"
-                        desc="Manually enter WABA ID, Phone Number ID, and access token in Settings."
-                        onClick={() => navigate('/settings?tab=whatsapp&path=advanced')}
+                        desc="Manually enter WABA ID, Phone Number ID, and access token in My Account."
+                        onClick={() => navigate('/account?tab=whatsapp&path=advanced')}
                       />
                       {connecting && <div className="text-xs text-slate-500 mt-2">Connecting…</div>}
                       {waPath === 'existing' && pinMsg && <div className="text-xs mt-2">{pinMsg}</div>}
@@ -341,8 +341,8 @@ export default function SetupStatusPage() {
                   )}
                 </div>
               ) : (
-                <Link to="/settings?tab=whatsapp" className="text-sm font-semibold text-emerald-800 underline">
-                  View WhatsApp account status
+                <Link to="/account?tab=whatsapp" className="text-sm font-semibold text-emerald-800 underline">
+                  Manage WhatsApp
                 </Link>
               )
             }
