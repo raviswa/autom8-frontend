@@ -3331,24 +3331,34 @@ export default function SettingsPanel() {
   const isBrandOwner = user?.role === 'brand_owner';
   const isManagerOnly = user?.role === 'manager';
   const hasAnyPaid = (...fs) => fs.some(f => paidFeatures.includes(f));
-  const [lobType, setLobType] = useState('restaurant');
+  // null until /waba loads — avoid flashing Restaurant/Tables/Kitchen for packaged LOBs
+  const [lobType, setLobType] = useState(null);
+  const [lobReady, setLobReady] = useState(false);
   const [businessIdentity, setBusinessIdentity] = useState({ name: '', logoUrl: '' });
   const [activeTab, setActiveTab] = useState(isManagerOnly ? 'staff' : 'restaurant');
   const [toast, setToast] = useState({ msg: '', type: 'success' });
   const toastTimer = useRef(null);
 
   useEffect(() => {
+    let cancelled = false;
     apiClient.get('/api/dashboard/waba')
       .then((r) => {
+        if (cancelled) return;
         const restaurant = r.data?.restaurant || {};
-        const next = restaurant.lob_type ?? 'restaurant';
-        setLobType(next);
+        setLobType(restaurant.lob_type ?? 'restaurant');
         setBusinessIdentity({
           name: restaurant.display_name || restaurant.name || '',
           logoUrl: restaurant.logo_url || '',
         });
       })
-      .catch(() => {});
+      .catch(() => {
+        if (cancelled) return;
+        setLobType('restaurant');
+      })
+      .finally(() => {
+        if (!cancelled) setLobReady(true);
+      });
+    return () => { cancelled = true; };
   }, [apiClient]);
 
   useEffect(() => {
@@ -3368,23 +3378,26 @@ export default function SettingsPanel() {
 
   const restaurantLob = isRestaurantLob(lobType);
 
-  const filteredTabs = TABS.filter(t => {
-    if (isManagerOnly) return t.id === 'staff';
-    if (t.brandOnly && !isBrandOwner) return false;
-    if (t.id === 'tables' && (!restaurantLob || !hasAnyPaid(FEATURES.DINE_IN, FEATURES.RESERVE_TABLE))) return false;
-    return true;
-  }).map(t => {
-    if (restaurantLob) return t;
-    if (t.id === 'kitchen') return { ...t, label: t.ordersLabel || '📦 Orders' };
-    if (t.genericLabel) return { ...t, label: t.genericLabel };
-    return t;
-  });
+  const filteredTabs = (!lobReady && !isManagerOnly)
+    ? []
+    : TABS.filter(t => {
+      if (isManagerOnly) return t.id === 'staff';
+      if (t.brandOnly && !isBrandOwner) return false;
+      if (t.id === 'tables' && (!restaurantLob || !hasAnyPaid(FEATURES.DINE_IN, FEATURES.RESERVE_TABLE))) return false;
+      return true;
+    }).map(t => {
+      if (restaurantLob) return t;
+      if (t.id === 'kitchen') return { ...t, label: t.ordersLabel || '📦 Orders' };
+      if (t.genericLabel) return { ...t, label: t.genericLabel };
+      return t;
+    });
 
   useEffect(() => {
-    if (!isManagerOnly && !filteredTabs.some(t => t.id === activeTab)) {
+    if (!lobReady || isManagerOnly) return;
+    if (!filteredTabs.some(t => t.id === activeTab)) {
       setActiveTab(filteredTabs[0]?.id || 'restaurant');
     }
-  }, [activeTab, filteredTabs, isManagerOnly]);
+  }, [activeTab, filteredTabs, isManagerOnly, lobReady]);
 
   const dashboardPath = isBrandOwner ? '/dashboard/brand' : '/dashboard/owner';
 
@@ -3445,26 +3458,34 @@ export default function SettingsPanel() {
       />
 
       <div style={{ maxWidth: 860, margin: '0 auto', padding: '24px 16px' }}>
-        {!isManagerOnly && (
-        <div style={{ display: 'flex', gap: 3, marginBottom: 20, background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 10, padding: 4, width: 'fit-content', flexWrap: 'wrap' }}>
-          {filteredTabs.map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
-              padding: '7px 14px', borderRadius: 7, fontSize: 12, fontWeight: activeTab === tab.id ? 500 : 400,
-              cursor: 'pointer', transition: 'all .15s', whiteSpace: 'nowrap',
-              background:   activeTab === tab.id ? C.primary     : 'transparent',
-              color:        activeTab === tab.id ? '#fff'        : C.textMuted,
-              border:       activeTab === tab.id ? `0.5px solid ${C.primaryDark}` : '0.5px solid transparent',
-            }}>
-              {tab.label}
-            </button>
-          ))}
-        </div>
-        )}
+        {!lobReady ? (
+          <div style={{ ...CARD, padding: 48, textAlign: 'center' }}>
+            <Spinner size={28} />
+            <div style={{ marginTop: 12, fontSize: 13, color: C.textMuted }}>Loading settings…</div>
+          </div>
+        ) : (
+          <>
+            {!isManagerOnly && (
+            <div style={{ display: 'flex', gap: 3, marginBottom: 20, background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 10, padding: 4, width: 'fit-content', flexWrap: 'wrap' }}>
+              {filteredTabs.map(tab => (
+                <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
+                  padding: '7px 14px', borderRadius: 7, fontSize: 12, fontWeight: activeTab === tab.id ? 500 : 400,
+                  cursor: 'pointer', transition: 'all .15s', whiteSpace: 'nowrap',
+                  background:   activeTab === tab.id ? C.primary     : 'transparent',
+                  color:        activeTab === tab.id ? '#fff'        : C.textMuted,
+                  border:       activeTab === tab.id ? `0.5px solid ${C.primaryDark}` : '0.5px solid transparent',
+                }}>
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            )}
 
-        {/* Content card */}
-        <div style={CARD}>
-          {tabContent[activeTab]}
-        </div>
+            <div style={CARD}>
+              {tabContent[activeTab]}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
