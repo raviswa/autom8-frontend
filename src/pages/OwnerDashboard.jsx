@@ -739,68 +739,6 @@ function useWAOrders(apiClient, startISO, endISO) {
   return state;
 }
 
-// ─── WABA Info Panel ──────────────────────────────────────────────────────────
-function WABAPanel({ info }) {
-  const row = (label, value) => (
-    <div style={{ display: "flex", gap: 12, marginBottom: 10 }}>
-      <div style={{ fontSize: 12, color: C.textMuted, minWidth: 160 }}>{label}</div>
-      <div style={{ fontSize: 13, fontWeight: 500, color: C.text, wordBreak: "break-all" }}>{value || "—"}</div>
-    </div>
-  );
-  if (info === undefined) return (
-    <div style={{ background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "center", color: C.textMuted, fontSize: 13 }}>Loading...</div>
-  );
-
-  const waDigits = info?.whatsapp_number ? String(info.whatsapp_number).replace(/\D/g, "") : "";
-  const connected = Boolean(info && (info.waba_id || waDigits.length >= 10));
-
-  if (!info || !connected) return (
-    <div style={{ background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: "20px 24px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>WhatsApp Business</span>
-        <span style={{ fontSize: 11, background: C.dangerLight, color: C.danger, padding: "2px 8px", borderRadius: 6 }}>Not connected</span>
-      </div>
-      {info?.name || info?.display_name ? (
-        <div style={{ fontSize: 13, color: C.text, marginBottom: 12 }}>
-          Outlet: <strong>{info.display_name || info.name}</strong>
-        </div>
-      ) : null}
-      <div style={{ fontSize: 12, color: C.textMuted, lineHeight: 1.7 }}>
-        <div style={{ fontWeight: 500, color: C.text, marginBottom: 8 }}>How to connect WhatsApp:</div>
-        <div>1. Finish first-time connect on <Link to="/setup" style={{ color: C.primary, fontWeight: 600 }}>Setup</Link></div>
-        <div>2. Or open <Link to="/account?tab=whatsapp" style={{ color: C.primary, fontWeight: 600 }}>My Account → WhatsApp</Link> (logo) to connect / manage</div>
-        <div>3. Click <strong>Connect WhatsApp</strong> (Meta Embedded Signup — no Developer Console)</div>
-        <div>4. Send <strong>Hi</strong> to your number to test the ordering bot</div>
-      </div>
-    </div>
-  );
-  return (
-    <div style={{ background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: "20px 24px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>WhatsApp Business</span>
-        <span style={{ fontSize: 11, background: C.successLight, color: C.successDark, padding: "2px 8px", borderRadius: 6 }}>● Connected</span>
-      </div>
-      {row("Business name",   info.display_name || info.name)}
-      {row("Phone number",    waDigits ? `+${waDigits}` : null)}
-      {row("WABA ID",         info.waba_id)}
-      {row("Business type",   info.lob_type || null)}
-      {row("Manager phone",   info.manager_phone ? `+${info.manager_phone}` : null)}
-      {row("Timezone",        info.timezone)}
-      {!["food_products", "retail", "psl", "b2b", "jewellery"].includes(String(info.lob_type || "").toLowerCase()) &&
-        row("Dining duration", info.dining_duration_minutes ? `${info.dining_duration_minutes} min` : null)}
-      {row("Payment mode",    info.payment_mode)}
-      <div style={{ marginTop: 12, padding: "8px 12px", background: C.surfaceBg, borderRadius: 8, fontSize: 12, color: C.textMuted }}>
-        📲 Test ordering bot: send <strong>&ldquo;Hi&rdquo;</strong> to <strong>+{waDigits}</strong>
-      </div>
-      <div style={{ marginTop: 12 }}>
-        <Link to="/account?tab=whatsapp" style={{ fontSize: 12, fontWeight: 600, color: C.primary }}>
-          Manage WhatsApp →
-        </Link>
-      </div>
-    </div>
-  );
-}
-
 // ─── WhatsApp Orders Table ────────────────────────────────────────────────────
 function formatPartySize(order) {
   const svc = String(order.service_type || order.event_type || "").toLowerCase();
@@ -1178,12 +1116,9 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 10, marginBottom: 14 }}>
                   <MetricCard icon="🛵" label="Takeaway active" value={tableSnapshot.takeawayActive} sub="in progress" />
                   <MetricCard icon="🚗" label="Delivery enabled" value={features.includes("delivery") ? "Yes" : "No"} sub="fulfillment" />
-                  <MetricCard icon="💬" label="WhatsApp" value={wabaInfo?.whatsapp_number ? "Linked" : "Not linked"} sub="connect in Settings" />
+                  <MetricCard icon="💬" label="WhatsApp" value={wabaInfo?.whatsapp_number ? "Linked" : "Not linked"} sub="manage via logo → Account" />
                 </div>
                 <LocalCourierQueue apiClient={apiClient} />
-                <div style={{ marginTop: 12 }}>
-                  <WABAPanel info={wabaInfo} />
-                </div>
               </>
             ) : (
               <>
@@ -1197,7 +1132,6 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
                   <TableOccupancy tables={tableSnapshot.tables} takeawayActive={tableSnapshot.takeawayActive} queueWaiting={tableSnapshot.queueWaiting} />
                   <KotStatus stats={kotStats} />
                 </div>
-                <WABAPanel info={wabaInfo} />
               </>
             )}
           </>
@@ -1230,8 +1164,8 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
             {/* Paid collections summary (replaces broken revenue chart) */}
             <PaidCollectionsSummary kpi={kpi} meta={insightsPack?.meta || waMeta} />
 
-            {/* Menu items + WABA panel — hide empty top-menu when no paid line items */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12, marginBottom: 12 }}>
+            {/* Top menu items — WhatsApp status lives on Live tab / My Account */}
+            <div style={{ marginBottom: 12 }}>
               {menuItems?.length > 0
                 ? <TopMenuItems items={menuItems} />
                 : (
@@ -1240,7 +1174,6 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
                     <div style={{ fontSize: 12, color: C.textMuted }}>No paid line items in this period yet.</div>
                   </div>
                 )}
-              <WABAPanel info={wabaInfo} />
             </div>
 
             {/* Paid collections (full width) */}
@@ -1249,10 +1182,14 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
             </div>
 
             {/* Session outcomes + Cancel stats */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12, marginBottom: 12 }}>
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: isPackagedGoods ? "1fr" : "repeat(2,minmax(0,1fr))",
+              gap: 12,
+              marginBottom: 12,
+            }}>
               <CancellationVoids stats={cancelStats} />
               {!isPackagedGoods && <KotStatus stats={kotStats} />}
-              {isPackagedGoods && <WABAPanel info={wabaInfo} />}
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12, marginBottom: 12 }}>
