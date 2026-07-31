@@ -12,6 +12,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import BrandHeader from '../components/BrandHeader';
+import SupportChip from '../components/SupportChip';
 import { C } from '../theme/brand';
 
 const CARD = {
@@ -215,16 +216,19 @@ export default function CaptainPortal() {
         title="Captain portal"
         subtitle={user?.full_name || 'Takeaway fulfillment'}
         right={
-          <button
-            onClick={logout}
-            style={{
-              fontSize: 12, fontWeight: 500, padding: '6px 12px', borderRadius: 8,
-              border: `0.5px solid ${C.dangerBorder}`, background: C.dangerLight,
-              color: C.dangerDark, cursor: 'pointer',
-            }}
-          >
-            Logout
-          </button>
+          <>
+            <SupportChip />
+            <button
+              onClick={logout}
+              style={{
+                fontSize: 12, fontWeight: 500, padding: '6px 12px', borderRadius: 8,
+                border: `0.5px solid ${C.dangerBorder}`, background: C.dangerLight,
+                color: C.dangerDark, cursor: 'pointer',
+              }}
+            >
+              Logout
+            </button>
+          </>
         }
       />
 

@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from "react";
 import BrandHeader from "../components/BrandHeader";
+import SupportChip from "../components/SupportChip";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 import { C } from '../theme/brand';
@@ -1467,6 +1468,7 @@ export default function MarketingDashboard({ restaurantId, restaurantName, onLog
             <div style={{ display: "flex", gap: 3, background: "rgba(255,255,255,0.12)", borderRadius: 9, padding: 3 }}>
               {tabs.map(t => <button key={t.key} style={tabStyle(t.key)} onClick={() => setActiveTab(t.key)}>{t.label}</button>)}
             </div>
+            <SupportChip />
             <button
               onClick={onLogout}
               style={{

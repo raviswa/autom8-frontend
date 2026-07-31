@@ -10,6 +10,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import BrandHeader from '../components/BrandHeader';
+import SupportChip from '../components/SupportChip';
 import { C } from '../theme/brand';
 
 const CARD = {
@@ -377,6 +378,7 @@ export default function BrandDashboard() {
             >
               Settings
             </button>
+            <SupportChip />
             <button
               onClick={logout}
               style={{

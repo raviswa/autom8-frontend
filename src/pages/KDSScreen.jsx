@@ -26,6 +26,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useWebSocket } from '../contexts/WebSocketContext';
 import DateRangeApply from '../components/DateRangeApply';
 import BrandHeader from '../components/BrandHeader';
+import SupportChip from '../components/SupportChip';
 import { CD } from '../theme/brand';
 import { formatKitchenOrderNo } from '../helpers/orderDisplay';
 
@@ -1447,6 +1448,7 @@ const fetchFeed = useCallback(async () => {
               >
                 {sound ? 'Sound on' : 'Sound off'}
               </button>
+              <SupportChip />
               <button className="kds-ribbon-chip kds-ribbon-chip-danger" onClick={logout}>
                 Logout
               </button>

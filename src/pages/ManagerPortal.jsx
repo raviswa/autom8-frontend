@@ -28,6 +28,7 @@ import { kotRef } from '../App';
 import { format } from 'date-fns';
 import DateRangeApply, { formatDateDMY } from '../components/DateRangeApply';
 import BrandHeader from '../components/BrandHeader';
+import SupportChip from '../components/SupportChip';
 import { formatBusinessLabel } from '../config/lobTaxonomy';
 import { MENU_SLOT_OPTIONS, normalizeMenuSlots, toggleMenuSlot } from '../helpers/menuSlots';
 import { ACTIVE_ORDER_STATUSES } from '../helpers/orderStatuses';
@@ -2507,6 +2508,7 @@ const fetchRestaurantMeta = useCallback(async () => {
                 👥 Team
               </Link>
               {!isPackagedLob && <Btn onClick={() => openNewOrderModal(null)}>+ New order</Btn>}
+              <SupportChip />
               <Btn variant="danger" onClick={logout}>Logout</Btn>
               </>
   }

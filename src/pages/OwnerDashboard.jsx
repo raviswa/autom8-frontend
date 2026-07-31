@@ -10,6 +10,7 @@ import { supabase, useAuth } from "../contexts/AuthContext";
 import { Link } from "react-router-dom";
 import OwnerInsights from "../components/OwnerInsights";
 import BrandHeader from "../components/BrandHeader";
+import SupportChip from "../components/SupportChip";
 import { formatBusinessLabel } from "../config/lobTaxonomy";
 import { getDashboardProfile } from "../config/dashboardProfiles";
 import { ACTIVE_ORDER_STATUSES } from "../helpers/orderStatuses";
@@ -1188,6 +1189,7 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
             {navTabs.map(t => (
               <Link key={t.to} to={t.to} style={t.chip}>{t.label}</Link>
             ))}
+            <SupportChip />
             <button
               onClick={onLogout}
               style={{

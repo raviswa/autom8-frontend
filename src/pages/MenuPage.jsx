@@ -8,6 +8,7 @@ import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { useAuth } from '../contexts/AuthContext';
 import BrandHeader from '../components/BrandHeader';
+import SupportChip from '../components/SupportChip';
 import { C, FONTS } from '../theme/brand';
 import { getSchemaForLob } from '../config/catalogSchemas';
 import { MENU_SLOT_OPTIONS, normalizeMenuSlots, toggleMenuSlot } from '../helpers/menuSlots';
@@ -471,12 +472,15 @@ export default function MenuPage() {
         logoUrl={logoUrl}
         logoAlt={businessName ? `${businessName} logo` : 'Business logo'}
         right={
-          <Link
-            to={backPath}
-            style={{ fontSize: 12, color: '#fff', textDecoration: 'none', fontWeight: 500 }}
-          >
-            {backLabel}
-          </Link>
+          <>
+            <SupportChip />
+            <Link
+              to={backPath}
+              style={{ fontSize: 12, color: '#fff', textDecoration: 'none', fontWeight: 500 }}
+            >
+              {backLabel}
+            </Link>
+          </>
         }
       />
 
