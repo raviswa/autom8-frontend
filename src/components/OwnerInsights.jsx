@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useRef } from "react";
 import { Link } from "react-router-dom";
+import { getDashboardProfile } from "../config/dashboardProfiles";
 
 const HEAT_COLORS = ["#F5F5F3", "#E6F1FB", "#85B7EB", "#378ADD", "#185FA5"];
 const CARD = { background: "#fff", border: "0.5px solid #E8E8E5", borderRadius: 12, padding: "16px 20px" };
@@ -291,11 +292,14 @@ function useInsights(apiClient, startISO, endISO, skip = false) {
   return { data, loading, error };
 }
 
-export default function OwnerInsights({ apiClient, startISO, endISO, rangeLabel, insightsData }) {
+export default function OwnerInsights({ apiClient, startISO, endISO, rangeLabel, insightsData, dashboardProfile }) {
   const fetched = useInsights(apiClient, startISO, endISO, Boolean(insightsData));
   const data = insightsData ?? fetched.data;
   const loading = !insightsData && fetched.loading;
   const error = !insightsData ? fetched.error : null;
+  const profile = dashboardProfile || getDashboardProfile("restaurant");
+  const sections = profile.insightsSections || {};
+  const copy = profile.copy || {};
 
   if (loading && !data) {
     return (
@@ -320,114 +324,139 @@ export default function OwnerInsights({ apiClient, startISO, endISO, rangeLabel,
       <div style={{ marginBottom: 16 }}>
         <h2 style={{ fontSize: 16, fontWeight: 500, color: "#111", margin: 0 }}>Insights</h2>
         <p style={{ fontSize: 12, color: "#888", margin: "4px 0 0" }}>
-          Actionable analytics for staffing, menu, and WhatsApp retention · paid revenue only · {rangeLabel}
+          {copy.insightsBlurb || "Actionable analytics · paid revenue only"} · {rangeLabel}
         </p>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, marginBottom: 12 }}>
-        <div style={CARD}>
-          <SectionHeader title="Returning customers %" sub="Weekly trend (paid guests)" />
-          <RepeatTrendChart trend={repeatTrend} />
-        </div>
-        <div style={CARD}>
-          <SectionHeader title="Visit frequency" sub="Based on phone numbers on paid orders" />
-          <div style={{ fontSize: 28, fontWeight: 500, color: "#111" }}>
-            {customers?.avgDaysBetweenVisits != null ? `${customers.avgDaysBetweenVisits} days` : "—"}
+        {sections.returning !== false && (
+          <div style={CARD}>
+            <SectionHeader title="Returning customers %" sub="Weekly trend (paid guests)" />
+            <RepeatTrendChart trend={repeatTrend} />
           </div>
-          <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>Avg days between visits</div>
-          {customers?.medianDaysBetweenVisits != null && (
-            <div style={{ fontSize: 11, color: "#aaa", marginTop: 8 }}>Median: {customers.medianDaysBetweenVisits} days</div>
-          )}
-        </div>
-        <div style={CARD}>
-          <SectionHeader title="Customer recency" sub="RFM-lite segments" />
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {[
-              { key: "active", label: "Active (≤14 days)", count: customers?.segments?.active },
-              { key: "atRisk", label: "At-risk (15–45 days)", count: customers?.segments?.atRisk },
-              { key: "lapsed", label: "Lapsed (45+ days)", count: customers?.segments?.lapsed },
-            ].map(s => (
-              <div key={s.key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }}>
-                <span style={{ color: "#666" }}>
-                  <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: SEGMENT_COLORS[s.key], marginRight: 6 }} />
-                  {s.label}
-                </span>
-                <strong style={{ color: "#111" }}>{s.count ?? 0}</strong>
-              </div>
-            ))}
+        )}
+        {sections.visitFrequency !== false && (
+          <div style={CARD}>
+            <SectionHeader
+              title={copy.visitFrequencyTitle || "Visit frequency"}
+              sub={copy.visitFrequencySub || "Based on phone numbers on paid orders"}
+            />
+            <div style={{ fontSize: 28, fontWeight: 500, color: "#111" }}>
+              {customers?.avgDaysBetweenVisits != null ? `${customers.avgDaysBetweenVisits} days` : "—"}
+            </div>
+            <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>
+              {copy.avgBetweenLabel || "Avg days between visits"}
+            </div>
+            {customers?.medianDaysBetweenVisits != null && (
+              <div style={{ fontSize: 11, color: "#aaa", marginTop: 8 }}>Median: {customers.medianDaysBetweenVisits} days</div>
+            )}
           </div>
-          {(customers?.segments?.lapsed ?? 0) > 0 && (
-            <Link
-              to="/dashboard/marketing"
-              style={{
-                marginTop: 14, width: "100%", fontSize: 11, fontWeight: 500, padding: "8px 12px",
-                borderRadius: 8, border: "0.5px solid #CECBF6", background: "#EEEDFE", color: "#3C3489",
-                cursor: "pointer", textDecoration: "none", display: "block", textAlign: "center", boxSizing: "border-box",
-              }}
-            >
-              Win back {customers.segments.lapsed} lapsed customers →
-            </Link>
-          )}
-        </div>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-        <div style={CARD}>
-          <SectionHeader title="Top customers by visits" sub={`${customers?.totalCustomers ?? 0} unique phones in period`} />
-          <CustomerLeaderboard rows={customers?.topByVisits} sortBy="visits" />
-        </div>
-        <div style={CARD}>
-          <SectionHeader title="Top customers by spend" sub="From paid collection totals" />
-          <CustomerLeaderboard rows={customers?.topBySpend} sortBy="spend" />
-        </div>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-        <div style={CARD}>
-          <SectionHeader title="Frequently ordered together" sub="Bundle & procurement signals" />
-          {!comboPatterns?.length ? (
-            <div style={{ fontSize: 12, color: "#aaa" }}>Need more orders to detect pairs (min 2 co-orders)</div>
-          ) : (
+        )}
+        {sections.recency !== false && (
+          <div style={CARD}>
+            <SectionHeader title="Customer recency" sub="RFM-lite segments" />
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {comboPatterns.map((p, i) => (
-                <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "6px 0", borderBottom: "0.5px solid #F7F7F5" }}>
-                  <span style={{ color: "#444" }}>{p.itemA} + {p.itemB}</span>
-                  <strong style={{ color: "#185FA5" }}>{p.count}×</strong>
+              {[
+                { key: "active", label: "Active (≤14 days)", count: customers?.segments?.active },
+                { key: "atRisk", label: "At-risk (15–45 days)", count: customers?.segments?.atRisk },
+                { key: "lapsed", label: "Lapsed (45+ days)", count: customers?.segments?.lapsed },
+              ].map(s => (
+                <div key={s.key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }}>
+                  <span style={{ color: "#666" }}>
+                    <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: SEGMENT_COLORS[s.key], marginRight: 6 }} />
+                    {s.label}
+                  </span>
+                  <strong style={{ color: "#111" }}>{s.count ?? 0}</strong>
                 </div>
               ))}
             </div>
-          )}
-        </div>
-        <div style={CARD}>
-          <SectionHeader title="Out-of-stock frequency" sub="From manager menu toggles" />
-          {!stockOutages?.length ? (
-            <div style={{ fontSize: 12, color: "#aaa" }}>No stock toggles recorded in this period</div>
-          ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-              <thead>
-                <tr style={{ borderBottom: "0.5px solid #F0F0EE" }}>
-                  {["Item", "Times off", "Hours off"].map(h => (
-                    <th key={h} style={{ textAlign: "left", color: "#aaa", fontWeight: 400, fontSize: 10, paddingBottom: 6 }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {stockOutages.map((r, i) => (
-                  <tr key={i} style={{ borderBottom: "0.5px solid #F7F7F5" }}>
-                    <td style={{ padding: "5px 0", fontWeight: 500 }}>{r.name}</td>
-                    <td style={{ padding: "5px 8px 5px 0", color: r.offCount >= 3 ? "#A32D2D" : "#666" }}>{r.offCount}</td>
-                    <td style={{ padding: "5px 0", color: "#666" }}>{r.totalOffHours > 0 ? `${r.totalOffHours}h` : "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+            {(customers?.segments?.lapsed ?? 0) > 0 && (
+              <Link
+                to="/dashboard/marketing"
+                style={{
+                  marginTop: 14, width: "100%", fontSize: 11, fontWeight: 500, padding: "8px 12px",
+                  borderRadius: 8, border: "0.5px solid #CECBF6", background: "#EEEDFE", color: "#3C3489",
+                  cursor: "pointer", textDecoration: "none", display: "block", textAlign: "center", boxSizing: "border-box",
+                }}
+              >
+                Win back {customers.segments.lapsed} lapsed customers →
+              </Link>
+            )}
+          </div>
+        )}
       </div>
 
-      {menuQuadrant?.items?.length > 0 || (Array.isArray(menuQuadrant) && menuQuadrant.length > 0) ? (
+      {sections.topCustomers !== false && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+          <div style={CARD}>
+            <SectionHeader
+              title={copy.topByVisitsTitle || "Top customers by visits"}
+              sub={`${customers?.totalCustomers ?? 0} unique phones in period`}
+            />
+            <CustomerLeaderboard rows={customers?.topByVisits} sortBy="visits" />
+          </div>
+          <div style={CARD}>
+            <SectionHeader title="Top customers by spend" sub="From paid collection totals" />
+            <CustomerLeaderboard rows={customers?.topBySpend} sortBy="spend" />
+          </div>
+        </div>
+      )}
+
+      {(sections.combos !== false || sections.stockOutages !== false) && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+          {sections.combos !== false && (
+            <div style={CARD}>
+              <SectionHeader title="Frequently ordered together" sub="Bundle & procurement signals" />
+              {!comboPatterns?.length ? (
+                <div style={{ fontSize: 12, color: "#aaa" }}>Need more orders to detect pairs (min 2 co-orders)</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {comboPatterns.map((p, i) => (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "6px 0", borderBottom: "0.5px solid #F7F7F5" }}>
+                      <span style={{ color: "#444" }}>{p.itemA} + {p.itemB}</span>
+                      <strong style={{ color: "#185FA5" }}>{p.count}×</strong>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {sections.stockOutages !== false && (
+            <div style={CARD}>
+              <SectionHeader title="Out-of-stock frequency" sub="From manager menu toggles" />
+              {!stockOutages?.length ? (
+                <div style={{ fontSize: 12, color: "#aaa" }}>No stock toggles recorded in this period</div>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ borderBottom: "0.5px solid #F0F0EE" }}>
+                      {["Item", "Times off", "Hours off"].map(h => (
+                        <th key={h} style={{ textAlign: "left", color: "#aaa", fontWeight: 400, fontSize: 10, paddingBottom: 6 }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stockOutages.map((r, i) => (
+                      <tr key={i} style={{ borderBottom: "0.5px solid #F7F7F5" }}>
+                        <td style={{ padding: "5px 0", fontWeight: 500 }}>{r.name}</td>
+                        <td style={{ padding: "5px 8px 5px 0", color: r.offCount >= 3 ? "#A32D2D" : "#666" }}>{r.offCount}</td>
+                        <td style={{ padding: "5px 0", color: "#666" }}>{r.totalOffHours > 0 ? `${r.totalOffHours}h` : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {sections.quadrant !== false && (menuQuadrant?.items?.length > 0 || (Array.isArray(menuQuadrant) && menuQuadrant.length > 0)) ? (
         <div style={CARD}>
-          <SectionHeader title="Menu engineering quadrant" sub="Stars · Hidden gems · Fillers · Dead weight (paid)" />
+          <SectionHeader
+            title={copy.quadrantTitle || "Menu engineering quadrant"}
+            sub={copy.quadrantSub || "Stars · Hidden gems · Fillers · Dead weight (paid)"}
+          />
           <MenuQuadrantChart data={menuQuadrant} />
         </div>
       ) : null}

@@ -11,6 +11,7 @@ import { Link } from "react-router-dom";
 import OwnerInsights from "../components/OwnerInsights";
 import BrandHeader from "../components/BrandHeader";
 import { formatBusinessLabel } from "../config/lobTaxonomy";
+import { getDashboardProfile } from "../config/dashboardProfiles";
 import { ACTIVE_ORDER_STATUSES } from "../helpers/orderStatuses";
 import { C } from "../theme/brand";
 
@@ -257,12 +258,12 @@ function MetricCard({ icon, label, value, sub, badge, neutral, tooltip }) {
   );
 }
 
-function TopMenuItems({ items }) {
+function TopMenuItems({ items, title = "Top menu items" }) {
   const maxRev = items?.[0]?.revenue ?? 1;
   return (
     <div style={{ background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: "16px 20px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>Top menu items</span>
+        <span style={{ fontSize: 14, fontWeight: 500, color: C.text }}>{title}</span>
         <span style={{ fontSize: 11, color: C.textMuted }}>by revenue</span>
       </div>
       {!items?.length && <div style={{ fontSize: 12, color: C.textMuted, padding: "16px 0", textAlign: "center" }}>No data for this period</div>}
@@ -402,33 +403,42 @@ function KotStatus({ stats }) {
 }
 
 // FIX: uses new backend fields: sessionsCompleted, sessionsAborted, totalSessions, sessionAbortRate
-function CancellationVoids({ stats }) {
+// mode: 'full' = sessions + cancels (restaurant); 'cancelsOnly' = manager voids (packaged commerce)
+function CancellationVoids({ stats, mode = "full" }) {
   const sessionsCompleted = stats?.sessionsCompleted ?? 0;
   const sessionsAborted   = stats?.sessionsAborted   ?? 0;
   const totalSessions     = stats?.totalSessions     ?? 0;
   const sessionAbortRate  = stats?.sessionAbortRate  ?? 0;
+  const cancelsOnly = mode === "cancelsOnly";
 
   return (
-    <StatCard title="Session outcomes &amp; voids" sub="selected period">
-      <div style={{
-        fontSize: 12, color: C.warningDark, background: C.warningLight, border: `0.5px solid ${C.warningBorder}`,
-        borderRadius: 8, padding: "10px 12px", marginBottom: 14, lineHeight: 1.55,
-      }}>
-        <strong>Not the same as lost revenue.</strong> WhatsApp &ldquo;aborts&rdquo; are customers who
-        explicitly cancelled their session — not no-shows. Completed visits are normal check-outs.
-      </div>
-      <div style={{ marginBottom: 14 }}>
-        <div style={{ fontSize: 11, fontWeight: 500, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>
-          WhatsApp session outcomes
-        </div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-          <MiniStat label="Completed visits" value={sessionsCompleted} color={C.success} />
-          <MiniStat label="Customer aborted" value={sessionsAborted}   color={sessionsAborted > 0 ? C.warning : C.text} />
-          <MiniStat label="Total sessions"   value={totalSessions} />
-          <MiniStat label="Abort rate"       value={`${sessionAbortRate}%`} color={sessionAbortRate > 10 ? C.warning : C.text} />
-        </div>
-      </div>
-      <div style={{ borderTop: `0.5px solid ${C.border}`, marginBottom: 14 }} />
+    <StatCard
+      title={cancelsOnly ? "Order cancels & voids" : "Session outcomes & voids"}
+      sub="selected period"
+    >
+      {!cancelsOnly && (
+        <>
+          <div style={{
+            fontSize: 12, color: C.warningDark, background: C.warningLight, border: `0.5px solid ${C.warningBorder}`,
+            borderRadius: 8, padding: "10px 12px", marginBottom: 14, lineHeight: 1.55,
+          }}>
+            <strong>Not the same as lost revenue.</strong> WhatsApp &ldquo;aborts&rdquo; are customers who
+            explicitly cancelled their session — not no-shows. Completed visits are normal check-outs.
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 500, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>
+              WhatsApp session outcomes
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+              <MiniStat label="Completed visits" value={sessionsCompleted} color={C.success} />
+              <MiniStat label="Customer aborted" value={sessionsAborted}   color={sessionsAborted > 0 ? C.warning : C.text} />
+              <MiniStat label="Total sessions"   value={totalSessions} />
+              <MiniStat label="Abort rate"       value={`${sessionAbortRate}%`} color={sessionAbortRate > 10 ? C.warning : C.text} />
+            </div>
+          </div>
+          <div style={{ borderTop: `0.5px solid ${C.border}`, marginBottom: 14 }} />
+        </>
+      )}
       <div>
         <div style={{ fontSize: 11, fontWeight: 500, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>
           Order cancellations (Manager portal)
@@ -527,9 +537,9 @@ function useCustomerCohorts(apiClient) {
   return data;
 }
 
-function ItemPerformanceTable({ rows, rangeLabel }) {
+function ItemPerformanceTable({ rows, rangeLabel, title = "Item performance" }) {
   return (
-    <StatCard title="Item performance" sub={rangeLabel || "Selected period"}>
+    <StatCard title={title} sub={rangeLabel || "Selected period"}>
       {!rows ? (
         <div style={{ fontSize: 12, color: "#aaa" }}>Loading…</div>
       ) : !rows.length ? (
@@ -982,13 +992,12 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
     ? `Custom · ${fmtDate(customStart)} – ${fmtDate(customEnd)}`
     : { today: "Today", yesterday: "Yesterday", "7d": "Last 7 days", "30d": "Last 30 days" }[preset];
 
-  const row1 = [
+  const row1Base = [
     { icon: "₹",  label: "Total revenue",  value: kpi ? fmtINR(kpi.totalRevenue) : "—", sub: "paid only", tooltip: "Sum of paid booking totals + completed POS orders. Durable ledger (not invoices)." },
     { icon: "🛒", label: "Paid orders", value: kpi?.totalOrders ?? "—",               sub: "payment collected", tooltip: "Count of paid bookings and completed POS orders." },
     { icon: "🧾", label: "Avg order value", value: kpi ? `₹${kpi.aov}` : "—",             sub: "paid only", tooltip: "Paid revenue ÷ paid order count." },
-    { icon: "👥", label: "Total covers",    value: kpi?.totalCovers ?? "—",                neutral: true, sub: "paid only", tooltip: "One cover per paid collection." },
   ];
-  const row2 = [
+  const diningRow2 = [
     { icon: "🔄", label: "Table turns",     value: kpi && tableSnapshot.tables?.length ? (kpi.totalOrders / tableSnapshot.tables.length).toFixed(1) : "—", sub: "selected period", tooltip: "Total orders ÷ tables." },
     { icon: "⏱",  label: "Avg dining time", value: kpi?.avgDining ? `${kpi.avgDining} min` : "—", sub: "Benchmark: 90 min", tooltip: "Avg mins from table assignment to visit completion." },
     { icon: "🎟",  label: "Tokens issued",  value: kpi?.tokensIssued ?? "—", sub: "selected period", tooltip: "Walk-in customers who received a queue token." },
@@ -1016,8 +1025,13 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
   // ── Nav tabs: which chips show depends on the tenant's line-of-business.
   // Packaged LOBs hide dine-in kitchen/captain chrome; Captain stays only when
   // takeaway/store-pickup is enabled (QR handover).
-  const lobType = String(wabaInfo?.lob_type || "restaurant").toLowerCase();
-  const isPackagedGoods = ["food_products", "psl", "retail", "b2b", "jewellery"].includes(lobType);
+  // Do not default to restaurant while /waba is loading — that flashes Kitchen/Menu.
+  const lobReady = wabaInfo !== undefined;
+  const lobType = lobReady
+    ? String(wabaInfo?.lob_type || "restaurant").toLowerCase()
+    : null;
+  const dashProfile = lobReady ? getDashboardProfile(lobType) : null;
+  const isPackagedGoods = !!dashProfile?.isPackaged;
   const features = Array.isArray(wabaInfo?.subscribed_features) ? wabaInfo.subscribed_features : [];
   const hasTakeaway = features.includes("takeaway");
   const businessName =
@@ -1025,41 +1039,118 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
     wabaInfo?.name ||
     restaurantName ||
     "Your business";
-  const businessLabel = formatBusinessLabel({
-    business_family: wabaInfo?.business_family,
-    business_vertical: wabaInfo?.business_vertical,
-    business_vertical_other: wabaInfo?.business_vertical_other,
-    lob_type: lobType,
-  });
+  const businessLabel = lobReady
+    ? formatBusinessLabel({
+        business_family: wabaInfo?.business_family,
+        business_vertical: wabaInfo?.business_vertical,
+        business_vertical_other: wabaInfo?.business_vertical_other,
+        lob_type: lobType,
+      })
+    : "Loading…";
 
-  const navTabs = isPackagedGoods
-    ? [
-        { to: "/dashboard/manager", label: "Manager", chip: CHIP_PRIMARY },
-        { to: "/dashboard/packing", label: "Packing", chip: CHIP_PRIMARY },
-        ...(hasTakeaway
-          ? [{ to: "/dashboard/captain", label: "Captain", chip: CHIP_SECONDARY }]
-          : []),
-        { to: "/dashboard/menu",    label: "Catalog",  chip: CHIP_SECONDARY },
-        { to: "/settings?tab=kitchen#scheduled-ordering", label: "Order hours", chip: CHIP_PRIMARY },
-        { to: "/settings",          label: "Settings", chip: CHIP_SECONDARY },
-      ]
-    : [
-        { to: "/dashboard/manager", label: "Manager", chip: CHIP_PRIMARY },
-        { to: "/dashboard/kitchen", label: "Kitchen", chip: CHIP_PRIMARY },
-        { to: "/dashboard/packing", label: "Packing", chip: CHIP_PRIMARY },
-        { to: "/dashboard/captain", label: "Captain", chip: CHIP_SECONDARY },
-        { to: "/dashboard/menu",    label: "Menu",     chip: CHIP_SECONDARY },
-        { to: "/settings?tab=kitchen#scheduled-ordering", label: "Kitchen hours", chip: CHIP_PRIMARY },
-        { to: "/settings",          label: "Settings", chip: CHIP_SECONDARY },
-      ];
+  const fulfillmentMix = useMemo(() => {
+    const orders = waOrders || [];
+    let pickup = 0;
+    let delivery = 0;
+    for (const o of orders) {
+      const svc = String(o.service_type || o.event_type || "").toLowerCase();
+      if (svc.includes("delivery")) delivery += 1;
+      else if (svc.includes("takeaway") || svc.includes("pickup") || svc === "parcel") pickup += 1;
+    }
+    return { pickup, delivery };
+  }, [waOrders]);
 
-  const packagedRow2 = [
-    { icon: "📦", label: "Orders",          value: kpi?.totalOrders ?? "—", sub: "selected period" },
-    { icon: "🛵", label: "Takeaway / pickup", value: kpi?.tokensIssued ?? "—", sub: "selected period" },
-    { icon: "🚗", label: "Delivery focus",  value: features.includes("delivery") ? "On" : "Off", sub: "fulfillment" },
-    { icon: "📋", label: "Catalog items",   value: menuItems?.length ?? "—", sub: "top sellers shown below" },
+  const uniqueCustomers =
+    cohorts?.total_customers
+    ?? insightsPack?.customers?.totalCustomers
+    ?? null;
+  const skuCountInPeriod = Array.isArray(itemPerf)
+    ? itemPerf.filter((r) => Number(r.order_count || r.qty || 0) > 0 || Number(r.revenue || 0) > 0).length
+    : (menuItems?.length ?? null);
+
+  const row1 = [
+    ...row1Base,
+    dashProfile?.fourthKpi === "uniqueCustomers"
+      ? {
+          icon: "👥",
+          label: "Unique customers",
+          value: uniqueCustomers ?? "—",
+          neutral: true,
+          sub: "paid phones",
+          tooltip: "Distinct customer phones on paid collections (cohorts / insights).",
+        }
+      : {
+          icon: "👥",
+          label: "Total covers",
+          value: kpi?.totalCovers ?? "—",
+          neutral: true,
+          sub: "paid only",
+          tooltip: "One cover per paid collection.",
+        },
   ];
-  const analyticsRow2 = isPackagedGoods ? packagedRow2 : row2;
+
+  const commerceRow2 = [
+    {
+      icon: "🛵",
+      label: "Pickup orders",
+      value: waOrders == null ? "—" : fulfillmentMix.pickup,
+      sub: "paid · selected period",
+      tooltip: "Paid collections with takeaway / store pickup service type.",
+    },
+    {
+      icon: "🚗",
+      label: "Delivery orders",
+      value: waOrders == null ? "—" : fulfillmentMix.delivery,
+      sub: "paid · selected period",
+      tooltip: "Paid collections with delivery service type.",
+    },
+    {
+      icon: "🔁",
+      label: "Repeat rate",
+      value: cohorts ? `${cohorts.repeat_rate ?? 0}%` : "—",
+      sub: "customer cohorts",
+      tooltip: "Share of customers with more than one paid order (marketing cohorts).",
+    },
+    {
+      icon: "📋",
+      label: "SKUs sold",
+      value: skuCountInPeriod ?? "—",
+      sub: "distinct items in period",
+      tooltip: "Distinct catalog items with paid sales in this period (not full catalog size).",
+    },
+  ];
+
+  const analyticsRow2 = dashProfile?.kpiRow2 === "commerce" ? commerceRow2 : diningRow2;
+
+  const accountNav = [
+    { to: "/account?tab=whatsapp", label: "WhatsApp", chip: CHIP_SECONDARY },
+    { to: "/account", label: "Account", chip: CHIP_SECONDARY },
+  ];
+
+  const navTabs = !lobReady
+    ? []
+    : isPackagedGoods
+      ? [
+          { to: "/dashboard/manager", label: "Manager", chip: CHIP_PRIMARY },
+          { to: "/dashboard/packing", label: "Packing", chip: CHIP_PRIMARY },
+          ...(hasTakeaway
+            ? [{ to: "/dashboard/captain", label: "Captain", chip: CHIP_SECONDARY }]
+            : []),
+          { to: "/dashboard/menu",    label: "Catalog",  chip: CHIP_SECONDARY },
+          { to: "/settings?tab=kitchen#scheduled-ordering", label: "Order hours", chip: CHIP_PRIMARY },
+          { to: "/settings",          label: "Settings", chip: CHIP_SECONDARY },
+          ...accountNav,
+        ]
+      : [
+          { to: "/dashboard/manager", label: "Manager", chip: CHIP_PRIMARY },
+          { to: "/dashboard/kitchen", label: "Kitchen", chip: CHIP_PRIMARY },
+          { to: "/dashboard/packing", label: "Packing", chip: CHIP_PRIMARY },
+          { to: "/dashboard/captain", label: "Captain", chip: CHIP_SECONDARY },
+          { to: "/dashboard/menu",    label: "Menu",     chip: CHIP_SECONDARY },
+          { to: "/settings?tab=kitchen#scheduled-ordering", label: "Kitchen hours", chip: CHIP_PRIMARY },
+          { to: "/settings",          label: "Settings", chip: CHIP_SECONDARY },
+          ...accountNav,
+        ];
 
   return (
     <div style={{ minHeight: "100vh", background: C.pageBg }}>
@@ -1067,6 +1158,8 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
         brandTo="/account"
         title="Owner dashboard"
         subtitle={`${businessName} · ${businessLabel} · ${dateStr}`}
+        logoUrl={wabaInfo?.logo_url || undefined}
+        logoAlt={businessName}
         right={
           <>
             <div style={{ display: "flex", gap: 2, background: "rgba(255,255,255,0.12)", borderRadius: 10, padding: 3 }}>
@@ -1089,6 +1182,9 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
               </>
             )}
 
+            {!lobReady && (
+              <span style={{ fontSize: 12, color: "#BFE0D6" }}>Loading…</span>
+            )}
             {navTabs.map(t => (
               <Link key={t.to} to={t.to} style={t.chip}>{t.label}</Link>
             ))}
@@ -1108,17 +1204,26 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
 
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "24px" }}>
 
+        {!lobReady && (
+          <div style={{
+            background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12,
+            padding: "40px 24px", textAlign: "center", color: C.textMuted, fontSize: 13,
+          }}>
+            Loading dashboard…
+          </div>
+        )}
+
         {/* ── LIVE TAB ──────────────────────────────────────────────────── */}
-        {activeTab === "live" && (
+        {lobReady && activeTab === "live" && (
           <>
-            {isPackagedGoods ? (
+            {dashProfile.showCommerceLive ? (
               <>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 10, marginBottom: 14 }}>
                   <MetricCard icon="🛵" label="Takeaway active" value={tableSnapshot.takeawayActive} sub="in progress" />
                   <MetricCard icon="🚗" label="Delivery enabled" value={features.includes("delivery") ? "Yes" : "No"} sub="fulfillment" />
-                  <MetricCard icon="💬" label="WhatsApp" value={wabaInfo?.whatsapp_number ? "Linked" : "Not linked"} sub="manage via logo → Account" />
+                  <MetricCard icon="💬" label="WhatsApp" value={wabaInfo?.whatsapp_number ? "Linked" : "Not linked"} sub="Account → WhatsApp" />
                 </div>
-                <LocalCourierQueue apiClient={apiClient} />
+                {dashProfile.showCourierQueue && <LocalCourierQueue apiClient={apiClient} />}
               </>
             ) : (
               <>
@@ -1129,8 +1234,10 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
                   <MetricCard icon="🍳" label="KOT open"          value={(kotStats?.open ?? 0) + (kotStats?.inProgress ?? 0)} sub="kitchen orders" />
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12, marginBottom: 12 }}>
-                  <TableOccupancy tables={tableSnapshot.tables} takeawayActive={tableSnapshot.takeawayActive} queueWaiting={tableSnapshot.queueWaiting} />
-                  <KotStatus stats={kotStats} />
+                  {dashProfile.showTablesLive && (
+                    <TableOccupancy tables={tableSnapshot.tables} takeawayActive={tableSnapshot.takeawayActive} queueWaiting={tableSnapshot.queueWaiting} />
+                  )}
+                  {dashProfile.showKot && <KotStatus stats={kotStats} />}
                 </div>
               </>
             )}
@@ -1138,7 +1245,7 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
         )}
 
         {/* ── ANALYTICS TAB ─────────────────────────────────────────────── */}
-        {activeTab === "analytics" && (
+        {lobReady && activeTab === "analytics" && (
           <>
             {/* Custom date picker */}
             {showCal && (
@@ -1164,13 +1271,12 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
             {/* Paid collections summary (replaces broken revenue chart) */}
             <PaidCollectionsSummary kpi={kpi} meta={insightsPack?.meta || waMeta} />
 
-            {/* Top menu items — WhatsApp status lives on Live tab / My Account */}
             <div style={{ marginBottom: 12 }}>
               {menuItems?.length > 0
-                ? <TopMenuItems items={menuItems} />
+                ? <TopMenuItems items={menuItems} title={dashProfile.topItemsTitle} />
                 : (
                   <div style={{ background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: "16px 20px" }}>
-                    <div style={{ fontSize: 14, fontWeight: 500, color: C.text, marginBottom: 8 }}>Top menu items</div>
+                    <div style={{ fontSize: 14, fontWeight: 500, color: C.text, marginBottom: 8 }}>{dashProfile.topItemsTitle}</div>
                     <div style={{ fontSize: 12, color: C.textMuted }}>No paid line items in this period yet.</div>
                   </div>
                 )}
@@ -1181,19 +1287,24 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
               <WAOrdersTable orders={waOrders} rangeLabel={rangeLabel} meta={waMeta} />
             </div>
 
-            {/* Session outcomes + Cancel stats */}
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: isPackagedGoods ? "1fr" : "repeat(2,minmax(0,1fr))",
-              gap: 12,
-              marginBottom: 12,
-            }}>
-              <CancellationVoids stats={cancelStats} />
-              {!isPackagedGoods && <KotStatus stats={kotStats} />}
-            </div>
+            {/* Session outcomes (restaurant) and/or order cancels */}
+            {(dashProfile.showSessionOutcomes || dashProfile.showOrderCancels) && (
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: dashProfile.showKotAnalytics ? "repeat(2,minmax(0,1fr))" : "1fr",
+                gap: 12,
+                marginBottom: 12,
+              }}>
+                <CancellationVoids
+                  stats={cancelStats}
+                  mode={dashProfile.showSessionOutcomes ? "full" : "cancelsOnly"}
+                />
+                {dashProfile.showKotAnalytics && <KotStatus stats={kotStats} />}
+              </div>
+            )}
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12, marginBottom: 12 }}>
-              <ItemPerformanceTable rows={itemPerf} rangeLabel={rangeLabel} />
+              <ItemPerformanceTable rows={itemPerf} rangeLabel={rangeLabel} title={dashProfile.itemPerfTitle} />
               <CustomerCohortsPanel data={cohorts} />
             </div>
 
@@ -1205,6 +1316,7 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
               endISO={endISO}
               rangeLabel={rangeLabel}
               insightsData={insightsPack}
+              dashboardProfile={dashProfile}
             />
           </>
         )}
