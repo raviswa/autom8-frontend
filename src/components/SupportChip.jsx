@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { C } from '../theme/brand';
 
@@ -10,6 +10,10 @@ const CATEGORIES = [
   { id: 'menu_setup', label: 'Menu setup' },
   { id: 'other', label: 'Other' },
 ];
+
+const MAX_IMAGES = 5;
+const MAX_BYTES = 5 * 1024 * 1024;
+const ALLOWED = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 
 const chipStyle = {
   fontSize: 12,
@@ -31,9 +35,12 @@ const chipStyle = {
  */
 export default function SupportChip() {
   const { user } = useAuth();
+  const fileRef = useRef(null);
   const [open, setOpen] = useState(false);
   const [category, setCategory] = useState('other');
   const [message, setMessage] = useState('');
+  const [files, setFiles] = useState([]);
+  const [previews, setPreviews] = useState([]);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
@@ -43,6 +50,48 @@ export default function SupportChip() {
   const restaurantId = user?.restaurant_id
     || user?.outlets?.[0]?.id
     || null;
+
+  useEffect(() => {
+    const urls = files.map((f) => URL.createObjectURL(f));
+    setPreviews(urls);
+    return () => urls.forEach((u) => URL.revokeObjectURL(u));
+  }, [files]);
+
+  const resetForm = () => {
+    setMessage('');
+    setFiles([]);
+    setCategory('other');
+    if (fileRef.current) fileRef.current.value = '';
+  };
+
+  const onPickFiles = (e) => {
+    setError('');
+    const picked = Array.from(e.target.files || []);
+    if (!picked.length) return;
+
+    const next = [...files];
+    for (const f of picked) {
+      if (!ALLOWED.has(f.type)) {
+        setError('Only JPEG, PNG, WebP, or GIF images are allowed.');
+        continue;
+      }
+      if (f.size > MAX_BYTES) {
+        setError('Each image must be 5 MB or smaller.');
+        continue;
+      }
+      if (next.length >= MAX_IMAGES) {
+        setError(`You can attach up to ${MAX_IMAGES} images.`);
+        break;
+      }
+      next.push(f);
+    }
+    setFiles(next);
+    e.target.value = '';
+  };
+
+  const removeFile = (idx) => {
+    setFiles((prev) => prev.filter((_, i) => i !== idx));
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -63,19 +112,20 @@ export default function SupportChip() {
     setBusy(true);
     try {
       const token = localStorage.getItem('authToken');
+      const body = new FormData();
+      body.append('restaurant_id', restaurantId);
+      body.append('message', message.trim());
+      body.append('category', category);
+      body.append('source', 'dashboard');
+      files.forEach((f) => body.append('images', f));
+
       const res = await fetch(`${supportBase}/tickets`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
           'x-restaurant-id': restaurantId,
         },
-        body: JSON.stringify({
-          restaurant_id: restaurantId,
-          message: message.trim(),
-          category,
-          source: 'dashboard',
-        }),
+        body,
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
@@ -84,7 +134,7 @@ export default function SupportChip() {
         text: data.confirmation || data.ticket?.ai_response
           || "We've got it — you'll hear back shortly.",
       });
-      setMessage('');
+      resetForm();
     } catch (err) {
       setError(err.message || 'Could not submit ticket');
     } finally {
@@ -113,6 +163,7 @@ export default function SupportChip() {
           <div style={{
             width: '100%', maxWidth: 420, background: C.cardBg || '#fff',
             borderRadius: 14, padding: 20, boxShadow: '0 12px 40px rgba(0,0,0,0.25)',
+            maxHeight: '90vh', overflowY: 'auto',
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <strong style={{ fontSize: 15, color: C.text || '#111' }}>Contact support</strong>
@@ -166,6 +217,47 @@ export default function SupportChip() {
                     fontSize: 13, resize: 'vertical', boxSizing: 'border-box',
                   }}
                 />
+
+                <label style={{ fontSize: 12, color: C.textMuted || '#888', display: 'block', marginBottom: 4 }}>
+                  Screenshots (optional, up to {MAX_IMAGES})
+                </label>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  multiple
+                  onChange={onPickFiles}
+                  style={{ width: '100%', marginBottom: 8, fontSize: 12 }}
+                />
+                {previews.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                    {previews.map((url, i) => (
+                      <div key={url} style={{ position: 'relative', width: 64, height: 64 }}>
+                        <img
+                          src={url}
+                          alt={files[i]?.name || `Attachment ${i + 1}`}
+                          style={{
+                            width: 64, height: 64, objectFit: 'cover',
+                            borderRadius: 8, border: `1px solid ${C.border || '#e8e8e5'}`,
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeFile(i)}
+                          aria-label="Remove image"
+                          style={{
+                            position: 'absolute', top: -6, right: -6,
+                            width: 20, height: 20, borderRadius: 10,
+                            border: 'none', background: C.danger || '#a32d2d',
+                            color: '#fff', fontSize: 12, cursor: 'pointer', lineHeight: '20px',
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {error && (
                   <div style={{ fontSize: 12, color: C.danger || '#a32d2d', marginBottom: 10 }}>{error}</div>
