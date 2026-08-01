@@ -2,7 +2,7 @@
 cmds = ["npm install", "npm run build"]
 
 [phases.start]
-cmds = ["npx serve dist -s --listen tcp://0.0.0.0:3000"]
+cmds = ["node scripts/serve-protected.mjs"]
 
 [staticAssets]
 path = "dist"

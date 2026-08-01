@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "lint": "eslint src/ src-autom8-owner/ src-register/",
     "lint:fix": "eslint --fix src/ src-autom8-owner/ src-register/",
-    "start": "serve -s dist -l 3000",
+    "start": "node scripts/serve-protected.mjs",
+    "start:legacy-serve": "serve -s dist -l 3000",
     "build:register": "npx vite build --config vite.register.config.js",
     "build:autom8-owner": "npx vite build --config vite.autom8-owner.config.js && node -e \"require('fs').copyFileSync('src-autom8-owner/index.html','dist-autom8-owner/index.html')\""
   },

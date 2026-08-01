@@ -5,7 +5,7 @@
     "buildCommand": "npm install --include=dev && npm run build"
   },
   "deploy": {
-    "startCommand": "npx serve dist -s --listen tcp://0.0.0.0:$PORT",
+    "startCommand": "node scripts/serve-protected.mjs",
     "restartPolicyType": "ON_FAILURE"
   }
 }
