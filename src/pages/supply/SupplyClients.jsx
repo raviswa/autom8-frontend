@@ -268,41 +268,45 @@ function ClientRow({ client, onRecordPayment }) {
     setLinkStatus('');
     try {
       let orderFormUrl = null;
-      let whatsappSent = false;
+      let templateSent = false;
+      let openShare = true;
       let lastError = '';
+      let fromWaba = '';
 
-      // 1) Try business WhatsApp send (returns signed URL either way)
       try {
         const data = await apiFetch(`/api/supply/clients/${client.id}/send-form-link`, {
           method: 'POST',
           body: '{}',
         });
         orderFormUrl = data.order_form_url;
-        whatsappSent = !!data.whatsapp_sent;
-        if (!whatsappSent) {
+        // Only Meta template delivery is reliable outside the 24h window.
+        templateSent = !!data.whatsapp_sent && data.delivery_mode === 'template';
+        openShare = data.open_whatsapp_share !== false && !templateSent;
+        fromWaba = data.from_waba_phone || '';
+        if (!templateSent) {
           lastError = data.notification?.error || '';
         }
       } catch (sendErr) {
         lastError = sendErr.message || 'Send failed';
       }
 
-      // 2) If no URL yet, generate a bookmark link
       if (!orderFormUrl) {
         const gen = await apiFetch('/api/supply/form/generate-link', {
           method: 'POST',
           body: JSON.stringify({ client_id: client.id, type: 'permanent' }),
         });
         orderFormUrl = gen.url;
+        openShare = true;
       }
 
-      if (whatsappSent) {
-        setLinkStatus('sent');
-      } else if (openWhatsAppWithLink(client.phone, client.name, orderFormUrl)) {
+      if (templateSent) {
+        setLinkStatus(fromWaba ? `✓ Sent from ${fromWaba}` : 'sent');
+      } else if (openShare && openWhatsAppWithLink(client.phone, client.name, orderFormUrl)) {
         setLinkStatus('opened');
       } else {
         setLinkStatus(lastError || 'Could not send link');
       }
-      setTimeout(() => setLinkStatus(''), 5000);
+      setTimeout(() => setLinkStatus(''), 6000);
     } catch (err) {
       setLinkStatus(err.message || 'Could not send link');
       setTimeout(() => setLinkStatus(''), 6000);
@@ -313,7 +317,7 @@ function ClientRow({ client, onRecordPayment }) {
 
   const linkLabel = sending
     ? '…'
-    : linkStatus === 'sent'
+    : (linkStatus === 'sent' || linkStatus.startsWith('✓ Sent'))
       ? '✓ Sent'
       : linkStatus === 'opened'
         ? 'WhatsApp opened'
