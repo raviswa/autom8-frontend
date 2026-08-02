@@ -1168,7 +1168,7 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
           ...accountNav,
         ];
 
-  // Supply LOB: tenant portal is not the ops surface — point to supply.munafe.in (no SSO).
+  // Supply LOB: tenant portal is not the ops surface — point to /supply/* on app.autom8.works (no SSO).
   if (lobReady && isSupplyPortalLob(rawLobType)) {
     return <SupplySeparatePortalNotice businessName={businessName} />;
   }

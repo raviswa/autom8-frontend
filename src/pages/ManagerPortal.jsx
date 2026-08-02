@@ -1905,7 +1905,7 @@ const fetchRestaurantMeta = useCallback(async () => {
     outline: "none", boxSizing: "border-box",
   };
 
-  // Supply LOB: tenant portal is not the ops surface — point to supply.munafe.in (no SSO).
+  // Supply LOB: tenant portal is not the ops surface — point to /supply/* on app.autom8.works (no SSO).
   if (isSupplyPortalLob(lobType)) {
     const name = businessTaxonomy?.display_name
       || businessLabel

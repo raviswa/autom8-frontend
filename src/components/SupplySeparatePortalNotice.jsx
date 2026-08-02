@@ -4,11 +4,11 @@ import BrandHeader from './BrandHeader';
 import { useAuth } from '../contexts/AuthContext';
 import { C, FONTS } from '../theme/brand';
 
-const DEFAULT_SUPPLY_PORTAL = 'https://supply.munafe.in';
+const DEFAULT_SUPPLY_PORTAL = 'https://app.autom8.works/supply/login';
 
 /**
  * Shown in the Autom8 tenant portal when lob_type is supply / b2b_supply.
- * Does not SSO or auto-route — separate supply_token auth stays on supply.munafe.in.
+ * Does not SSO or auto-route — separate supply_token auth stays on /supply/*.
  */
 export default function SupplySeparatePortalNotice({ businessName }) {
   const { logout } = useAuth();
