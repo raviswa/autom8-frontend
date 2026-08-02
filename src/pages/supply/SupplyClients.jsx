@@ -1,4 +1,3 @@
-import { resolveSupplyApiBase } from '../../config/api';
 // src/pages/supply/SupplyClients.jsx
 // ============================================================================
 // MODULE 2 — Client Management (List View)
@@ -17,24 +16,7 @@ import { resolveSupplyApiBase } from '../../config/api';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-
-const API = resolveSupplyApiBase();
-
-function getToken() { return localStorage.getItem('supply_token'); }
-
-async function apiFetch(path, opts = {}) {
-  const res = await fetch(`${API}${path}`, {
-    ...opts,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization:  `Bearer ${getToken()}`,
-      ...(opts.headers || {}),
-    },
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Request failed');
-  return data;
-}
+import { openWhatsAppWithLink, supplyApiFetch as apiFetch } from './supplyApi';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -268,23 +250,6 @@ function RecordPaymentModal({ client, onClose, onSaved }) {
 
 // ── Client row ────────────────────────────────────────────────────────────────
 
-function openWhatsAppWithLink(phone, clientName, orderFormUrl) {
-  const digits = String(phone || '').replace(/\D/g, '');
-  if (!digits || !orderFormUrl) return false;
-  const text = [
-    `Hi ${clientName || 'there'},`,
-    '',
-    'Here is your order form link:',
-    orderFormUrl,
-  ].join('\n');
-  window.open(
-    `https://wa.me/${digits}?text=${encodeURIComponent(text)}`,
-    '_blank',
-    'noopener,noreferrer',
-  );
-  return true;
-}
-
 function ClientRow({ client, onRecordPayment }) {
   const navigate   = useNavigate();
   const balance    = parseFloat(client.outstanding_balance || 0);
@@ -302,19 +267,45 @@ function ClientRow({ client, onRecordPayment }) {
     setSending(true);
     setLinkStatus('');
     try {
-      const data = await apiFetch(`/api/supply/clients/${client.id}/send-form-link`, { method: 'POST' });
-      if (data.whatsapp_sent) {
+      let orderFormUrl = null;
+      let whatsappSent = false;
+      let lastError = '';
+
+      // 1) Try business WhatsApp send (returns signed URL either way)
+      try {
+        const data = await apiFetch(`/api/supply/clients/${client.id}/send-form-link`, {
+          method: 'POST',
+          body: '{}',
+        });
+        orderFormUrl = data.order_form_url;
+        whatsappSent = !!data.whatsapp_sent;
+        if (!whatsappSent) {
+          lastError = data.notification?.error || '';
+        }
+      } catch (sendErr) {
+        lastError = sendErr.message || 'Send failed';
+      }
+
+      // 2) If no URL yet, generate a bookmark link
+      if (!orderFormUrl) {
+        const gen = await apiFetch('/api/supply/form/generate-link', {
+          method: 'POST',
+          body: JSON.stringify({ client_id: client.id, type: 'permanent' }),
+        });
+        orderFormUrl = gen.url;
+      }
+
+      if (whatsappSent) {
         setLinkStatus('sent');
-      } else if (openWhatsAppWithLink(client.phone, client.name, data.order_form_url)) {
-        // Business WABA not configured / template failed — open owner's WhatsApp
+      } else if (openWhatsAppWithLink(client.phone, client.name, orderFormUrl)) {
         setLinkStatus('opened');
       } else {
-        setLinkStatus(data.notification?.error || 'Could not send link');
+        setLinkStatus(lastError || 'Could not send link');
       }
-      setTimeout(() => setLinkStatus(''), 4000);
+      setTimeout(() => setLinkStatus(''), 5000);
     } catch (err) {
       setLinkStatus(err.message || 'Could not send link');
-      setTimeout(() => setLinkStatus(''), 5000);
+      setTimeout(() => setLinkStatus(''), 6000);
     } finally {
       setSending(false);
     }
