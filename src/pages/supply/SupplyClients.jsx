@@ -268,6 +268,23 @@ function RecordPaymentModal({ client, onClose, onSaved }) {
 
 // ── Client row ────────────────────────────────────────────────────────────────
 
+function openWhatsAppWithLink(phone, clientName, orderFormUrl) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (!digits || !orderFormUrl) return false;
+  const text = [
+    `Hi ${clientName || 'there'},`,
+    '',
+    'Here is your order form link:',
+    orderFormUrl,
+  ].join('\n');
+  window.open(
+    `https://wa.me/${digits}?text=${encodeURIComponent(text)}`,
+    '_blank',
+    'noopener,noreferrer',
+  );
+  return true;
+}
+
 function ClientRow({ client, onRecordPayment }) {
   const navigate   = useNavigate();
   const balance    = parseFloat(client.outstanding_balance || 0);
@@ -278,18 +295,38 @@ function ClientRow({ client, onRecordPayment }) {
   const isOverdue  = client.is_overdue;
 
   const [sending, setSending] = useState(false);
-  const [sentOk,  setSentOk]  = useState(false);
+  const [linkStatus, setLinkStatus] = useState(''); // '' | 'sent' | 'opened' | error text
 
   const sendFormLink = async e => {
     e.stopPropagation();
     setSending(true);
+    setLinkStatus('');
     try {
-      await apiFetch(`/api/supply/clients/${client.id}/send-form-link`, { method: 'POST' });
-      setSentOk(true);
-      setTimeout(() => setSentOk(false), 3000);
-    } catch { /* ignore UI for now */ }
-    finally { setSending(false); }
+      const data = await apiFetch(`/api/supply/clients/${client.id}/send-form-link`, { method: 'POST' });
+      if (data.whatsapp_sent) {
+        setLinkStatus('sent');
+      } else if (openWhatsAppWithLink(client.phone, client.name, data.order_form_url)) {
+        // Business WABA not configured / template failed — open owner's WhatsApp
+        setLinkStatus('opened');
+      } else {
+        setLinkStatus(data.notification?.error || 'Could not send link');
+      }
+      setTimeout(() => setLinkStatus(''), 4000);
+    } catch (err) {
+      setLinkStatus(err.message || 'Could not send link');
+      setTimeout(() => setLinkStatus(''), 5000);
+    } finally {
+      setSending(false);
+    }
   };
+
+  const linkLabel = sending
+    ? '…'
+    : linkStatus === 'sent'
+      ? '✓ Sent'
+      : linkStatus === 'opened'
+        ? 'WhatsApp opened'
+        : 'Send link';
 
   return (
     <tr
@@ -299,6 +336,9 @@ function ClientRow({ client, onRecordPayment }) {
       <td style={s.td}>
         <div style={s.clientName}>{client.name}</div>
         <div style={s.clientPhone}>{client.phone}</div>
+        {linkStatus && linkStatus !== 'sent' && linkStatus !== 'opened' && (
+          <div style={{ fontSize: 11, color: '#b91c1c', marginTop: 4 }}>{linkStatus}</div>
+        )}
       </td>
 
       <td style={s.td}>
@@ -351,8 +391,9 @@ function ClientRow({ client, onRecordPayment }) {
             style={s.actionBtn}
             onClick={sendFormLink}
             disabled={sending}
+            title="Send order form link on WhatsApp"
           >
-            {sentOk ? '✓ Sent' : sending ? '…' : 'Send link'}
+            {linkLabel}
           </button>
           <button
             style={{ ...s.actionBtn, ...s.actionBtnPrimary }}
