@@ -18,6 +18,7 @@
 
 // Add to the top import block
 import { getSchemaForLob } from '../config/catalogSchemas';
+import { isPackagedLob as checkPackagedLob, isSupplyPortalLob } from '../config/dashboardProfiles';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -29,6 +30,7 @@ import { format } from 'date-fns';
 import DateRangeApply, { formatDateDMY } from '../components/DateRangeApply';
 import BrandHeader from '../components/BrandHeader';
 import SupportChip from '../components/SupportChip';
+import SupplySeparatePortalNotice from '../components/SupplySeparatePortalNotice';
 import { formatBusinessLabel } from '../config/lobTaxonomy';
 import { MENU_SLOT_OPTIONS, normalizeMenuSlots, toggleMenuSlot } from '../helpers/menuSlots';
 import { ACTIVE_ORDER_STATUSES } from '../helpers/orderStatuses';
@@ -896,7 +898,7 @@ const fetchRestaurantMeta = useCallback(async () => {
 
   // Packaged LOBs: poll today's low-stock / sold-out alerts for Menu banner.
   useEffect(() => {
-    const packaged = ['food_products', 'retail', 'psl', 'b2b', 'jewellery'].includes(String(lobType || '').toLowerCase());
+    const packaged = checkPackagedLob(lobType);
     if (!packaged) {
       setStockAlerts([]);
       return undefined;
@@ -908,7 +910,7 @@ const fetchRestaurantMeta = useCallback(async () => {
 
   // Packaged LOBs: no queue / tables / scheduled — default to active orders.
   useEffect(() => {
-    const packaged = ['food_products', 'retail', 'psl', 'b2b', 'jewellery'].includes(String(lobType || '').toLowerCase());
+    const packaged = checkPackagedLob(lobType);
     if (!packaged) return;
     if (activeTab === 'queue' || activeTab === 'tables' || activeTab === 'scheduled') {
       setActiveTab('orders');
@@ -1041,7 +1043,7 @@ const fetchRestaurantMeta = useCallback(async () => {
     + scheduledDeliveryTokens.length + scheduledPrepOrders.length;
   const activeKdsItems = kdsItems.filter(i => ['pending', 'in_progress', 'ready'].includes(i.status));
 
-  const isPackagedLob = ['food_products', 'retail', 'psl', 'b2b', 'jewellery'].includes(String(lobType || '').toLowerCase());
+  const isPackagedLob = checkPackagedLob(lobType);
   const businessLabel = formatBusinessLabel(businessTaxonomy || { lob_type: lobType });
   const openShipmentCount = liveTakeawayTokens.length + liveDeliveryTokens.length;
   const freeTablesCount    = tables.filter(t => getTableStatus(t).status === 'available').length;
@@ -1902,6 +1904,15 @@ const fetchRestaurantMeta = useCallback(async () => {
     border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.text,
     outline: "none", boxSizing: "border-box",
   };
+
+  // Supply LOB: tenant portal is not the ops surface — point to supply.munafe.in (no SSO).
+  if (isSupplyPortalLob(lobType)) {
+    const name = businessTaxonomy?.display_name
+      || businessLabel
+      || user?.restaurant_name
+      || 'Munafe Supply';
+    return <SupplySeparatePortalNotice businessName={name} />;
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: C.pageBg }}>

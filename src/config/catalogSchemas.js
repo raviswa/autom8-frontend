@@ -476,15 +476,24 @@ export const LOB_SCHEMAS = {
 };
 
 export function getSchemaForLob(lobType) {
-  return LOB_SCHEMAS[lobType] || LOB_SCHEMAS.restaurant;
+  const key = normalizeLobType(lobType, 'restaurant');
+  return LOB_SCHEMAS[key] || LOB_SCHEMAS.restaurant;
 }
 
 /** LOB types valid at tenant registration and in Settings → Business type. */
 export const REGISTER_LOB_TYPES = Object.freeze(Object.keys(LOB_SCHEMAS));
 
+/** Aliases stored on tenants that map to a registered schema lob. */
+const LOB_ALIASES = Object.freeze({
+  supply: 'b2b',
+  b2b_supply: 'b2b',
+});
+
 export function normalizeLobType(value, fallback = 'restaurant') {
   const raw = String(value ?? '').trim().toLowerCase();
-  return REGISTER_LOB_TYPES.includes(raw) ? raw : fallback;
+  if (!raw) return fallback;
+  const aliased = LOB_ALIASES[raw] || raw;
+  return REGISTER_LOB_TYPES.includes(aliased) ? aliased : fallback;
 }
 
 /**
@@ -494,6 +503,7 @@ export function normalizeLobType(value, fallback = 'restaurant') {
 export function parseRegistrationLobType(value) {
   const raw = String(value ?? '').trim().toLowerCase();
   if (!raw) return { lob_type: 'restaurant', invalid: false };
-  if (REGISTER_LOB_TYPES.includes(raw)) return { lob_type: raw, invalid: false };
+  const aliased = LOB_ALIASES[raw] || raw;
+  if (REGISTER_LOB_TYPES.includes(aliased)) return { lob_type: aliased, invalid: false };
   return { lob_type: null, invalid: true, attempted: raw };
 }

@@ -12,8 +12,10 @@ import OwnerInsights from "../components/OwnerInsights";
 import BrandHeader from "../components/BrandHeader";
 import SupportChip from "../components/SupportChip";
 import { formatBusinessLabel } from "../config/lobTaxonomy";
-import { getDashboardProfile } from "../config/dashboardProfiles";
+import { getDashboardProfile, isB2bLob, isSupplyPortalLob } from "../config/dashboardProfiles";
+import { normalizeLobType } from "../config/catalogSchemas";
 import { ACTIVE_ORDER_STATUSES } from "../helpers/orderStatuses";
+import SupplySeparatePortalNotice from "../components/SupplySeparatePortalNotice";
 import { C } from "../theme/brand";
 
 // ── Export to CSV ─────────────────────────────────────────────────────────────
@@ -1024,15 +1026,19 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
   const dateStr = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 
   // ── Nav tabs: which chips show depends on the tenant's line-of-business.
-  // Packaged LOBs hide dine-in kitchen/captain chrome; Captain stays only when
-  // takeaway/store-pickup is enabled (QR handover).
+  // Packaged LOBs hide dine-in kitchen chrome; Captain stays only when
+  // takeaway/store-pickup is enabled (QR handover) — except B2B/supply.
   // Do not default to restaurant while /waba is loading — that flashes Kitchen/Menu.
   const lobReady = wabaInfo !== undefined;
   const lobType = lobReady
+    ? normalizeLobType(wabaInfo?.lob_type || "restaurant", "restaurant")
+    : null;
+  const rawLobType = lobReady
     ? String(wabaInfo?.lob_type || "restaurant").toLowerCase()
     : null;
-  const dashProfile = lobReady ? getDashboardProfile(lobType) : null;
+  const dashProfile = lobReady ? getDashboardProfile(rawLobType || lobType) : null;
   const isPackagedGoods = !!dashProfile?.isPackaged;
+  const isB2b = lobReady && isB2bLob(rawLobType || lobType);
   const features = Array.isArray(wabaInfo?.subscribed_features) ? wabaInfo.subscribed_features : [];
   const hasTakeaway = features.includes("takeaway");
   const businessName =
@@ -1045,7 +1051,7 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
         business_family: wabaInfo?.business_family,
         business_vertical: wabaInfo?.business_vertical,
         business_vertical_other: wabaInfo?.business_vertical_other,
-        lob_type: lobType,
+        lob_type: rawLobType || lobType,
       })
     : "Loading…";
 
@@ -1130,7 +1136,16 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
 
   const navTabs = !lobReady
     ? []
-    : isPackagedGoods
+    : isB2b
+      ? [
+          { to: "/dashboard/manager", label: "Manager", chip: CHIP_PRIMARY },
+          { to: "/dashboard/packing", label: "Packing", chip: CHIP_PRIMARY },
+          { to: "/dashboard/menu",    label: "Catalog",  chip: CHIP_SECONDARY },
+          { to: "/settings?tab=kitchen#scheduled-ordering", label: "Order hours", chip: CHIP_PRIMARY },
+          { to: "/settings",          label: "Settings", chip: CHIP_SECONDARY },
+          ...accountNav,
+        ]
+      : isPackagedGoods
       ? [
           { to: "/dashboard/manager", label: "Manager", chip: CHIP_PRIMARY },
           { to: "/dashboard/packing", label: "Packing", chip: CHIP_PRIMARY },
@@ -1152,6 +1167,11 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
           { to: "/settings",          label: "Settings", chip: CHIP_SECONDARY },
           ...accountNav,
         ];
+
+  // Supply LOB: tenant portal is not the ops surface — point to supply.munafe.in (no SSO).
+  if (lobReady && isSupplyPortalLob(rawLobType)) {
+    return <SupplySeparatePortalNotice businessName={businessName} />;
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: C.pageBg }}>

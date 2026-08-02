@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { resolveEmployeeHomePath } from '../helpers/employeeHomePath';
 import { C, FONTS } from '../theme/brand';
 
 export default function LoginPage() {
@@ -20,17 +21,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const user = await loginWithEmail(email, password);
-      const roleRoutes = {
-        owner: '/dashboard/owner',
-        brand_owner: '/dashboard/brand',
-        brand_manager: '/dashboard/brand',
-        manager: '/dashboard/manager',
-        kitchen_staff: '/dashboard/kitchen',
-        marketing: '/dashboard/marketing',
-        captain: '/dashboard/captain',
-        waiter: '/dashboard/kitchen',
-      };
-      navigate(roleRoutes[user.role] || '/');
+      navigate(resolveEmployeeHomePath(user));
     } catch (err) {
       setLocalError(err.message);
     } finally {

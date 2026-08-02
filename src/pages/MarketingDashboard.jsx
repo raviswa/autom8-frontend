@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from "react";
 import BrandHeader from "../components/BrandHeader";
 import SupportChip from "../components/SupportChip";
+import { useRedirectIfB2bRestaurantRoute } from "../hooks/useRedirectIfB2bRestaurantRoute";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 import { C } from '../theme/brand';
@@ -1393,6 +1394,7 @@ function WABAStrip({ apiClient, restaurantId }) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function MarketingDashboard({ restaurantId, restaurantName, onLogout, apiClient }) {
+  const b2bBlocking = useRedirectIfB2bRestaurantRoute();
   const [stats,         setStats]         = useState(null);
   const [segmentCounts, setSegmentCounts] = useState(null);
   const [previewName,   setPreviewName]   = useState("Ravi");
@@ -1406,7 +1408,7 @@ export default function MarketingDashboard({ restaurantId, restaurantName, onLog
   const [activeTab,     setActiveTab]     = useState("compose");
 
   useEffect(() => {
-    if (!apiClient || !restaurantId) return;
+    if (b2bBlocking || !apiClient || !restaurantId) return;
     apiClient.get("/api/marketing/subscribers")
       .then(res => {
         setStats(res.data.stats);
@@ -1418,7 +1420,7 @@ export default function MarketingDashboard({ restaurantId, restaurantName, onLog
     apiClient.get("/api/marketing/templates")
       .then(res => setTemplates(res.data.templates || []))
       .catch(() => {});
-  }, [apiClient, restaurantId]);
+  }, [apiClient, restaurantId, b2bBlocking]);
 
   const handleClone = (c) => {
     setCloneCampaign({ ...c, segment: c.segment_type });
@@ -1456,6 +1458,14 @@ export default function MarketingDashboard({ restaurantId, restaurantName, onLog
   });
 
   const dateStr = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+
+  if (b2bBlocking) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: C.textMuted, fontSize: 13 }}>
+        Loading…
+      </div>
+    );
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: C.pageBg }}>

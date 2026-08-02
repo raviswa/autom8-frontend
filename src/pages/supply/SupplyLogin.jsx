@@ -14,7 +14,7 @@ import { resolveSupplyApiBase } from '../../config/api';
 // ============================================================================
 
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 
 const API = resolveSupplyApiBase();
 
@@ -53,10 +53,12 @@ function Field({ label, type = 'text', value, onChange, placeholder, required, a
 
 function LoginPanel({ onSwitch }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [email,    setEmail]    = useState('');
   const [password, setPassword] = useState('');
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState('');
+  const [info,     setInfo]     = useState(location.state?.message || '');
 
   const submit = async e => {
     e.preventDefault();
@@ -83,6 +85,7 @@ function LoginPanel({ onSwitch }) {
       </div>
 
       {error && <div style={s.errorBox}>{error}</div>}
+      {info && !error && <div style={s.successBox}>{info}</div>}
 
       <Field
         label="Email"
@@ -106,6 +109,10 @@ function LoginPanel({ onSwitch }) {
       <button type="submit" style={s.submitBtn} disabled={loading}>
         {loading ? 'Signing in…' : 'Sign in'}
       </button>
+
+      <div style={s.switchRow}>
+        <Link to="/supply/forgot-password" style={s.forgotLink}>Forgot password?</Link>
+      </div>
 
       <div style={s.switchRow}>
         <span style={s.switchText}>New supplier?</span>
@@ -308,6 +315,15 @@ const s = {
     padding:      '10px 14px',
     marginBottom: 16,
   },
+  successBox: {
+    background:   '#ecfdf5',
+    border:       '1px solid #a7f3d0',
+    borderRadius: 8,
+    color:        '#047857',
+    fontSize:     13,
+    padding:      '10px 14px',
+    marginBottom: 16,
+  },
   field: {
     display:      'flex',
     flexDirection:'column',
@@ -390,6 +406,13 @@ const s = {
     fontWeight:  600,
     cursor:      'pointer',
     padding:     0,
+    textDecoration: 'underline',
+    textUnderlineOffset: 2,
+  },
+  forgotLink: {
+    color:       '#0ea5e9',
+    fontSize:    13,
+    fontWeight:  600,
     textDecoration: 'underline',
     textUnderlineOffset: 2,
   },

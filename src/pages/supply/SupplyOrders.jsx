@@ -30,13 +30,21 @@ export default function SupplyOrders() {
   const date      = searchParams.get('date')   || todayISO();
   const status    = searchParams.get('status') || '';
   const clientId  = searchParams.get('client') || '';
+  // IA: reservation vs in-progress — bucket tabs (status filter still wins if set)
+  const bucket    = searchParams.get('bucket') || 'all';
 
   const token = localStorage.getItem('supply_token');
 
   const fetchOrders = useCallback(() => {
     setLoading(true);
     const params = new URLSearchParams({ date });
-    if (status)   params.set('status',    status);
+    if (status) {
+      params.set('status', status);
+    } else if (bucket === 'awaiting') {
+      params.set('status', 'requested');
+    } else if (bucket === 'active') {
+      // Backend filters one status; fetch without status and filter client-side for active set
+    }
     if (clientId) params.set('client_id', clientId);
 
     fetch(`${API}/api/supply/orders?${params}`, {
@@ -45,12 +53,18 @@ export default function SupplyOrders() {
       .then(r => r.json())
       .then(data => {
         if (data.error) { setError(data.error); return; }
-        setOrders(data.orders || []);
-        setTotal(data.total || 0);
+        let list = data.orders || [];
+        if (!status && bucket === 'active') {
+          list = list.filter(o => ['confirmed', 'out_for_delivery', 'partially_delivered'].includes(o.status));
+        } else if (!status && bucket === 'done') {
+          list = list.filter(o => ['delivered', 'cancelled'].includes(o.status));
+        }
+        setOrders(list);
+        setTotal(status || bucket === 'all' || bucket === 'awaiting' ? (data.total || list.length) : list.length);
       })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
-  }, [date, status, clientId, token]);
+  }, [date, status, clientId, bucket, token]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
@@ -111,15 +125,45 @@ export default function SupplyOrders() {
             to={`/supply/picking-list?date=${date}`}
             className="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg font-medium"
           >
-            📋 Picking List
+            Picking List
           </Link>
           <Link
             to={`/supply/route-sheet?date=${date}`}
             className="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg font-medium"
           >
-            🗺️ Route Sheet
+            Route Sheet
           </Link>
         </div>
+      </div>
+
+      {/* Reservation vs in-progress buckets */}
+      <div className="flex gap-1 mb-3 p-1 bg-gray-100 rounded-lg w-fit flex-wrap">
+        {[
+          ['all', 'All'],
+          ['awaiting', 'Awaiting confirmation'],
+          ['active', 'In progress'],
+          ['done', 'Done'],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => {
+              const p = new URLSearchParams(searchParams);
+              if (key === 'all') p.delete('bucket');
+              else p.set('bucket', key);
+              // Bucket takes precedence over a stale status filter
+              p.delete('status');
+              setSearchParams(p);
+            }}
+            className={`text-sm px-3 py-1.5 rounded-md font-medium transition ${
+              (bucket || 'all') === key
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
       {/* Filters */}
@@ -132,7 +176,13 @@ export default function SupplyOrders() {
         />
         <select
           value={status}
-          onChange={e => setFilter('status', e.target.value)}
+          onChange={e => {
+            const p = new URLSearchParams(searchParams);
+            if (e.target.value) p.set('status', e.target.value);
+            else p.delete('status');
+            p.delete('bucket');
+            setSearchParams(p);
+          }}
           className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
         >
           <option value="">All statuses</option>

@@ -29,6 +29,7 @@ import BrandHeader from '../components/BrandHeader';
 import SupportChip from '../components/SupportChip';
 import { CD } from '../theme/brand';
 import { formatKitchenOrderNo } from '../helpers/orderDisplay';
+import { useRedirectIfB2bRestaurantRoute } from '../hooks/useRedirectIfB2bRestaurantRoute';
 
 // ─── Timezone helpers ────────────────────────────────────────────────────────
 
@@ -1093,6 +1094,7 @@ export default function KDSScreen() {
     searchParams.get('station') === 'packing' ||
     location.pathname.includes('/dashboard/packing');
   const queue = packingMode ? 'packing' : 'cooking';
+  const b2bBlocking = useRedirectIfB2bRestaurantRoute({ enabled: !packingMode });
 
   const [allItems, setAllItems]   = useState([]);
   const [scheduledOrders, setScheduledOrders] = useState([]);
@@ -1338,7 +1340,7 @@ const fetchFeed = useCallback(async () => {
     await Promise.all(batch.map((i) => advanceItem(i.id, i.status)));
   };
 
-  if (loading) {
+  if (loading || b2bBlocking) {
     return (
       <div className="kds-loading">
         <div className="kds-spinner" />

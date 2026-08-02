@@ -4,11 +4,13 @@
  * Matrix (additive — refine per LOB in follow-ups):
  * - restaurant: tables, queue, KOT, dining KPIs, session outcomes
  * - food_products: commerce Live + SKU analytics (template for packaged)
- * - retail / jewellery / b2b / psl: currently inherit packagedCommerce
+ * - retail / jewellery / b2b / supply / psl: packaged commerce
  *   (psl may later need a kitchen-aware hybrid)
  */
 
-const PACKAGED_LOBS = ['food_products', 'psl', 'retail', 'b2b', 'jewellery'];
+const PACKAGED_LOBS = ['food_products', 'psl', 'retail', 'b2b', 'supply', 'b2b_supply', 'jewellery'];
+
+const B2B_LOBS = ['b2b', 'supply', 'b2b_supply'];
 
 /** Restaurant baseline — full dining chrome. */
 const restaurant = {
@@ -49,7 +51,7 @@ const restaurant = {
 
 /**
  * Packaged commerce (food_products template).
- * Shared by retail / jewellery / b2b / psl until LOB-specific splits land.
+ * Shared by retail / jewellery / b2b / supply / psl until LOB-specific splits land.
  */
 const packagedCommerce = {
   id: 'packagedCommerce',
@@ -93,17 +95,35 @@ const food_products = {
   id: 'food_products',
 };
 
+const b2bProfile = { ...packagedCommerce, id: 'b2b' };
+
 const BY_LOB = {
   restaurant,
   food_products,
   retail: { ...packagedCommerce, id: 'retail' },
   jewellery: { ...packagedCommerce, id: 'jewellery' },
-  b2b: { ...packagedCommerce, id: 'b2b' },
+  b2b: b2bProfile,
+  supply: b2bProfile,
+  b2b_supply: b2bProfile,
   psl: { ...packagedCommerce, id: 'psl' },
 };
 
 export function isPackagedLob(lobType) {
   return PACKAGED_LOBS.includes(String(lobType || '').toLowerCase());
+}
+
+/** Wholesale / F&B supply tenants — no Kitchen / Captain chrome. */
+export function isB2bLob(lobType) {
+  return B2B_LOBS.includes(String(lobType || '').toLowerCase());
+}
+
+/**
+ * Tenants that use the dedicated Munafe Supply portal (supply_token),
+ * not Autom8 owner/manager chrome. Raw DB values: supply | b2b_supply.
+ */
+export function isSupplyPortalLob(lobType) {
+  const key = String(lobType || '').toLowerCase();
+  return key === 'supply' || key === 'b2b_supply';
 }
 
 /**
@@ -115,4 +135,4 @@ export function getDashboardProfile(lobType) {
   return BY_LOB[key] || (isPackagedLob(key) ? packagedCommerce : restaurant);
 }
 
-export { PACKAGED_LOBS, restaurant, packagedCommerce, food_products };
+export { PACKAGED_LOBS, B2B_LOBS, restaurant, packagedCommerce, food_products };

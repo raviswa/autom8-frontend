@@ -47,8 +47,14 @@ import SupplyInvoices from './pages/supply/SupplyInvoices';
 import StatementsPage from './pages/supply/StatementsPage';
 import SupplyAnalytics from './pages/supply/SupplyAnalytics';
 import SupplySettings from './pages/supply/SupplySettings';
+import SupplyResetPasswordPage from './pages/supply/SupplyResetPasswordPage';
+import SupplyForgotPasswordPage from './pages/supply/SupplyForgotPasswordPage';
+import SupplyLayout from './pages/supply/SupplyLayout';
 import OrderForm from './pages/supply/OrderForm';
 import { StepUpOtpHost } from './components/StepUpOtpModal';
+import SupplySeparatePortalNotice from './components/SupplySeparatePortalNotice';
+import { isSupplyPortalLob } from './config/dashboardProfiles';
+import { resolveEmployeeHomePath, SUPPLY_INFO_PATH } from './helpers/employeeHomePath';
 
 export const kotRef = React.createRef();
 
@@ -69,6 +75,42 @@ function ProtectedRoute({ children, allowedRoles }) {
   if (!user) return <Navigate to="/login" />;
   if (allowedRoles && !allowedRoles.includes(user.role)) return <Navigate to="/unauthorized" />;
   return children;
+}
+
+/** Block restaurant-ops routes for lob_type=supply (informational landing only — no SSO). */
+function SupplyLobGate({ children }) {
+  const { user } = useAuth();
+  if (isSupplyPortalLob(user?.lob_type)) {
+    return <Navigate to={SUPPLY_INFO_PATH} replace />;
+  }
+  return children;
+}
+
+/**
+ * Fail closed when the session has no outlet id.
+ * Never fall back to a hardcoded tenant — that would leak another customer's data.
+ */
+function RequireRestaurantId({ restaurantId, children }) {
+  const { logout } = useAuth();
+  if (restaurantId) return children;
+  return (
+    <div className="flex items-center justify-center min-h-screen bg-slate-50 px-4">
+      <div className="max-w-md w-full text-center space-y-4">
+        <h1 className="text-xl font-semibold text-slate-900">Session incomplete</h1>
+        <p className="text-slate-600 text-sm leading-relaxed">
+          Your login did not include an outlet. Sign in again to continue.
+          If this keeps happening, contact support.
+        </p>
+        <button
+          type="button"
+          onClick={() => logout()}
+          className="inline-flex items-center justify-center rounded-lg bg-slate-900 text-white px-4 py-2.5 text-sm font-medium hover:bg-slate-800"
+        >
+          Sign in again
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function FeatureRoute({ feature, children }) {
@@ -165,28 +207,13 @@ function AppRoutes() {
   const { hasAnyOf, loading: subLoading } = useSubscription();
   if (loading || subLoading) return <Spinner />;
 
-  const restaurantId = user?.restaurant_id ?? user?.restaurantId ?? '46fb9b9e-431a-43c9-9edb-d316b0fef216';
-  // The dashboard replaces this generic fallback with the canonical tenant
-  // name returned by /api/dashboard/waba once it loads.
+  // Never default to a hardcoded tenant id — missing outlet must fail closed.
+  const restaurantId =
+    user?.restaurant_id ?? user?.restaurantId ?? user?.outlets?.[0]?.id ?? null;
+  // Dashboards replace this with the canonical name from /api/dashboard/waba when available.
   const restaurantName = user?.restaurant_name ?? user?.restaurantName ?? 'Your business';
 
-  const defaultRoute = () => {
-    if (!user) return '/login';
-    const roleMap = {
-      brand_owner: '/dashboard/brand',
-      brand_manager: '/dashboard/brand',
-      owner: '/dashboard/owner',
-      manager: '/dashboard/manager',
-      kitchen_staff: '/dashboard/kitchen',
-      packing_staff: '/dashboard/packing',
-      dispatch_staff: '/dashboard/packing',
-      sales_staff: '/dashboard/manager',
-      marketing: '/dashboard/marketing',
-      captain: '/dashboard/captain',
-      waiter: '/dashboard/kitchen',
-    };
-    return roleMap[user.role] ?? `/dashboard/${user.role}`;
-  };
+  const defaultRoute = () => resolveEmployeeHomePath(user);
 
   return (
     <Routes>
@@ -274,12 +301,24 @@ function AppRoutes() {
         }
       />
 
+      {/* Supply lob informational landing (tenant portal ≠ supply ops; no SSO) */}
+      <Route
+        path={SUPPLY_INFO_PATH}
+        element={
+          <ProtectedRoute allowedRoles={['owner', 'manager', 'kitchen_staff', 'packing_staff', 'dispatch_staff', 'sales_staff', 'captain', 'waiter', 'marketing']}>
+            <SupplySeparatePortalNotice businessName={restaurantName} />
+          </ProtectedRoute>
+        }
+      />
+
       {/* ── Captain Portal ── */}
       <Route
         path="/dashboard/captain"
         element={
           <ProtectedRoute allowedRoles={['captain', 'owner', 'manager']}>
-            <CaptainPortal />
+            <SupplyLobGate>
+              <CaptainPortal />
+            </SupplyLobGate>
           </ProtectedRoute>
         }
       />
@@ -288,9 +327,11 @@ function AppRoutes() {
       <Route
         path="/checkin"
         element={
-          <FeatureRoute feature={FEATURES.TOKEN_MANAGEMENT}>
-            <WalkInForm />
-          </FeatureRoute>
+          <SupplyLobGate>
+            <FeatureRoute feature={FEATURES.TOKEN_MANAGEMENT}>
+              <WalkInForm />
+            </FeatureRoute>
+          </SupplyLobGate>
         }
       />
 
@@ -299,20 +340,24 @@ function AppRoutes() {
         path="/dashboard/owner"
         element={
           <ProtectedRoute allowedRoles={['owner']}>
-            <SubscriptionGate>
-              <SetupGate>
-                <>
-                  <SetupProgressBar />
-                  <SubscriptionStatusBar />
-                  <OwnerDashboard
-                    restaurantId={restaurantId}
-                    restaurantName={restaurantName}
-                    onLogout={logout}
-                    apiClient={apiClient}
-                  />
-                </>
-              </SetupGate>
-            </SubscriptionGate>
+            <SupplyLobGate>
+              <RequireRestaurantId restaurantId={restaurantId}>
+                <SubscriptionGate>
+                  <SetupGate>
+                    <>
+                      <SetupProgressBar />
+                      <SubscriptionStatusBar />
+                      <OwnerDashboard
+                        restaurantId={restaurantId}
+                        restaurantName={restaurantName}
+                        onLogout={logout}
+                        apiClient={apiClient}
+                      />
+                    </>
+                  </SetupGate>
+                </SubscriptionGate>
+              </RequireRestaurantId>
+            </SupplyLobGate>
           </ProtectedRoute>
         }
       />
@@ -321,14 +366,18 @@ function AppRoutes() {
         path="/dashboard/marketing"
         element={
           <ProtectedRoute allowedRoles={['marketing', 'owner']}>
-            <SubscriptionGate>
-              <MarketingDashboard
-                restaurantId={restaurantId}
-                restaurantName={restaurantName}
-                onLogout={logout}
-                apiClient={apiClient}
-              />
-            </SubscriptionGate>
+            <SupplyLobGate>
+              <RequireRestaurantId restaurantId={restaurantId}>
+                <SubscriptionGate>
+                  <MarketingDashboard
+                    restaurantId={restaurantId}
+                    restaurantName={restaurantName}
+                    onLogout={logout}
+                    apiClient={apiClient}
+                  />
+                </SubscriptionGate>
+              </RequireRestaurantId>
+            </SupplyLobGate>
           </ProtectedRoute>
         }
       />
@@ -337,9 +386,11 @@ function AppRoutes() {
         path="/dashboard/manager"
         element={
           <ProtectedRoute allowedRoles={['manager', 'owner', 'sales_staff']}>
-            <SubscriptionGate>
-              <ManagerPortal />
-            </SubscriptionGate>
+            <SupplyLobGate>
+              <SubscriptionGate>
+                <ManagerPortal />
+              </SubscriptionGate>
+            </SupplyLobGate>
           </ProtectedRoute>
         }
       />
@@ -348,11 +399,13 @@ function AppRoutes() {
         path="/dashboard/kitchen"
         element={
           <ProtectedRoute allowedRoles={['kitchen_staff', 'owner', 'manager']}>
-            <SubscriptionGate>
-              {hasAnyOf(FEATURES.DINE_IN, FEATURES.TAKEAWAY, FEATURES.DELIVERY)
-                ? <KDSScreen />
-                : <FeatureWall feature={FEATURES.DINE_IN} />}
-            </SubscriptionGate>
+            <SupplyLobGate>
+              <SubscriptionGate>
+                {hasAnyOf(FEATURES.DINE_IN, FEATURES.TAKEAWAY, FEATURES.DELIVERY)
+                  ? <KDSScreen />
+                  : <FeatureWall feature={FEATURES.DINE_IN} />}
+              </SubscriptionGate>
+            </SupplyLobGate>
           </ProtectedRoute>
         }
       />
@@ -360,11 +413,13 @@ function AppRoutes() {
         path="/dashboard/packing"
         element={
           <ProtectedRoute allowedRoles={['kitchen_staff', 'packing_staff', 'dispatch_staff', 'owner', 'manager']}>
-            <SubscriptionGate>
-              {hasAnyOf(FEATURES.DINE_IN, FEATURES.TAKEAWAY, FEATURES.DELIVERY)
-                ? <KDSScreen />
-                : <FeatureWall feature={FEATURES.DINE_IN} />}
-            </SubscriptionGate>
+            <SupplyLobGate>
+              <SubscriptionGate>
+                {hasAnyOf(FEATURES.DINE_IN, FEATURES.TAKEAWAY, FEATURES.DELIVERY)
+                  ? <KDSScreen />
+                  : <FeatureWall feature={FEATURES.DINE_IN} />}
+              </SubscriptionGate>
+            </SupplyLobGate>
           </ProtectedRoute>
         }
       />
@@ -373,33 +428,40 @@ function AppRoutes() {
         path="/dashboard/menu"
         element={
           <ProtectedRoute allowedRoles={['owner', 'manager']}>
-            <SubscriptionGate>
-              {hasAnyOf(FEATURES.DINE_IN, FEATURES.TAKEAWAY, FEATURES.DELIVERY)
-                ? <MenuPage />
-                : <FeatureWall feature={FEATURES.DINE_IN} />}
-            </SubscriptionGate>
+            <SupplyLobGate>
+              <SubscriptionGate>
+                {hasAnyOf(FEATURES.DINE_IN, FEATURES.TAKEAWAY, FEATURES.DELIVERY)
+                  ? <MenuPage />
+                  : <FeatureWall feature={FEATURES.DINE_IN} />}
+              </SubscriptionGate>
+            </SupplyLobGate>
           </ProtectedRoute>
         }
       />
 
       {/* ── Supply chain ── */}
       <Route path="/supply/login" element={<SupplyLogin />} />
-      <Route path="/supply/dashboard" element={<SupplyDashboard />} />
-      <Route path="/supply/catalog" element={<SupplyCatalog />} />
-      <Route path="/supply/clients" element={<SupplyClients />} />
-      <Route path="/supply/clients/:id" element={<SupplyClientAccount />} />
-      <Route path="/supply/clients/:id/ratecard" element={<SupplyRatecard />} />
-      <Route path="/supply/orders" element={<SupplyOrders />} />
-      <Route path="/supply/orders/:id" element={<SupplyOrderDetail />} />
-      <Route path="/supply/orders/picking/:date" element={<SupplyPickingList />} />
-      <Route path="/supply/orders/route/:date" element={<SupplyRouteSheet />} />
-      <Route path="/supply/picking-list" element={<SupplyPickingList />} />
-      <Route path="/supply/route-sheet" element={<SupplyRouteSheet />} />
-      <Route path="/supply/payment-claims" element={<SupplyPaymentClaims />} />
-      <Route path="/supply/invoices" element={<SupplyInvoices />} />
-      <Route path="/supply/statements" element={<StatementsPage />} />
-      <Route path="/supply/analytics" element={<SupplyAnalytics />} />
-      <Route path="/supply/settings" element={<SupplySettings />} />
+      <Route path="/supply/forgot-password" element={<SupplyForgotPasswordPage />} />
+      <Route path="/supply/reset-password" element={<SupplyResetPasswordPage />} />
+      <Route path="/supply" element={<SupplyLayout />}>
+        <Route index element={<Navigate to="dashboard" replace />} />
+        <Route path="dashboard" element={<SupplyDashboard />} />
+        <Route path="catalog" element={<SupplyCatalog />} />
+        <Route path="clients" element={<SupplyClients />} />
+        <Route path="clients/:id" element={<SupplyClientAccount />} />
+        <Route path="clients/:id/ratecard" element={<SupplyRatecard />} />
+        <Route path="orders" element={<SupplyOrders />} />
+        <Route path="orders/:id" element={<SupplyOrderDetail />} />
+        <Route path="orders/picking/:date" element={<SupplyPickingList />} />
+        <Route path="orders/route/:date" element={<SupplyRouteSheet />} />
+        <Route path="picking-list" element={<SupplyPickingList />} />
+        <Route path="route-sheet" element={<SupplyRouteSheet />} />
+        <Route path="payment-claims" element={<SupplyPaymentClaims />} />
+        <Route path="invoices" element={<SupplyInvoices />} />
+        <Route path="statements" element={<StatementsPage />} />
+        <Route path="analytics" element={<SupplyAnalytics />} />
+        <Route path="settings" element={<SupplySettings />} />
+      </Route>
 
       {/* ── Order form (public token links) ── */}
       <Route path="/s/:token" element={<OrderForm />} />

@@ -14,6 +14,7 @@ import { useAuth } from '../contexts/AuthContext';
 import BrandHeader from '../components/BrandHeader';
 import SupportChip from '../components/SupportChip';
 import { C } from '../theme/brand';
+import { useRedirectIfB2bRestaurantRoute } from '../hooks/useRedirectIfB2bRestaurantRoute';
 
 const CARD = {
   background: C.cardBg,
@@ -147,6 +148,7 @@ function CameraScanner({ onDetect }) {
 // ── Main CaptainPortal ────────────────────────────────────────────────────────
 export default function CaptainPortal() {
   const { user, logout, apiClient } = useAuth();
+  const b2bBlocking = useRedirectIfB2bRestaurantRoute();
 
   const [inputVal,  setInputVal]  = useState('');
   const [scanning,  setScanning]  = useState(false);
@@ -209,6 +211,14 @@ export default function CaptainPortal() {
   }
 
   const hasCameraApi = typeof BarcodeDetector !== 'undefined';
+
+  if (b2bBlocking) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.textMuted, fontSize: 13 }}>
+        Loading…
+      </div>
+    );
+  }
 
   return (
     <div style={{ minHeight: '100vh', background: C.pageBg }}>
