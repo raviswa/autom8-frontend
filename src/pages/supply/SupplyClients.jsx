@@ -279,9 +279,9 @@ function ClientRow({ client, onRecordPayment }) {
           body: '{}',
         });
         orderFormUrl = data.order_form_url;
-        // Only Meta template delivery is reliable outside the 24h window.
-        templateSent = !!data.whatsapp_sent && data.delivery_mode === 'template';
-        openShare = data.open_whatsapp_share !== false && !templateSent;
+        // Business-line Cloud API success (template or text) — do NOT open wa.me.
+        templateSent = !!data.whatsapp_sent;
+        openShare = !!data.open_whatsapp_share && !templateSent;
         fromWaba = data.from_waba_phone || '';
         if (!templateSent) {
           lastError = data.notification?.error || '';
