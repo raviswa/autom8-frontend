@@ -8,7 +8,7 @@ import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 const API = resolveSupplyApiBase();
-const todayISO = () => new Date().toISOString().split('T')[0];
+const todayISO = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 
 export default function SupplyRouteSheet() {
   const [searchParams, setSearchParams] = useSearchParams();

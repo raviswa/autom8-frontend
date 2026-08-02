@@ -17,7 +17,7 @@ const STATUS_META = {
   cancelled:           { label: 'Cancelled',            color: 'bg-gray-100 text-gray-500'   },
 };
 
-const todayISO = () => new Date().toISOString().split('T')[0];
+const todayISO = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 
 export default function SupplyOrders() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -171,6 +171,8 @@ export default function SupplyOrders() {
         <input
           type="date"
           value={date}
+          title="Delivery date (IST)"
+          aria-label="Delivery date"
           onChange={e => setFilter('date', e.target.value)}
           className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
         />
