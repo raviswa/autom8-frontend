@@ -418,7 +418,7 @@ export default function SupplyClients() {
       <div style={s.header}>
         <div>
           <h1 style={s.pageTitle}>Clients</h1>
-          <p style={s.pageSubtitle}>{total} restaurant{total !== 1 ? 's' : ''} on your supply network</p>
+          <p style={s.pageSubtitle}>{total} client{total !== 1 ? 's' : ''} on your supply network</p>
         </div>
         <button style={s.addBtn} onClick={() => setShowAdd(true)}>
           + Add client
