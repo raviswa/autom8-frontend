@@ -6,6 +6,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../../contexts/AuthContext';
+import { C, FONTS } from '../../theme/brand';
 
 export default function SupplyResetPasswordPage() {
   const navigate = useNavigate();
@@ -112,109 +113,116 @@ export default function SupplyResetPasswordPage() {
     }
   };
 
+  const shell = (children) => (
+    <div style={page}>
+      <div style={{ width: '100%', maxWidth: 400 }}>
+        <div style={{ textAlign: 'center', marginBottom: 28 }}>
+          <div style={logoMark}>M</div>
+          <h1 style={title}>Set a new password</h1>
+          <p style={subtitle}>Munafe Supply · by autom8.works</p>
+        </div>
+        <div style={card}>{children}</div>
+      </div>
+    </div>
+  );
+
   if (checking) {
-    return (
-      <main style={s.page}>
-        <p style={s.muted}>Verifying reset link…</p>
-      </main>
-    );
+    return shell(<p style={{ margin: 0, fontSize: 14, color: C.textMuted }}>Verifying reset link…</p>);
   }
 
   if (!ready) {
-    return (
-      <main style={s.page}>
-        <div style={s.card}>
-          <p style={s.body}>{error || 'This reset link is invalid or has expired.'}</p>
-          <Link to="/supply/forgot-password" style={s.link}>Request a new reset link</Link>
-        </div>
-      </main>
+    return shell(
+      <>
+        <p style={{ margin: '0 0 16px', fontSize: 14, color: C.textSub, lineHeight: 1.5 }}>
+          {error || 'This reset link is invalid or has expired.'}
+        </p>
+        <Link to="/supply/forgot-password" style={link}>Request a new reset link</Link>
+      </>
     );
   }
 
-  return (
-    <main style={s.page}>
-      <div style={s.card}>
-        <h1 style={s.title}>Set a new password</h1>
-        <p style={s.muted}>Choose a password for your Munafe Supply account.</p>
-        {error && <div style={s.error}>{error}</div>}
-        <form onSubmit={handleSubmit} style={s.form}>
-          <label style={s.label}>
-            New password
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              style={s.input}
-              minLength={8}
-              required
-            />
-          </label>
-          <label style={s.label}>
-            Confirm password
-            <input
-              type="password"
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-              style={s.input}
-              minLength={8}
-              required
-            />
-          </label>
-          <button type="submit" style={s.button} disabled={loading}>
-            {loading ? 'Saving…' : 'Update password'}
-          </button>
-        </form>
-      </div>
-    </main>
+  return shell(
+    <>
+      <p style={{ margin: '0 0 16px', fontSize: 14, color: C.textMuted, lineHeight: 1.5 }}>
+        Choose a password for your Munafe Supply account.
+      </p>
+      {error && (
+        <div style={alertError}>
+          <p style={{ margin: 0, fontSize: 13, fontWeight: 500, color: C.dangerDark }}>{error}</p>
+        </div>
+      )}
+      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div>
+          <label htmlFor="new-password" style={label}>New password</label>
+          <input
+            id="new-password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            style={input}
+            minLength={8}
+            required
+            autoComplete="new-password"
+          />
+        </div>
+        <div>
+          <label htmlFor="confirm-password" style={label}>Confirm password</label>
+          <input
+            id="confirm-password"
+            type="password"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            style={input}
+            minLength={8}
+            required
+            autoComplete="new-password"
+          />
+        </div>
+        <button type="submit" style={btn(loading)} disabled={loading}>
+          {loading ? 'Saving…' : 'Update password'}
+        </button>
+      </form>
+    </>
   );
 }
 
-const s = {
-  page: {
-    minHeight: '100vh',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-    background: '#0f172a',
-    fontFamily: "'Inter', system-ui, sans-serif",
-  },
-  card: {
-    width: '100%',
-    maxWidth: 420,
-    background: '#fff',
-    borderRadius: 12,
-    padding: 28,
-  },
-  title: { margin: '0 0 8px', fontSize: 22, fontWeight: 800, color: '#0f172a' },
-  muted: { margin: 0, color: '#64748b', fontSize: 14 },
-  body: { color: '#334155', marginBottom: 12 },
-  error: {
-    marginTop: 12,
-    padding: 10,
-    background: '#fef2f2',
-    border: '1px solid #fecaca',
-    borderRadius: 8,
-    color: '#b91c1c',
-    fontSize: 13,
-  },
-  form: { display: 'grid', gap: 14, marginTop: 16 },
-  label: { display: 'grid', gap: 6, fontSize: 13, fontWeight: 600, color: '#334155' },
-  input: {
-    padding: '10px 12px',
-    border: '1px solid #cbd5e1',
-    borderRadius: 8,
-    fontSize: 14,
-  },
-  button: {
-    marginTop: 4,
-    padding: '12px 14px',
-    border: 'none',
-    borderRadius: 8,
-    background: '#2563eb',
-    color: '#fff',
-    fontWeight: 700,
-    cursor: 'pointer',
-  },
-  link: { color: '#2563eb', fontWeight: 600, fontSize: 14 },
+const page = {
+  minHeight: '100vh',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: 16,
+  fontFamily: FONTS.body,
+  background: `linear-gradient(160deg, ${C.emeraldDark} 0%, ${C.emerald} 55%, #0A2E27 100%)`,
 };
+const logoMark = {
+  width: 56, height: 56, borderRadius: 14, background: C.gold,
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  margin: '0 auto 16px', fontFamily: FONTS.heading, fontWeight: 600,
+  fontSize: 22, color: C.emeraldDark,
+};
+const title = { fontFamily: FONTS.heading, fontSize: 26, fontWeight: 600, color: '#fff', margin: 0 };
+const subtitle = { fontSize: 14, color: '#BFE0D6', margin: '4px 0 0' };
+const card = {
+  background: C.cardBg, borderRadius: 16, padding: 32,
+  boxShadow: '0 24px 64px rgba(0,0,0,0.25)',
+};
+const label = { fontSize: 12, fontWeight: 600, color: C.textSub, marginBottom: 6, display: 'block' };
+const input = {
+  width: '100%', padding: '11px 14px', borderRadius: 10, boxSizing: 'border-box',
+  border: `1px solid ${C.border}`, fontSize: 14, outline: 'none', color: C.text,
+  fontFamily: FONTS.body,
+};
+const alertError = {
+  marginBottom: 16, padding: '12px 14px',
+  background: C.dangerLight, border: `0.5px solid ${C.dangerBorder}`, borderRadius: 10,
+};
+const link = { color: C.primary, fontWeight: 600, fontSize: 14, textDecoration: 'none' };
+function btn(loading) {
+  return {
+    width: '100%', padding: '13px', borderRadius: 10, border: 'none',
+    background: loading ? C.textMuted : C.emerald, color: '#fff',
+    fontSize: 14, fontWeight: 600, cursor: loading ? 'default' : 'pointer',
+    fontFamily: FONTS.body,
+  };
+}
