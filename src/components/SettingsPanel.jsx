@@ -850,12 +850,12 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
         <img src={form.logo_url} alt="Logo preview" style={{ marginTop: 8, height: 48, borderRadius: 6, border: `0.5px solid ${C.border}` }} onError={e => e.target.style.display = 'none'} />
       )}
 
-      <SectionTitle>About Us on webcart</SectionTitle>
+      <SectionTitle>Contact Us on webcart</SectionTitle>
       <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 12, lineHeight: 1.45 }}>
-        Optional trust tab for customers. Off by default. Contact, address, logo, website, Instagram, and FSSAI come from the fields above — only filled fields appear, and the tab stays hidden if everything is blank.
+        Optional Contact Us entry for customers. Off by default. Phone, address, logo, website, Instagram, and FSSAI come from the fields above — only filled fields appear, and the button stays hidden if everything is blank.
       </div>
       <ToggleRow
-        label="Show About tab on customer webcart"
+        label="Show Contact Us on customer webcart"
         checked={!!form.about_enabled}
         onToggle={() => set('about_enabled', !form.about_enabled)}
       />
@@ -1385,6 +1385,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
         takeaway_ready_range:      d.takeaway_ready_range ?? '',
         delivery_ready_range:      d.delivery_ready_range ?? '',
         delivery_charge_default:   d.delivery_charge_default ?? 30,
+        delivery_distance_tiers_enabled: !!d.delivery_distance_tiers_enabled,
         delivery_charge_tiers:     Array.isArray(d.delivery_charge_tiers) && d.delivery_charge_tiers.length
           ? d.delivery_charge_tiers.map(t => ({
               max_km: t.max_km == null ? '' : t.max_km,
@@ -1573,6 +1574,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
         takeaway_ready_range:       (form.takeaway_ready_range || '').trim() || null,
         delivery_ready_range:       (form.delivery_ready_range || '').trim() || null,
         delivery_charge_default:    parseFloat(form.delivery_charge_default) || 30,
+        delivery_distance_tiers_enabled: !!form.delivery_distance_tiers_enabled,
         delivery_charge_tiers:      (form.delivery_charge_tiers || []).map(t => ({
           max_km: t.max_km === '' || t.max_km == null ? null : parseFloat(t.max_km),
           charge: parseFloat(t.charge) || 0,
@@ -1753,93 +1755,120 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
         <>
           <SectionTitle>Delivery charges</SectionTitle>
           <div style={{ fontSize: 12, color: C.textSub, marginBottom: 12, lineHeight: 1.55 }}>
-            For direct WhatsApp orders (no Swiggy/Zomato). Charge is based on distance from your pickup coordinates to the customer&apos;s shared location.
-            Road distance is used when <code>GOOGLE_MAPS_API_KEY</code> is set on the server; otherwise straight-line distance is used.
-          </div>
-          <div style={{
-            fontSize: 12, color: C.textSub, marginBottom: 12, lineHeight: 1.6,
-            padding: '10px 12px', background: C.warningLight, borderRadius: 8,
-            border: `0.5px solid ${C.warningBorder}`,
-          }}>
-            <strong>Tip:</strong> Ask customers to tap <strong>Share location</strong> on WhatsApp (not just type an address) so delivery charge and radius checks are accurate.
-            {restaurantLob
-              ? <> Set your kitchen pin under <strong>Restaurant → Cloud kitchen</strong> using a full Google Maps link.</>
-              : <> Keep your pickup address up to date in the <strong>Business</strong> tab for accurate distances.</>}
+            For direct WhatsApp orders (no Swiggy/Zomato). Use a flat fee, or opt in to charge by distance from your pickup coordinates to the customer&apos;s shared location.
           </div>
           <div style={{ marginBottom: 12 }}>
-            <Label>Default charge when distance unknown (₹)</Label>
+            <Label>
+              {form.delivery_distance_tiers_enabled
+                ? 'Default charge when distance unknown (₹)'
+                : 'Delivery charge (₹)'}
+            </Label>
             <Input value={form.delivery_charge_default} onChange={v => set('delivery_charge_default', v)} type="number" placeholder="30" />
           </div>
-          <div style={{ marginBottom: 8, fontSize: 11, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase' }}>Distance tiers</div>
-          {(form.delivery_charge_tiers || []).map((tier, i) => (
-            <div key={i} style={{ ...grid2, marginBottom: 8, alignItems: 'end' }}>
-              <div>
-                <Label>{i < (form.delivery_charge_tiers.length - 1) ? `Up to (km)` : `Beyond previous (km — leave blank)`}</Label>
-                <Input
-                  value={tier.max_km}
-                  onChange={v => {
-                    const tiers = [...form.delivery_charge_tiers];
-                    tiers[i] = { ...tiers[i], max_km: v };
-                    set('delivery_charge_tiers', tiers);
-                  }}
-                  type="number"
-                  placeholder={i === form.delivery_charge_tiers.length - 1 ? 'blank = rest' : '3'}
-                />
+          <ToggleRow
+            label="Distance-based tiers"
+            checked={!!form.delivery_distance_tiers_enabled}
+            onToggle={() => {
+              setSaved(false);
+              setForm((p) => {
+                const next = !p.delivery_distance_tiers_enabled;
+                return {
+                  ...p,
+                  delivery_distance_tiers_enabled: next,
+                  ...(next && !(p.delivery_charge_tiers || []).length
+                    ? { delivery_charge_tiers: defaultTiers }
+                    : {}),
+                };
+              });
+            }}
+          />
+          <div style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 12px' }}>
+            When off, every WhatsApp delivery uses the flat charge above. When on, fee is picked from the km bands below (road distance when Maps is configured).
+          </div>
+          {!!form.delivery_distance_tiers_enabled && (
+            <>
+              <div style={{
+                fontSize: 12, color: C.textSub, marginBottom: 12, lineHeight: 1.6,
+                padding: '10px 12px', background: C.warningLight, borderRadius: 8,
+                border: `0.5px solid ${C.warningBorder}`,
+              }}>
+                <strong>Tip:</strong> Ask customers to tap <strong>Share location</strong> on WhatsApp (not just type an address) so delivery charge and radius checks are accurate.
+                {restaurantLob
+                  ? <> Set your kitchen pin under <strong>Restaurant → Cloud kitchen</strong> using a full Google Maps link.</>
+                  : <> Keep your pickup address up to date in the <strong>Business</strong> tab for accurate distances.</>}
               </div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-                <div style={{ flex: 1 }}>
-                  <Label>Charge (₹)</Label>
-                  <Input
-                    value={tier.charge}
-                    onChange={v => {
-                      const tiers = [...form.delivery_charge_tiers];
-                      tiers[i] = { ...tiers[i], charge: v };
-                      set('delivery_charge_tiers', tiers);
-                    }}
-                    type="number"
-                    placeholder="30"
-                  />
+              <div style={{ marginBottom: 8, fontSize: 11, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase' }}>Distance tiers</div>
+              {(form.delivery_charge_tiers || []).map((tier, i) => (
+                <div key={i} style={{ ...grid2, marginBottom: 8, alignItems: 'end' }}>
+                  <div>
+                    <Label>{i < (form.delivery_charge_tiers.length - 1) ? `Up to (km)` : `Beyond previous (km — leave blank)`}</Label>
+                    <Input
+                      value={tier.max_km}
+                      onChange={v => {
+                        const tiers = [...form.delivery_charge_tiers];
+                        tiers[i] = { ...tiers[i], max_km: v };
+                        set('delivery_charge_tiers', tiers);
+                      }}
+                      type="number"
+                      placeholder={i === form.delivery_charge_tiers.length - 1 ? 'blank = rest' : '3'}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                    <div style={{ flex: 1 }}>
+                      <Label>Charge (₹)</Label>
+                      <Input
+                        value={tier.charge}
+                        onChange={v => {
+                          const tiers = [...form.delivery_charge_tiers];
+                          tiers[i] = { ...tiers[i], charge: v };
+                          set('delivery_charge_tiers', tiers);
+                        }}
+                        type="number"
+                        placeholder="30"
+                      />
+                    </div>
+                    {(form.delivery_charge_tiers || []).length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const tiers = [...form.delivery_charge_tiers];
+                          tiers.splice(i, 1);
+                          set('delivery_charge_tiers', tiers);
+                        }}
+                        style={{
+                          padding: '10px 12px', marginBottom: 2, borderRadius: 8, cursor: 'pointer',
+                          border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.textSub,
+                          fontSize: 12,
+                        }}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
                 </div>
-                {(form.delivery_charge_tiers || []).length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const tiers = [...form.delivery_charge_tiers];
-                      tiers.splice(i, 1);
-                      set('delivery_charge_tiers', tiers);
-                    }}
-                    style={{
-                      padding: '10px 12px', marginBottom: 2, borderRadius: 8, cursor: 'pointer',
-                      border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.textSub,
-                      fontSize: 12,
-                    }}
-                  >
-                    Remove
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-          <button
-            type="button"
-            onClick={() => {
-              const tiers = [...(form.delivery_charge_tiers || defaultTiers)];
-              if (tiers.length === 0) {
-                set('delivery_charge_tiers', [{ max_km: 3, charge: 30 }, { max_km: '', charge: 40 }]);
-                return;
-              }
-              const catchAll = tiers[tiers.length - 1];
-              tiers.splice(tiers.length - 1, 0, { max_km: '', charge: catchAll.charge || 40 });
-              set('delivery_charge_tiers', tiers);
-            }}
-            style={{
-              padding: '8px 14px', marginBottom: 16, borderRadius: 8, cursor: 'pointer',
-              border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.primary,
-              fontSize: 12, fontWeight: 600,
-            }}
-          >
-            + Add distance tier
-          </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => {
+                  const tiers = [...(form.delivery_charge_tiers || defaultTiers)];
+                  if (tiers.length === 0) {
+                    set('delivery_charge_tiers', [{ max_km: 3, charge: 30 }, { max_km: '', charge: 40 }]);
+                    return;
+                  }
+                  const catchAll = tiers[tiers.length - 1];
+                  tiers.splice(tiers.length - 1, 0, { max_km: '', charge: catchAll.charge || 40 });
+                  set('delivery_charge_tiers', tiers);
+                }}
+                style={{
+                  padding: '8px 14px', marginBottom: 16, borderRadius: 8, cursor: 'pointer',
+                  border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.primary,
+                  fontSize: 12, fontWeight: 600,
+                }}
+              >
+                + Add distance tier
+              </button>
+            </>
+          )}
           <div style={{ ...grid2, marginBottom: 16 }}>
             <div>
               <Label>Minimum order — delivery (₹)</Label>

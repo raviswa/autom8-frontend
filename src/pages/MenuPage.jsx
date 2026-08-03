@@ -440,7 +440,6 @@ export default function MenuPage() {
   );
 
   const restaurantLob = !lobType || lobType === 'restaurant';
-  const isFoodProductsLob = String(lobType || '').toLowerCase() === 'food_products';
   const canEditCatalog = isOwner
     || (user?.role === 'manager' && allowManagerUpload);
 
@@ -489,12 +488,8 @@ export default function MenuPage() {
       <BrandHeader
         title="Menu Management"
         subtitle={businessName
-          ? (isFoodProductsLob
-            ? `${businessName} · add/edit items, bulk Excel, discounts`
-            : `${businessName} · upload catalog, toggle stock, set discounts`)
-          : (isFoodProductsLob
-            ? 'Add/edit items, bulk Excel upload, set discounts'
-            : 'Upload catalog, toggle stock, set time-limited discounts')}
+          ? `${businessName} · add/edit items, bulk Excel, discounts`
+          : 'Add/edit items, bulk Excel upload, set discounts'}
         logoUrl={logoUrl}
         logoAlt={businessName ? `${businessName} logo` : 'Business logo'}
         right={
@@ -526,7 +521,7 @@ export default function MenuPage() {
           ))}
         </div>
 
-        {isFoodProductsLob && canEditCatalog && (
+        {canEditCatalog && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
             <button
               type="button"
@@ -547,12 +542,10 @@ export default function MenuPage() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
               <div>
                 <div style={{ fontFamily: FONTS.heading, fontSize: 15, fontWeight: 600, color: C.text }}>
-                  {isFoodProductsLob ? 'Bulk Excel upload' : 'Catalog upload'}
+                  Bulk Excel upload
                 </div>
                 <div style={{ fontSize: 12, color: C.textMuted, marginTop: 4, lineHeight: 1.5 }}>
-                  {isFoodProductsLob
-                    ? <>Use Excel for <strong>bulk</strong> import/update. For a single SKU, use <strong>Add item</strong> or Edit on a card.</>
-                    : <>Download the Excel template for your business type, fill it in, then upload to <strong>replace</strong> the full menu.</>}
+                  Use Excel for <strong>bulk</strong> import/update. For a single item, use <strong>Add item</strong> or Edit on a card.
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -860,7 +853,7 @@ export default function MenuPage() {
 
                       {canEdit && (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-                          {isFoodProductsLob && canEditCatalog && (
+                          {canEditCatalog && (
                             <>
                               <button
                                 type="button"
@@ -1008,11 +1001,9 @@ export default function MenuPage() {
             <div style={{ fontSize: 36, marginBottom: 8 }}>📦</div>
             <div style={{ fontFamily: FONTS.heading, fontSize: 18, fontWeight: 600, color: C.text }}>No menu items yet</div>
             <p style={{ fontSize: 13, color: C.textMuted, marginTop: 6 }}>
-              {isFoodProductsLob
-                ? 'Add your first item, or upload an Excel file for bulk import.'
-                : 'Download the Excel template and upload your catalog to get started.'}
+              Add your first item, or upload an Excel file for bulk import.
             </p>
-            {isFoodProductsLob && canEditCatalog ? (
+            {canEditCatalog ? (
               <button
                 type="button"
                 onClick={() => setCatalogEditor({ open: true, mode: 'create', item: null })}

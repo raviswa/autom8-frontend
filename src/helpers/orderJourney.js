@@ -58,6 +58,17 @@ export function shiprocketTrackUrl(shipment) {
   if (shipment?.tracking_url) return shipment.tracking_url;
   const awb = String(shipment?.awb || '').trim();
   if (!awb) return null;
+  const provider = String(shipment?.shipping_provider || '').toLowerCase();
+  const channel = String(shipment?.delivery_channel || '').toLowerCase();
+  const mode = String(shipment?.shipment_mode || '').toLowerCase();
+  if (
+    provider === 'custom'
+    || mode === 'manual'
+    || channel === 'custom'
+    || channel === 'own_team'
+  ) {
+    return null;
+  }
   return `https://shiprocket.co/tracking/${encodeURIComponent(awb)}`;
 }
 

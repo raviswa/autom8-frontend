@@ -326,15 +326,17 @@ export const LOB_SCHEMAS = {
     templateHeaders: [
       ...BASE_TEMPLATE_HEADERS,
       'condition', 'original_mrp', 'warranty_days', 'colour',
+      'ingredients', 'how_to_use', 'shelf_life_days',
       'image_url_2', 'image_url_3', 'image_url_4', 'image_url_5',
     ],
     templateColWidths: [
       { wch: 10 }, { wch: 26 }, { wch: 40 }, { wch: 8 }, { wch: 16 }, { wch: 48 }, { wch: 12 },
       { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 12 },
+      { wch: 28 }, { wch: 28 }, { wch: 12 },
       { wch: 48 }, { wch: 48 }, { wch: 48 }, { wch: 48 },
     ],
     templateExamples: [
-      ['RT001', 'iPhone 12 (Refurbished, 64GB)', 'Grade A refurbished', 24999, 'Phones', 'https://images.unsplash.com/photo-1592286927505-1def25115558?w=800', 'TRUE', 'Refurbished', 32999, 180, 'Black', '', '', '', ''],
+      ['RT001', 'iPhone 12 (Refurbished, 64GB)', 'Grade A refurbished', 24999, 'Phones', 'https://images.unsplash.com/photo-1592286927505-1def25115558?w=800', 'TRUE', 'Refurbished', 32999, 180, 'Black', '', '', '', '', '', '', ''],
     ],
     columnHelp: [
       ['Column guide - Retail / Electronics'],
@@ -342,6 +344,7 @@ export const LOB_SCHEMAS = {
       ['category - customer-facing menu tab, e.g. Phones, Accessories'],
       ['condition - New / Refurbished / Used (shown in webcart product detail)'],
       ['original_mrp - optional; webcart shows a discount badge when higher than price'],
+      ['ingredients / how_to_use / shelf_life_days - optional trust fields for ingredient-led retail (no FSSAI gate)'],
       ['image_link - primary image; image_url_2 … image_url_5 for extra gallery photos'],
     ],
     previewColumns: [
@@ -362,6 +365,11 @@ export const LOB_SCHEMAS = {
           ? parseInt(String(row['warranty_days']).replace(/\D/g, ''), 10) || null
           : null,
         colour: strOrNull(row['colour'] ?? row['Colour'] ?? row['color'] ?? row['Color']),
+        ingredients: strOrNull(row['ingredients'] ?? row['Ingredients']),
+        how_to_use: strOrNull(row['how_to_use'] ?? row['How To Use'] ?? row['how to use']),
+        shelf_life_days: row['shelf_life_days'] != null && row['shelf_life_days'] !== ''
+          ? parseInt(String(row['shelf_life_days']).replace(/\D/g, ''), 10) || null
+          : null,
         image_url_2: strOrNull(row['image_url_2'] ?? row['Image URL 2']),
         image_url_3: strOrNull(row['image_url_3'] ?? row['Image URL 3']),
         image_url_4: strOrNull(row['image_url_4'] ?? row['Image URL 4']),
@@ -502,6 +510,7 @@ export const REGISTER_LOB_TYPES = Object.freeze(Object.keys(LOB_SCHEMAS));
 const LOB_ALIASES = Object.freeze({
   supply: 'b2b',
   b2b_supply: 'b2b',
+  jewellery: 'retail',
 });
 
 export function normalizeLobType(value, fallback = 'restaurant') {

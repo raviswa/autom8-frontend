@@ -660,8 +660,10 @@ export default function ManagerPortal() {
   const [lobType,        setLobType]        = useState('restaurant');
   const [businessTaxonomy, setBusinessTaxonomy] = useState(null);
   const [allowManagerUpload, setAllowManagerUpload] = useState(false);
+  const [shippingProvider, setShippingProvider] = useState('shiprocket');
   const [catalogEditor, setCatalogEditor] = useState({ open: false, mode: 'create', item: null });
   const [catalogRemovingId, setCatalogRemovingId] = useState(null);
+  const [markShippedDraft, setMarkShippedDraft] = useState({}); // booking_id → { courier_name, tracking_url, open, saving }
   const [instagramHandle, setInstagramHandle] = useState('');
   const [instagramUserId, setInstagramUserId] = useState('');
   const [igCanPublish, setIgCanPublish] = useState(false);
@@ -839,6 +841,7 @@ const fetchRestaurantMeta = useCallback(async () => {
         lob_type: rest.lob_type || 'restaurant',
       });
       setAllowManagerUpload(!!rest.allow_manager_menu_upload);
+      setShippingProvider(rest.shipping_provider === 'custom' ? 'custom' : 'shiprocket');
       setInstagramHandle(rest.instagram_handle || '');
       setInstagramUserId(rest.instagram_user_id || '');
       setOrderOpsMode(rest.order_ops_mode === 'split' ? 'split' : 'combined');
@@ -1047,7 +1050,6 @@ const fetchRestaurantMeta = useCallback(async () => {
   const activeKdsItems = kdsItems.filter(i => ['pending', 'in_progress', 'ready'].includes(i.status));
 
   const isPackagedLob = checkPackagedLob(lobType);
-  const isFoodProductsLob = String(lobType || '').toLowerCase() === 'food_products';
   const canEditCatalog = (user?.role === 'owner' || user?.role === 'brand_owner')
     || (user?.role === 'manager' && allowManagerUpload);
   const businessLabel = formatBusinessLabel(businessTaxonomy || { lob_type: lobType });
@@ -3397,6 +3399,20 @@ const fetchRestaurantMeta = useCallback(async () => {
                   const awb = row.shipment?.awb;
                   const track = shiprocketTrackUrl(row.shipment);
                   const skip = skipReasonLabel(row.skip_reason, row.shiprocket_error);
+                  const isCustomShip = shippingProvider === 'custom'
+                    || String(row.shipping_provider || row.shipment?.shipping_provider || '').toLowerCase() === 'custom'
+                    || String(row.delivery_channel || '').toLowerCase() === 'custom';
+                  const fulfillment = String(row.fulfillment_type || '').toLowerCase();
+                  const stage = String(row.stage || '').toLowerCase();
+                  const alreadyTracked = !!(row.shipment?.tracking_url || track);
+                  const canMarkShipped = isCustomShip
+                    && fulfillment !== 'pickup'
+                    && !!row.booking_id
+                    && !alreadyTracked
+                    && !['prep', 'delivered', 'pickup'].includes(stage);
+                  const draft = markShippedDraft[row.booking_id] || {
+                    open: false, courier_name: '', tracking_url: '', saving: false,
+                  };
                   return (
                     <div key={row.token_number} style={{ ...CARD }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
@@ -3466,13 +3482,131 @@ const fetchRestaurantMeta = useCallback(async () => {
                             </button>
                           </>
                         ) : (
-                          <span>{skip || 'Shipment pending pack / courier create'}</span>
+                          <span>{skip || (isCustomShip ? 'Awaiting manual courier entry' : 'Shipment pending pack / courier create')}</span>
                         )}
-                        {awb && <span>{row.shipment?.courier_name || 'Courier'} · AWB {awb}</span>}
+                        {(awb || row.shipment?.courier_name) && (
+                          <span>{row.shipment?.courier_name || 'Courier'}{awb ? ` · AWB ${awb}` : ''}</span>
+                        )}
                         {track && (
-                          <a href={track} target="_blank" rel="noreferrer" style={{ color: C.primaryDark, fontWeight: 600 }}>Track →</a>
+                          <a href={/^https?:\/\//i.test(track) ? track : undefined} target="_blank" rel="noreferrer" style={{ color: C.primaryDark, fontWeight: 600 }}>
+                            {/^https?:\/\//i.test(track) ? 'Track →' : track}
+                          </a>
+                        )}
+                        {canMarkShipped && !draft.open && (
+                          <button
+                            type="button"
+                            onClick={() => setMarkShippedDraft((prev) => ({
+                              ...prev,
+                              [row.booking_id]: { open: true, courier_name: '', tracking_url: '', saving: false },
+                            }))}
+                            style={{
+                              fontSize: 11, fontWeight: 600, padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
+                              border: 'none', background: C.primary, color: '#fff',
+                            }}
+                          >
+                            Mark as shipped
+                          </button>
                         )}
                       </div>
+                      {canMarkShipped && draft.open && (
+                        <div style={{
+                          marginTop: 10, padding: 12, borderRadius: 8,
+                          border: `0.5px solid ${C.border}`, background: C.surfaceBg,
+                          display: 'flex', flexDirection: 'column', gap: 8,
+                        }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: C.text }}>Mark as shipped</div>
+                          <label style={{ fontSize: 11, color: C.textMuted, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            Courier name
+                            <input
+                              value={draft.courier_name}
+                              onChange={(e) => setMarkShippedDraft((prev) => ({
+                                ...prev,
+                                [row.booking_id]: { ...draft, courier_name: e.target.value },
+                              }))}
+                              placeholder="e.g. India Post, Porter"
+                              style={{
+                                padding: '8px 10px', borderRadius: 6, fontSize: 13,
+                                border: `0.5px solid ${C.border}`, background: C.cardBg,
+                              }}
+                            />
+                          </label>
+                          <label style={{ fontSize: 11, color: C.textMuted, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            Paste the tracking link or number your courier provided
+                            <input
+                              value={draft.tracking_url}
+                              onChange={(e) => setMarkShippedDraft((prev) => ({
+                                ...prev,
+                                [row.booking_id]: { ...draft, tracking_url: e.target.value },
+                              }))}
+                              placeholder="https://… or tracking number"
+                              style={{
+                                padding: '8px 10px', borderRadius: 6, fontSize: 13,
+                                border: `0.5px solid ${C.border}`, background: C.cardBg,
+                              }}
+                            />
+                          </label>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <button
+                              type="button"
+                              disabled={draft.saving}
+                              onClick={() => setMarkShippedDraft((prev) => {
+                                const next = { ...prev };
+                                delete next[row.booking_id];
+                                return next;
+                              })}
+                              style={{
+                                fontSize: 12, fontWeight: 600, padding: '7px 12px', borderRadius: 6, cursor: 'pointer',
+                                border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.textSub,
+                              }}
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              disabled={draft.saving}
+                              onClick={async () => {
+                                const courier = String(draft.courier_name || '').trim();
+                                const tracking = String(draft.tracking_url || '').trim();
+                                if (!courier || !tracking) {
+                                  showToast('Courier name and tracking link/number are required');
+                                  return;
+                                }
+                                setMarkShippedDraft((prev) => ({
+                                  ...prev,
+                                  [row.booking_id]: { ...draft, saving: true },
+                                }));
+                                try {
+                                  await apiClient.post('/api/dashboard/shipment/manual', {
+                                    booking_id: row.booking_id,
+                                    courier_name: courier,
+                                    tracking_url: tracking,
+                                    status: 'Shipped',
+                                  });
+                                  showToast('Marked as shipped — customer notified');
+                                  setMarkShippedDraft((prev) => {
+                                    const next = { ...prev };
+                                    delete next[row.booking_id];
+                                    return next;
+                                  });
+                                  fetchJourneyOrders();
+                                } catch (err) {
+                                  showToast(err.response?.data?.error || 'Failed to mark as shipped');
+                                  setMarkShippedDraft((prev) => ({
+                                    ...prev,
+                                    [row.booking_id]: { ...draft, saving: false },
+                                  }));
+                                }
+                              }}
+                              style={{
+                                fontSize: 12, fontWeight: 600, padding: '7px 12px', borderRadius: 6, cursor: 'pointer',
+                                border: 'none', background: C.primary, color: '#fff',
+                              }}
+                            >
+                              {draft.saving ? 'Saving…' : 'Submit'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -3694,15 +3828,13 @@ const fetchRestaurantMeta = useCallback(async () => {
                 </h2>
 
                 <p style={{ fontSize: 12, color: C.textMuted, margin: "4px 0 0" }}>
-                  {isFoodProductsLob
+                  {isPackagedLob
                     ? <>Add, edit, or remove items here. Use Excel for <strong>bulk upload</strong> only. Prefer <strong>Record new batch</strong> for production stock.</>
-                    : isPackagedLob
-                    ? <>Packaged Food template: product details + optional <code style={{ fontSize: 11 }}>current_stock</code>. Prefer <strong>Record new batch</strong> for production. This is not the restaurant menu template.</>
-                    : <>Restaurant template: use <code style={{ fontSize: 11 }}>is_available</code> TRUE/FALSE only (no stock qty column). Different from Packaged Food — prepared dishes are toggled in/out of stock, not batch-counted in Excel.</>}
+                    : <>Add, edit, or remove dishes here. Use Excel for <strong>bulk upload</strong>. Toggle stock with the in-stock switch.</>}
                 </p>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                {isFoodProductsLob && canEditCatalog && (
+                {canEditCatalog && (
                   <button
                     type="button"
                     onClick={() => setCatalogEditor({ open: true, mode: 'create', item: null })}
@@ -3756,17 +3888,13 @@ const fetchRestaurantMeta = useCallback(async () => {
                 Packaged Food / Home Baker templates use <code style={{ fontSize: 11 }}>current_stock</code> and Record batch — do not use those columns here.
               </AlertBanner>
             )}
-            {isFoodProductsLob ? (
-              <AlertBanner type="info">
-                <strong>Edit in app:</strong> Use <strong>Add item</strong> / row Edit for single SKUs.
-                Excel is for bulk import/update. Stock quantities still use <strong>Record batch</strong>.
-              </AlertBanner>
-            ) : isPackagedLob ? (
-              <AlertBanner type="info">
-                <strong>Packaged Food template:</strong> Use <code style={{ fontSize: 11 }}>current_stock</code> or Record batch for jar quantities.
-                This is not the restaurant menu file (restaurants use <code style={{ fontSize: 11 }}>is_available</code> only).
-              </AlertBanner>
-            ) : null}
+            <AlertBanner type="info">
+              <strong>Edit in app:</strong> Use <strong>Add item</strong> / row Edit for single SKUs.
+              Excel is for bulk import/update.
+              {isPackagedLob
+                ? <> Stock quantities still use <strong>Record batch</strong>.</>
+                : <> Use the in-stock toggle for availability.</>}
+            </AlertBanner>
 
             {isPackagedLob && stockAlerts.filter((a) => !dismissedStockAlertIds.has(a.id)).length > 0 && (
               <div style={{
@@ -4118,7 +4246,7 @@ const fetchRestaurantMeta = useCallback(async () => {
               {menuItems.length === 0 ? (
                 <div style={{ ...CARD, textAlign: "center", padding: "40px 20px", color: C.textMuted, fontSize: 13 }}>
                   No menu items yet.
-                  {isFoodProductsLob && canEditCatalog
+                  {canEditCatalog
                     ? ' Use Add item, or upload a catalog Excel for bulk import.'
                     : ' Upload the catalog Excel to get started.'}
                 </div>
@@ -4302,7 +4430,7 @@ const fetchRestaurantMeta = useCallback(async () => {
                             </td>
                             <td style={{ padding: "10px 14px", textAlign: "right" }}>
                               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                              {isFoodProductsLob && canEditCatalog && (
+                              {canEditCatalog && (
                                 <>
                                   <button
                                     type="button"
