@@ -40,6 +40,9 @@ export default function BillingPage() {
   const [midSaving, setMidSaving] = useState(false);
   const [referralUrl, setReferralUrl] = useState(null);
   const [referralBusy, setReferralBusy] = useState(false);
+  const [preferredProvider, setPreferredProvider] = useState('phonepe');
+  const [providerSaving, setProviderSaving] = useState(false);
+  const [providerMsg, setProviderMsg] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -53,6 +56,7 @@ export default function BillingPage() {
         const res = await apiClient.get('/api/subscription');
         setSingle(res.data);
         setBrand(null);
+        setPreferredProvider(res.data.preferred_provider || 'phonepe');
         const g = res.data.phonepe_merchant;
         setMidForm({
           merchant_id: g?.merchant_id || '',
@@ -62,6 +66,9 @@ export default function BillingPage() {
         try {
           const gw = await apiClient.get('/api/subscription/payment-gateway');
           setReferralUrl(gw.data?.referral_url || null);
+          if (gw.data?.preferred_provider) {
+            setPreferredProvider(gw.data.preferred_provider);
+          }
           const row = gw.data?.gateway;
           if (row) {
             setMidForm({
@@ -108,6 +115,24 @@ export default function BillingPage() {
       await load();
     } catch (e) {
       setOfferMsg(e.response?.data?.error || e.message || 'Could not apply offer');
+    }
+  };
+
+  const savePreferredProvider = async (next) => {
+    setProviderSaving(true);
+    setProviderMsg('');
+    try {
+      const res = await apiClient.put('/api/subscription/payment-gateway', {
+        preferred_provider: next,
+      });
+      const saved = res.data?.preferred_provider || next;
+      setPreferredProvider(saved);
+      setSingle((prev) => (prev ? { ...prev, preferred_provider: saved } : prev));
+      setProviderMsg(`Checkout gateway set to ${SOURCE_LABEL[saved] || saved}`);
+    } catch (e) {
+      setProviderMsg(e.response?.data?.error || e.message || 'Could not save gateway preference');
+    } finally {
+      setProviderSaving(false);
     }
   };
 
@@ -298,6 +323,38 @@ export default function BillingPage() {
             </div>
 
             <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+              <div className="text-sm font-semibold text-slate-800 mb-1">Customer checkout gateway</div>
+              <p className="text-xs text-slate-500 mb-3">
+                Choose how diners pay online for orders. Existing Razorpay outlets can keep Razorpay;
+                new PhonePe partner outlets should select PhonePe.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {['phonepe', 'razorpay'].map((gw) => (
+                  <button
+                    key={gw}
+                    type="button"
+                    disabled={providerSaving}
+                    onClick={() => savePreferredProvider(gw)}
+                    className={`text-sm font-semibold px-4 py-2 rounded-lg border ${
+                      preferredProvider === gw
+                        ? 'bg-emerald-700 text-white border-emerald-700'
+                        : 'bg-white text-slate-700 border-slate-300 hover:border-emerald-600'
+                    } disabled:opacity-50`}
+                  >
+                    {SOURCE_LABEL[gw]}
+                  </button>
+                ))}
+              </div>
+              {preferredProvider === 'razorpay' && (
+                <p className="text-xs text-slate-500 mt-3">
+                  Checkout uses Autom8&apos;s platform Razorpay account — no merchant ID to enter.
+                </p>
+              )}
+              {providerMsg && <p className="text-xs text-slate-600 mt-2">{providerMsg}</p>}
+            </div>
+
+            {preferredProvider === 'phonepe' && (
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
               <div className="text-sm font-semibold text-slate-800 mb-1">Your PhonePe merchant ID</div>
               <p className="text-xs text-slate-500 mb-3">
                 For partnership tracking only — we never ask for your PhonePe salt key or customer payment details.
@@ -357,6 +414,7 @@ export default function BillingPage() {
               </div>
               {midMsg && <p className="text-xs text-slate-600 mt-2">{midMsg}</p>}
             </div>
+            )}
 
             <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
               <div className="text-sm font-semibold text-slate-800 mb-3">Payment history</div>
