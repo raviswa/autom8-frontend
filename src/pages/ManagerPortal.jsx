@@ -25,6 +25,7 @@ import * as XLSX from 'xlsx';
 import { useAuth } from '../contexts/AuthContext';
 import { useWebSocket } from '../contexts/WebSocketContext';
 import { useKOTPrint } from '../components/KOTPrint';
+import CatalogItemEditor from '../components/CatalogItemEditor';
 import { kotRef } from '../App';
 import { format } from 'date-fns';
 import DateRangeApply, { formatDateDMY } from '../components/DateRangeApply';
@@ -659,6 +660,8 @@ export default function ManagerPortal() {
   const [lobType,        setLobType]        = useState('restaurant');
   const [businessTaxonomy, setBusinessTaxonomy] = useState(null);
   const [allowManagerUpload, setAllowManagerUpload] = useState(false);
+  const [catalogEditor, setCatalogEditor] = useState({ open: false, mode: 'create', item: null });
+  const [catalogRemovingId, setCatalogRemovingId] = useState(null);
   const [instagramHandle, setInstagramHandle] = useState('');
   const [instagramUserId, setInstagramUserId] = useState('');
   const [igCanPublish, setIgCanPublish] = useState(false);
@@ -1044,6 +1047,9 @@ const fetchRestaurantMeta = useCallback(async () => {
   const activeKdsItems = kdsItems.filter(i => ['pending', 'in_progress', 'ready'].includes(i.status));
 
   const isPackagedLob = checkPackagedLob(lobType);
+  const isFoodProductsLob = String(lobType || '').toLowerCase() === 'food_products';
+  const canEditCatalog = (user?.role === 'owner' || user?.role === 'brand_owner')
+    || (user?.role === 'manager' && allowManagerUpload);
   const businessLabel = formatBusinessLabel(businessTaxonomy || { lob_type: lobType });
   const openShipmentCount = liveTakeawayTokens.length + liveDeliveryTokens.length;
   const freeTablesCount    = tables.filter(t => getTableStatus(t).status === 'available').length;
@@ -1518,6 +1524,21 @@ const fetchRestaurantMeta = useCallback(async () => {
       showToast(err.response?.data?.error || `Failed to launch ${item.name}`);
     } finally {
       setLaunchingId(null);
+    }
+  };
+
+  const removeCatalogItem = async (item) => {
+    if (!window.confirm(`Remove "${item.name}" from the catalog? You can re-add it later via Excel or Add item.`)) return;
+    setCatalogRemovingId(item.id);
+    try {
+      await apiClient.delete(`/api/menu-items/${item.id}`);
+      setMenuItems((prev) => prev.filter((m) => m.id !== item.id));
+      showToast(`Removed ${item.name}`);
+      fetchStockAlerts?.();
+    } catch (err) {
+      showToast(err.response?.data?.error || `Failed to remove ${item.name}`);
+    } finally {
+      setCatalogRemovingId(null);
     }
   };
 
@@ -3673,12 +3694,23 @@ const fetchRestaurantMeta = useCallback(async () => {
                 </h2>
 
                 <p style={{ fontSize: 12, color: C.textMuted, margin: "4px 0 0" }}>
-                  {isPackagedLob
+                  {isFoodProductsLob
+                    ? <>Add, edit, or remove items here. Use Excel for <strong>bulk upload</strong> only. Prefer <strong>Record new batch</strong> for production stock.</>
+                    : isPackagedLob
                     ? <>Packaged Food template: product details + optional <code style={{ fontSize: 11 }}>current_stock</code>. Prefer <strong>Record new batch</strong> for production. This is not the restaurant menu template.</>
                     : <>Restaurant template: use <code style={{ fontSize: 11 }}>is_available</code> TRUE/FALSE only (no stock qty column). Different from Packaged Food — prepared dishes are toggled in/out of stock, not batch-counted in Excel.</>}
                 </p>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                {isFoodProductsLob && canEditCatalog && (
+                  <button
+                    type="button"
+                    onClick={() => setCatalogEditor({ open: true, mode: 'create', item: null })}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, padding: '7px 14px', borderRadius: 8, border: `0.5px solid ${C.primary}`, background: C.primary, color: '#fff', cursor: 'pointer' }}
+                  >
+                    + Add item
+                  </button>
+                )}
                 {!isPackagedLob && (
                   <button
                     onClick={syncMetaCatalog}
@@ -3724,12 +3756,17 @@ const fetchRestaurantMeta = useCallback(async () => {
                 Packaged Food / Home Baker templates use <code style={{ fontSize: 11 }}>current_stock</code> and Record batch — do not use those columns here.
               </AlertBanner>
             )}
-            {isPackagedLob && (
+            {isFoodProductsLob ? (
+              <AlertBanner type="info">
+                <strong>Edit in app:</strong> Use <strong>Add item</strong> / row Edit for single SKUs.
+                Excel is for bulk import/update. Stock quantities still use <strong>Record batch</strong>.
+              </AlertBanner>
+            ) : isPackagedLob ? (
               <AlertBanner type="info">
                 <strong>Packaged Food template:</strong> Use <code style={{ fontSize: 11 }}>current_stock</code> or Record batch for jar quantities.
                 This is not the restaurant menu file (restaurants use <code style={{ fontSize: 11 }}>is_available</code> only).
               </AlertBanner>
-            )}
+            ) : null}
 
             {isPackagedLob && stockAlerts.filter((a) => !dismissedStockAlertIds.has(a.id)).length > 0 && (
               <div style={{
@@ -4079,7 +4116,12 @@ const fetchRestaurantMeta = useCallback(async () => {
     </div>
   )}
               {menuItems.length === 0 ? (
-                <div style={{ ...CARD, textAlign: "center", padding: "40px 20px", color: C.textMuted, fontSize: 13 }}>No menu items yet. Upload the catalog Excel to get started.</div>
+                <div style={{ ...CARD, textAlign: "center", padding: "40px 20px", color: C.textMuted, fontSize: 13 }}>
+                  No menu items yet.
+                  {isFoodProductsLob && canEditCatalog
+                    ? ' Use Add item, or upload a catalog Excel for bulk import.'
+                    : ' Upload the catalog Excel to get started.'}
+                </div>
               ) : filteredMenuItems.length === 0 ? (
                 <div style={{ ...CARD, textAlign: "center", padding: "32px 20px", color: C.textMuted, fontSize: 13 }}>
                   No items match your search. Try a different term or category.
@@ -4260,6 +4302,32 @@ const fetchRestaurantMeta = useCallback(async () => {
                             </td>
                             <td style={{ padding: "10px 14px", textAlign: "right" }}>
                               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                              {isFoodProductsLob && canEditCatalog && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => setCatalogEditor({ open: true, mode: 'edit', item })}
+                                    style={{
+                                      fontSize: 10, fontWeight: 600, padding: '4px 8px', borderRadius: 8,
+                                      border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.textSub, cursor: 'pointer',
+                                    }}
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeCatalogItem(item)}
+                                    disabled={catalogRemovingId === item.id}
+                                    style={{
+                                      fontSize: 10, fontWeight: 600, padding: '4px 8px', borderRadius: 8,
+                                      border: `0.5px solid ${C.dangerBorder || C.border}`, background: C.dangerLight || C.cardBg,
+                                      color: C.dangerDark || C.danger, cursor: 'pointer',
+                                    }}
+                                  >
+                                    {catalogRemovingId === item.id ? '…' : 'Remove'}
+                                  </button>
+                                </>
+                              )}
                               <button onClick={() => restockBatch(item)} disabled={isToggle}
                                 title="Add / set batch stock"
                                 style={{
@@ -4346,6 +4414,17 @@ const fetchRestaurantMeta = useCallback(async () => {
             </div>
           </div>
         )}
+
+        <CatalogItemEditor
+          open={catalogEditor.open}
+          mode={catalogEditor.mode}
+          item={catalogEditor.item}
+          lobType={lobType}
+          apiClient={apiClient}
+          showToast={(msg) => showToast(msg)}
+          onClose={() => setCatalogEditor({ open: false, mode: 'create', item: null })}
+          onSaved={() => { fetchMenuItems(); fetchStockAlerts(); }}
+        />
 
         {promoModal && (
           <div style={{

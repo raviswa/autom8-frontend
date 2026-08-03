@@ -30,6 +30,21 @@ function parseBundleComponents(raw) {
   return out.length ? out : null;
 }
 
+export { parseBundleComponents };
+
+export function formatBundleComponents(components) {
+  if (!Array.isArray(components) || !components.length) return '';
+  return components
+    .map((c) => {
+      const id = c?.retailer_id || c?.id;
+      if (!id) return null;
+      const qty = Math.max(1, parseInt(c.qty ?? c.quantity ?? 1, 10) || 1);
+      return `${id}:${qty}`;
+    })
+    .filter(Boolean)
+    .join(',');
+}
+
 function parseMadeOnDate(raw) {
   if (raw == null || raw === '') return null;
   if (raw instanceof Date && !Number.isNaN(raw.getTime())) {

@@ -9,6 +9,7 @@ import * as XLSX from 'xlsx';
 import { useAuth } from '../contexts/AuthContext';
 import BrandHeader from '../components/BrandHeader';
 import SupportChip from '../components/SupportChip';
+import CatalogItemEditor from '../components/CatalogItemEditor';
 import { C, FONTS } from '../theme/brand';
 import { getSchemaForLob } from '../config/catalogSchemas';
 import { MENU_SLOT_OPTIONS, normalizeMenuSlots, toggleMenuSlot } from '../helpers/menuSlots';
@@ -95,10 +96,13 @@ export default function MenuPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [categorySlots, setCategorySlots] = useState({});
   const [lobType, setLobType] = useState('restaurant');
+  const [allowManagerUpload, setAllowManagerUpload] = useState(false);
   const [businessName, setBusinessName] = useState('');
   const [logoUrl, setLogoUrl] = useState('');
   const [toast, setToast] = useState({ msg: '', type: 'success' });
   const toastTimer = useRef(null);
+  const [catalogEditor, setCatalogEditor] = useState({ open: false, mode: 'create', item: null });
+  const [catalogRemovingId, setCatalogRemovingId] = useState(null);
 
   // Upload
   const fileInputRef = useRef(null);
@@ -158,6 +162,7 @@ export default function MenuPage() {
       const r = await apiClient.get('/api/dashboard/waba');
       const rest = r.data?.restaurant || {};
       setLobType(rest.lob_type || 'restaurant');
+      setAllowManagerUpload(!!rest.allow_manager_menu_upload);
       setBusinessName(rest.display_name || rest.name || '');
       setLogoUrl(rest.logo_url || '');
     } catch (_e) { /* ignore */ }
@@ -435,6 +440,23 @@ export default function MenuPage() {
   );
 
   const restaurantLob = !lobType || lobType === 'restaurant';
+  const isFoodProductsLob = String(lobType || '').toLowerCase() === 'food_products';
+  const canEditCatalog = isOwner
+    || (user?.role === 'manager' && allowManagerUpload);
+
+  const removeCatalogItem = async (item) => {
+    if (!window.confirm(`Remove "${item.name}" from the catalog?`)) return;
+    setCatalogRemovingId(item.id);
+    try {
+      await apiClient.delete(`/api/menu-items/${item.id}`);
+      setItems((prev) => prev.filter((i) => i.id !== item.id));
+      showToast(`Removed ${item.name}`);
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to remove item', 'error');
+    } finally {
+      setCatalogRemovingId(null);
+    }
+  };
 
   if (loading) {
     return (
@@ -467,8 +489,12 @@ export default function MenuPage() {
       <BrandHeader
         title="Menu Management"
         subtitle={businessName
-          ? `${businessName} · upload catalog, toggle stock, set discounts`
-          : 'Upload catalog, toggle stock, set time-limited discounts'}
+          ? (isFoodProductsLob
+            ? `${businessName} · add/edit items, bulk Excel, discounts`
+            : `${businessName} · upload catalog, toggle stock, set discounts`)
+          : (isFoodProductsLob
+            ? 'Add/edit items, bulk Excel upload, set discounts'
+            : 'Upload catalog, toggle stock, set time-limited discounts')}
         logoUrl={logoUrl}
         logoAlt={businessName ? `${businessName} logo` : 'Business logo'}
         right={
@@ -500,16 +526,33 @@ export default function MenuPage() {
           ))}
         </div>
 
+        {isFoodProductsLob && canEditCatalog && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+            <button
+              type="button"
+              onClick={() => setCatalogEditor({ open: true, mode: 'create', item: null })}
+              style={{
+                fontSize: 12, fontWeight: 600, padding: '8px 14px', borderRadius: 8, cursor: 'pointer',
+                border: 'none', background: C.primary, color: '#fff',
+              }}
+            >
+              + Add item
+            </button>
+          </div>
+        )}
+
         {/* Upload strip */}
         {canEdit && (
           <div style={{ ...CARD, marginBottom: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
               <div>
                 <div style={{ fontFamily: FONTS.heading, fontSize: 15, fontWeight: 600, color: C.text }}>
-                  Catalog upload
+                  {isFoodProductsLob ? 'Bulk Excel upload' : 'Catalog upload'}
                 </div>
                 <div style={{ fontSize: 12, color: C.textMuted, marginTop: 4, lineHeight: 1.5 }}>
-                  Download the Excel template for your business type, fill it in, then upload to <strong>replace</strong> the full menu.
+                  {isFoodProductsLob
+                    ? <>Use Excel for <strong>bulk</strong> import/update. For a single SKU, use <strong>Add item</strong> or Edit on a card.</>
+                    : <>Download the Excel template for your business type, fill it in, then upload to <strong>replace</strong> the full menu.</>}
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -817,6 +860,31 @@ export default function MenuPage() {
 
                       {canEdit && (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                          {isFoodProductsLob && canEditCatalog && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => setCatalogEditor({ open: true, mode: 'edit', item })}
+                                style={{
+                                  fontSize: 11, fontWeight: 600, padding: '5px 10px', borderRadius: 6, cursor: 'pointer',
+                                  border: `0.5px solid ${C.border}`, background: C.surfaceBg, color: C.textSub,
+                                }}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => removeCatalogItem(item)}
+                                disabled={catalogRemovingId === item.id}
+                                style={{
+                                  fontSize: 11, fontWeight: 600, padding: '5px 10px', borderRadius: 6, cursor: 'pointer',
+                                  border: `0.5px solid ${C.dangerBorder}`, background: C.dangerLight, color: C.dangerDark,
+                                }}
+                              >
+                                {catalogRemovingId === item.id ? '…' : 'Remove'}
+                              </button>
+                            </>
+                          )}
                           <button
                             type="button"
                             onClick={() => toggleAvailability(item.id, item.is_available)}
@@ -940,9 +1008,22 @@ export default function MenuPage() {
             <div style={{ fontSize: 36, marginBottom: 8 }}>📦</div>
             <div style={{ fontFamily: FONTS.heading, fontSize: 18, fontWeight: 600, color: C.text }}>No menu items yet</div>
             <p style={{ fontSize: 13, color: C.textMuted, marginTop: 6 }}>
-              Download the Excel template and upload your catalog to get started.
+              {isFoodProductsLob
+                ? 'Add your first item, or upload an Excel file for bulk import.'
+                : 'Download the Excel template and upload your catalog to get started.'}
             </p>
-            {canEdit && (
+            {isFoodProductsLob && canEditCatalog ? (
+              <button
+                type="button"
+                onClick={() => setCatalogEditor({ open: true, mode: 'create', item: null })}
+                style={{
+                  marginTop: 14, fontSize: 13, fontWeight: 600, padding: '10px 18px', borderRadius: 8,
+                  border: 'none', background: C.primary, color: '#fff', cursor: 'pointer',
+                }}
+              >
+                + Add item
+              </button>
+            ) : canEdit ? (
               <button
                 type="button"
                 onClick={() => { setShowUpload(true); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
@@ -953,10 +1034,21 @@ export default function MenuPage() {
               >
                 Upload Excel catalog
               </button>
-            )}
+            ) : null}
           </div>
         )}
       </div>
+
+      <CatalogItemEditor
+        open={catalogEditor.open}
+        mode={catalogEditor.mode}
+        item={catalogEditor.item}
+        lobType={lobType}
+        apiClient={apiClient}
+        showToast={showToast}
+        onClose={() => setCatalogEditor({ open: false, mode: 'create', item: null })}
+        onSaved={() => { fetchMenu(); }}
+      />
     </div>
   );
 }
