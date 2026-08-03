@@ -78,9 +78,16 @@ export default function OrderForm() {
   useEffect(() => {
     if (!token) { setState(STATE.ERROR); setErrorMsg('No order token found in URL.'); return; }
 
+    let safeToken = token;
+    try {
+      safeToken = decodeURIComponent(token);
+    } catch {
+      safeToken = token;
+    }
+
     const prefill = searchParams.get('prefill') || '';
 
-    fetch(`${API}/api/supply/form/${token}${prefill ? `?prefill=${prefill}` : ''}`)
+    fetch(`${API}/api/supply/form/${encodeURIComponent(safeToken)}${prefill ? `?prefill=${prefill}` : ''}`)
       .then(async r => {
         const data = await r.json();
         if (r.status === 410) { setState(STATE.EXPIRED); setErrorMsg(data.message || data.error); return; }
