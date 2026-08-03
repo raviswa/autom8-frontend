@@ -5,46 +5,76 @@ import { resolveSupplyApiBase } from '../../config/api';
 //
 // Route: /s/:token  or  /s/b/:token  (permanent bookmark)
 // Auth:  HMAC-signed token in URL, validated server-side
-//
-// Responsibilities:
-//   - Load form (supplier header + catalog + client credit status)
-//   - Group items by category, qty inputs with MOQ hints
-//   - Live running total
-//   - Credit check + MOQ validation before submit
-//   - Confirmation screen on success
 // ============================================================================
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
+import { C, FONTS } from '../../theme/brand';
 
 const API = resolveSupplyApiBase();
 
-// ── Form states ───────────────────────────────────────────────────────────────
 const STATE = {
-  LOADING:   'loading',
-  CLOSED:    'closed',    // ordering window not open
-  EXPIRED:   'expired',   // token expired
-  ERROR:     'error',
-  READY:     'ready',
-  SUBMITTING:'submitting',
-  SUCCESS:   'success',
+  LOADING:    'loading',
+  CLOSED:     'closed',
+  EXPIRED:    'expired',
+  ERROR:      'error',
+  READY:      'ready',
+  SUBMITTING: 'submitting',
+  SUCCESS:    'success',
 };
 
-export default function OrderForm() {
-  const { token }              = useParams();  // /s/:token or /s/b/:token
-  const [searchParams]         = useSearchParams();
-  const isPermanent            = window.location.pathname.includes('/s/b/');
+const pageShell = {
+  minHeight: '100vh',
+  fontFamily: FONTS.body,
+  background: C.pageBg,
+  color: C.text,
+};
 
-  const [state, setState]      = useState(STATE.LOADING);
+const cardShell = {
+  background: C.cardBg,
+  borderRadius: 16,
+  boxShadow: '0 8px 32px rgba(15, 91, 76, 0.08)',
+  border: `1px solid ${C.border}`,
+  padding: 28,
+  maxWidth: 384,
+  width: '100%',
+  textAlign: 'center',
+};
+
+function BrandMark({ size = 36 }) {
+  return (
+    <div style={{
+      width: size,
+      height: size,
+      borderRadius: 10,
+      background: C.gold,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+      fontFamily: FONTS.heading,
+      fontWeight: 600,
+      fontSize: size * 0.4,
+      color: C.emeraldDark,
+    }}>
+      M
+    </div>
+  );
+}
+
+export default function OrderForm() {
+  const { token } = useParams();
+  const [searchParams] = useSearchParams();
+
+  const [state, setState] = useState(STATE.LOADING);
   const [errorMsg, setErrorMsg] = useState('');
-  const [formData, setFormData] = useState(null);   // { supplier, client, categories, delivery_date }
-  const [quantities, setQty]   = useState({});       // item_id → qty string
-  const [moqErrors, setMoqErrors] = useState({});    // item_id → error string
+  const [formData, setFormData] = useState(null);
+  const [quantities, setQty] = useState({});
+  const [moqErrors, setMoqErrors] = useState({});
   const [submitError, setSubmitError] = useState('');
   const [orderResult, setOrderResult] = useState(null);
   const inputRefs = useRef({});
 
-  // ── Load form ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!token) { setState(STATE.ERROR); setErrorMsg('No order token found in URL.'); return; }
 
@@ -55,11 +85,10 @@ export default function OrderForm() {
         const data = await r.json();
         if (r.status === 410) { setState(STATE.EXPIRED); setErrorMsg(data.message || data.error); return; }
         if (r.status === 423) { setState(STATE.CLOSED); setErrorMsg(data.message || data.error); setFormData({ closed: data }); return; }
-        if (!r.ok)            { setState(STATE.ERROR);  setErrorMsg(data.error || 'Failed to load order form.'); return; }
+        if (!r.ok) { setState(STATE.ERROR); setErrorMsg(data.error || 'Failed to load order form.'); return; }
 
         setFormData(data);
 
-        // Pre-fill quantities if last order data exists
         if (data.last_order_qtys) {
           const prefillQty = {};
           Object.entries(data.last_order_qtys).forEach(([id, q]) => {
@@ -68,18 +97,15 @@ export default function OrderForm() {
           setQty(prefillQty);
         }
 
-        // If permanent token was renewed, update URL silently
         if (data.renewed_token) {
-          const newPath = `/s/b/${data.renewed_token}`;
-          window.history.replaceState(null, '', newPath);
+          window.history.replaceState(null, '', `/s/b/${data.renewed_token}`);
         }
 
         setState(STATE.READY);
       })
       .catch(err => { setState(STATE.ERROR); setErrorMsg(err.message); });
-  }, [token]);
+  }, [token, searchParams]);
 
-  // ── Compute running total ──────────────────────────────────────────────────
   const runningTotal = useCallback(() => {
     if (!formData?.categories) return 0;
     let total = 0;
@@ -87,7 +113,7 @@ export default function OrderForm() {
       const q = parseFloat(quantities[item.id] || 0);
       if (q > 0) {
         const lineBase = q * item.price;
-        const lineGst  = lineBase * (item.gst_rate / 100);
+        const lineGst = lineBase * (item.gst_rate / 100);
         total += lineBase + lineGst;
       }
     });
@@ -96,7 +122,6 @@ export default function OrderForm() {
 
   const totalAmount = runningTotal();
 
-  // ── Credit state ───────────────────────────────────────────────────────────
   const creditAvailable = formData?.client?.credit_available;
   const creditAutoBlock = formData?.client?.credit_auto_block;
   const wouldExceedCredit = creditAvailable !== null && creditAvailable !== undefined
@@ -105,7 +130,6 @@ export default function OrderForm() {
     ? Math.round(((formData.client.credit_limit - creditAvailable) / formData.client.credit_limit) * 100)
     : 0;
 
-  // ── Qty change ─────────────────────────────────────────────────────────────
   const handleQtyChange = (itemId, value, unitType = 'weight') => {
     if (unitType === 'count') {
       if (value !== '' && !/^\d*$/.test(value)) return;
@@ -116,7 +140,6 @@ export default function OrderForm() {
     setMoqErrors(prev => ({ ...prev, [itemId]: '' }));
   };
 
-  // ── Validate + submit ──────────────────────────────────────────────────────
   const handleSubmit = async () => {
     setSubmitError('');
     const newMoqErrors = {};
@@ -155,11 +178,10 @@ export default function OrderForm() {
       return;
     }
 
-    // Credit auto-block warning
     if (creditAutoBlock && wouldExceedCredit) {
       setSubmitError(
         `Order blocked: this order (₹${totalAmount.toFixed(2)}) exceeds your available credit (₹${creditAvailable?.toFixed(2)}). ` +
-        `Please contact your supplier to clear your balance first.`
+        `Please contact your supplier to clear your balance first.`,
       );
       return;
     }
@@ -168,11 +190,11 @@ export default function OrderForm() {
 
     try {
       const res = await fetch(`${API}/api/supply/orders`, {
-        method:  'POST',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({
-          form_token:    token,
-          items:         orderItems,
+        body: JSON.stringify({
+          form_token: token,
+          items: orderItems,
           delivery_date: formData.delivery_date,
         }),
       });
@@ -180,10 +202,8 @@ export default function OrderForm() {
       const data = await res.json();
 
       if (res.status === 422 && data.code === 'ITEMS_UNAVAILABLE') {
-        // Some items went unavailable between form load and submit
         setState(STATE.READY);
         setSubmitError('Some items are no longer available today. They have been removed — please review and resubmit.');
-        // Remove unavailable items from quantities
         const unavailable = new Set(data.unavailable_ids || []);
         setQty(prev => {
           const updated = { ...prev };
@@ -207,117 +227,145 @@ export default function OrderForm() {
 
       setOrderResult(data);
       setState(STATE.SUCCESS);
-
     } catch (err) {
       setState(STATE.READY);
       setSubmitError(`Network error: ${err.message}`);
     }
   };
 
-  // ── Render helpers ─────────────────────────────────────────────────────────
   const formatCurrency = n => `₹${Number(n).toFixed(2)}`;
 
   const CreditBadge = () => {
-    if (creditAvailable === null) return null;  // unlimited
+    if (creditAvailable === null || creditAvailable === undefined) return null;
     const pct = creditPct;
-    let color = 'bg-green-100 text-green-800';
-    if (pct >= 90) color = 'bg-red-100 text-red-800';
-    else if (pct >= 70) color = 'bg-yellow-100 text-yellow-800';
+    let bg = C.successLight;
+    let fg = C.successDark;
+    let border = C.successBorder;
+    if (pct >= 90) {
+      bg = C.dangerLight; fg = C.dangerDark; border = C.dangerBorder;
+    } else if (pct >= 70) {
+      bg = C.warningLight; fg = C.warningDark; border = C.warningBorder;
+    }
     return (
-      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${color}`}>
+      <span style={{
+        fontSize: 11,
+        fontWeight: 600,
+        padding: '4px 10px',
+        borderRadius: 999,
+        background: bg,
+        color: fg,
+        border: `1px solid ${border}`,
+        whiteSpace: 'nowrap',
+      }}>
         {formatCurrency(creditAvailable)} available
       </span>
     );
   };
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // Loading
+  const StatusScreen = ({ title, body, icon }) => (
+    <div style={{ ...pageShell, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+      <div style={cardShell}>
+        {icon}
+        <h2 style={{ fontFamily: FONTS.heading, fontSize: 20, fontWeight: 600, color: C.text, margin: '12px 0 8px' }}>
+          {title}
+        </h2>
+        <p style={{ fontSize: 14, color: C.textSub, margin: 0, lineHeight: 1.5 }}>{body}</p>
+      </div>
+    </div>
+  );
+
   if (state === STATE.LOADING) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600 mx-auto mb-3" />
-          <p className="text-gray-500 text-sm">Loading your order form…</p>
+      <div style={{ ...pageShell, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: '50%', margin: '0 auto 12px',
+            border: `3px solid ${C.emeraldBorder}`,
+            borderTopColor: C.emerald,
+            animation: 'of-spin .7s linear infinite',
+          }} />
+          <style>{`@keyframes of-spin { to { transform: rotate(360deg); } }`}</style>
+          <p style={{ fontSize: 14, color: C.textMuted, margin: 0 }}>Loading your order form…</p>
         </div>
       </div>
     );
   }
 
-  // Expired
   if (state === STATE.EXPIRED) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-        <div className="bg-white rounded-2xl shadow p-8 max-w-sm w-full text-center">
-          <div className="text-4xl mb-3">⏰</div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-2">Order link expired</h2>
-          <p className="text-gray-500 text-sm">{errorMsg || 'Your daily order link has expired. Ask your supplier for a new one.'}</p>
-        </div>
-      </div>
+      <StatusScreen
+        title="Order link expired"
+        body={errorMsg || 'Your daily order link has expired. Ask your supplier for a new one.'}
+        icon={<BrandMark size={48} />}
+      />
     );
   }
 
-  // Ordering window closed
   if (state === STATE.CLOSED) {
     const d = formData?.closed;
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-        <div className="bg-white rounded-2xl shadow p-8 max-w-sm w-full text-center">
-          <div className="text-4xl mb-3">🕐</div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-2">Ordering is closed</h2>
-          <p className="text-gray-500 text-sm">
-            Orders can be placed between <strong>{d?.ordering_open_time}</strong> and <strong>{d?.ordering_cutoff_time}</strong> IST.
-          </p>
-        </div>
-      </div>
+      <StatusScreen
+        title="Ordering is closed"
+        body={`Orders can be placed between ${d?.ordering_open_time || '—'} and ${d?.ordering_cutoff_time || '—'} IST.`}
+        icon={<BrandMark size={48} />}
+      />
     );
   }
 
-  // Error
   if (state === STATE.ERROR) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-        <div className="bg-white rounded-2xl shadow p-8 max-w-sm w-full text-center">
-          <div className="text-4xl mb-3">⚠️</div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-2">Something went wrong</h2>
-          <p className="text-gray-500 text-sm">{errorMsg}</p>
-        </div>
-      </div>
+      <StatusScreen
+        title="Something went wrong"
+        body={errorMsg}
+        icon={<BrandMark size={48} />}
+      />
     );
   }
 
-  // Success
   if (state === STATE.SUCCESS && orderResult) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-        <div className="bg-white rounded-2xl shadow p-6 max-w-sm w-full">
-          <div className="text-center mb-5">
-            <div className="text-4xl mb-2">⏳</div>
-            <h2 className="text-lg font-semibold text-gray-900">Reservation submitted</h2>
-            <p className="text-gray-500 text-sm mt-1">
+      <div style={{ ...pageShell, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+        <div style={{ ...cardShell, textAlign: 'left' }}>
+          <div style={{ textAlign: 'center', marginBottom: 20 }}>
+            <BrandMark size={48} />
+            <h2 style={{ fontFamily: FONTS.heading, fontSize: 20, fontWeight: 600, color: C.text, margin: '12px 0 6px' }}>
+              Order submitted
+            </h2>
+            <p style={{ fontSize: 14, color: C.textSub, margin: 0, lineHeight: 1.5 }}>
               Pending supplier confirmation. You'll receive a WhatsApp update once it's accepted.
             </p>
           </div>
 
-          <div className="bg-gray-50 rounded-xl p-4 mb-4 space-y-1 text-sm">
-            <div className="flex justify-between">
-              <span className="text-gray-500">Order no.</span>
-              <span className="font-medium">{orderResult.order?.order_number}</span>
+          <div style={{
+            background: C.emeraldLight,
+            borderRadius: 12,
+            padding: 14,
+            marginBottom: 16,
+            fontSize: 14,
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span style={{ color: C.textSub }}>Order no.</span>
+              <span style={{ fontWeight: 600, color: C.text }}>{orderResult.order?.order_number}</span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">Delivery</span>
-              <span className="font-medium">{orderResult.order?.delivery_date}</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span style={{ color: C.textSub }}>Delivery</span>
+              <span style={{ fontWeight: 600, color: C.text }}>{orderResult.order?.delivery_date}</span>
             </div>
-            <div className="flex justify-between text-base font-semibold border-t pt-2 mt-2">
+            <div style={{
+              display: 'flex', justifyContent: 'space-between',
+              borderTop: `1px solid ${C.emeraldBorder}`, paddingTop: 8, marginTop: 4,
+              fontSize: 16, fontWeight: 700, color: C.emeraldDark,
+            }}>
               <span>Total</span>
               <span>{formatCurrency(orderResult.order_total)}</span>
             </div>
           </div>
 
-          <div className="space-y-2">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {orderResult.items?.map(item => (
-              <div key={item.item_id} className="flex justify-between text-sm">
-                <span className="text-gray-700">{item.item_name} × {item.qty_ordered} {item.unit}</span>
-                <span className="text-gray-600">{formatCurrency(item.line_total)}</span>
+              <div key={item.item_id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                <span style={{ color: C.textSub }}>{item.item_name} × {item.qty_ordered} {item.unit}</span>
+                <span style={{ color: C.text, fontWeight: 500 }}>{formatCurrency(item.line_total)}</span>
               </div>
             ))}
           </div>
@@ -326,77 +374,147 @@ export default function OrderForm() {
     );
   }
 
-  // Ready / Submitting
   const { supplier, client, categories, delivery_date } = formData || {};
   const categoryNames = Object.keys(categories || {});
   const allItems = Object.values(categories || {}).flat();
   const orderedItemCount = allItems.filter(i => parseFloat(quantities[i.id] || 0) > 0).length;
+  const submitDisabled = state === STATE.SUBMITTING || orderedItemCount === 0;
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* ── Header ── */}
-      <div className="bg-white border-b border-gray-100 sticky top-0 z-10 shadow-sm">
-        <div className="max-w-lg mx-auto px-4 py-3 flex items-center gap-3">
-          {supplier?.logo_url && (
-            <img src={supplier.logo_url} alt="" className="h-9 w-9 rounded-full object-cover border border-gray-200" />
+    <div style={{ ...pageShell, display: 'flex', flexDirection: 'column' }}>
+      {/* Header */}
+      <header style={{
+        position: 'sticky',
+        top: 0,
+        zIndex: 10,
+        background: `linear-gradient(160deg, ${C.emeraldDark} 0%, ${C.emerald} 100%)`,
+        boxShadow: '0 4px 16px rgba(10, 64, 56, 0.25)',
+      }}>
+        <div style={{
+          maxWidth: 512,
+          margin: '0 auto',
+          padding: '12px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+        }}>
+          {supplier?.logo_url ? (
+            <img
+              src={supplier.logo_url}
+              alt=""
+              style={{
+                height: 36, width: 36, borderRadius: 10, objectFit: 'cover',
+                border: '1px solid rgba(255,255,255,0.25)',
+              }}
+            />
+          ) : (
+            <BrandMark size={36} />
           )}
-          <div className="flex-1 min-w-0">
-            <p className="font-semibold text-gray-900 text-sm truncate">{supplier?.business_name}</p>
-            <p className="text-xs text-gray-500">
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{
+              margin: 0, fontFamily: FONTS.heading, fontWeight: 600, fontSize: 15,
+              color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>
+              {supplier?.business_name}
+            </p>
+            <p style={{ margin: '2px 0 0', fontSize: 12, color: '#BFE0D6' }}>
               {client?.name} · Delivery {delivery_date}
             </p>
           </div>
           <CreditBadge />
         </div>
-      </div>
+      </header>
 
-      {/* Credit warning banner */}
       {wouldExceedCredit && !creditAutoBlock && (
-        <div className="bg-yellow-50 border-b border-yellow-200 px-4 py-2 max-w-lg mx-auto text-sm text-yellow-800">
-          ⚠️ This order will exceed your credit limit. Your supplier will be notified.
+        <div style={{
+          background: C.warningLight,
+          borderBottom: `1px solid ${C.warningBorder}`,
+          padding: '10px 16px',
+          maxWidth: 512,
+          margin: '0 auto',
+          width: '100%',
+          boxSizing: 'border-box',
+          fontSize: 13,
+          color: C.warningDark,
+        }}>
+          This order will exceed your credit limit. Your supplier will be notified.
         </div>
       )}
 
-      <div className="max-w-lg mx-auto pb-40">
+      {/* Catalog */}
+      <main style={{ flex: 1, maxWidth: 512, margin: '0 auto', width: '100%' }}>
         {categoryNames.map(category => {
           const items = categories[category];
           return (
             <div key={category}>
-              <div className="px-4 py-2 bg-gray-100 border-y border-gray-200">
-                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{category}</h3>
+              <div style={{
+                padding: '8px 16px',
+                background: C.emeraldLight,
+                borderTop: `1px solid ${C.emeraldBorder}`,
+                borderBottom: `1px solid ${C.emeraldBorder}`,
+              }}>
+                <h3 style={{
+                  margin: 0,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: C.emerald,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.08em',
+                }}>
+                  {category}
+                </h3>
               </div>
               {items.map(item => {
-                const qty   = quantities[item.id] || '';
+                const qty = quantities[item.id] || '';
                 const moqErr = moqErrors[item.id];
                 const hasQty = parseFloat(qty) > 0;
                 return (
                   <div
                     key={item.id}
-                    className={`bg-white border-b border-gray-100 px-4 py-3 ${moqErr ? 'bg-red-50' : ''}`}
+                    style={{
+                      background: moqErr ? C.dangerLight : C.cardBg,
+                      borderBottom: `1px solid ${C.border}`,
+                      padding: '12px 16px',
+                    }}
                   >
-                    <div className="flex items-center gap-3">
-                      <div className="flex-1 min-w-0">
-                        <p className={`text-sm font-medium ${hasQty ? 'text-indigo-700' : 'text-gray-900'}`}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{
+                          margin: 0,
+                          fontSize: 14,
+                          fontWeight: 600,
+                          color: hasQty ? C.emeraldDark : C.text,
+                        }}>
                           {item.name}
                         </p>
-                        <p className="text-xs text-gray-500">
+                        <p style={{ margin: '2px 0 0', fontSize: 12, color: C.textMuted }}>
                           {formatCurrency(item.price)}/{item.unit}
                           {item.gst_rate > 0 && ` + ${item.gst_rate}% GST`}
                         </p>
                         {item.min_order_qty > 0 && (
-                          <p className="text-xs text-gray-400">Min: {item.min_order_qty} {item.unit}</p>
+                          <p style={{ margin: '2px 0 0', fontSize: 11, color: C.textMuted }}>
+                            Min: {item.min_order_qty} {item.unit}
+                          </p>
                         )}
                         {moqErr && (
-                          <p className="text-xs text-red-600 font-medium mt-0.5">{moqErr}</p>
+                          <p style={{ margin: '4px 0 0', fontSize: 12, fontWeight: 600, color: C.dangerDark }}>
+                            {moqErr}
+                          </p>
                         )}
                       </div>
-                      <div className="flex items-center gap-1.5">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         {hasQty && (
                           <button
+                            type="button"
                             onClick={() => handleQtyChange(item.id, '', item.unit_type)}
-                            className="text-gray-300 hover:text-red-400 text-lg leading-none"
                             aria-label="Clear"
-                          >×</button>
+                            style={{
+                              background: 'none', border: 'none', cursor: 'pointer',
+                              color: C.textMuted, fontSize: 18, lineHeight: 1, padding: 4,
+                            }}
+                          >
+                            ×
+                          </button>
                         )}
                         <input
                           ref={el => { inputRefs.current[item.id] = el; }}
@@ -407,11 +525,31 @@ export default function OrderForm() {
                           placeholder="0"
                           min="0"
                           step={item.unit_type === 'count' ? '1' : '0.5'}
-                          className={`w-20 text-right border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400
-                            ${moqErr ? 'border-red-400 bg-red-50' : hasQty ? 'border-indigo-300 bg-indigo-50' : 'border-gray-200'}
-                          `}
+                          style={{
+                            width: 80,
+                            textAlign: 'right',
+                            padding: '8px 10px',
+                            fontSize: 14,
+                            fontFamily: FONTS.body,
+                            borderRadius: 10,
+                            border: `1px solid ${moqErr ? C.dangerBorder : hasQty ? C.emeraldBorder : C.border}`,
+                            background: moqErr ? C.dangerLight : hasQty ? C.emeraldLight : C.cardBg,
+                            color: C.text,
+                            outline: 'none',
+                            boxSizing: 'border-box',
+                          }}
+                          onFocus={e => { e.target.style.borderColor = C.emerald; e.target.style.boxShadow = `0 0 0 2px ${C.emeraldLight}`; }}
+                          onBlur={e => {
+                            e.target.style.borderColor = moqErr ? C.dangerBorder : hasQty ? C.emeraldBorder : C.border;
+                            e.target.style.boxShadow = 'none';
+                          }}
                         />
-                        <span className="text-xs text-gray-400 w-8 truncate">{item.unit}</span>
+                        <span style={{
+                          fontSize: 11, color: C.textMuted, width: 28,
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        }}>
+                          {item.unit}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -422,41 +560,63 @@ export default function OrderForm() {
         })}
 
         {categoryNames.length === 0 && (
-          <div className="text-center py-16 text-gray-400">
-            <p className="text-2xl mb-2">📦</p>
-            <p className="text-sm">No items available today.</p>
+          <div style={{ textAlign: 'center', padding: '48px 16px', color: C.textMuted }}>
+            <p style={{ fontSize: 14, margin: 0 }}>No items available today.</p>
           </div>
         )}
-      </div>
+      </main>
 
-      {/* ── Sticky footer ── */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-xl">
-        <div className="max-w-lg mx-auto px-4 py-3">
+      {/* In-flow sticky footer — no fixed + pb-40 gap */}
+      <footer style={{
+        position: 'sticky',
+        bottom: 0,
+        background: C.cardBg,
+        borderTop: `1px solid ${C.border}`,
+        boxShadow: '0 -8px 24px rgba(15, 91, 76, 0.06)',
+        paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+      }}>
+        <div style={{ maxWidth: 512, margin: '0 auto', padding: '12px 16px' }}>
           {submitError && (
-            <p className="text-xs text-red-600 mb-2">{submitError}</p>
+            <p style={{ margin: '0 0 8px', fontSize: 12, color: C.dangerDark, fontWeight: 500 }}>
+              {submitError}
+            </p>
           )}
-          <div className="flex items-center gap-3">
-            <div className="flex-1">
-              <p className="text-xs text-gray-400">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ flex: 1 }}>
+              <p style={{ margin: 0, fontSize: 12, color: C.textMuted }}>
                 {orderedItemCount} item{orderedItemCount !== 1 ? 's' : ''}
               </p>
-              <p className="text-lg font-bold text-gray-900">
+              <p style={{ margin: '2px 0 0', fontSize: 18, fontWeight: 700, color: C.text }}>
                 {formatCurrency(totalAmount)}
                 {Object.values(categories || {}).flat().some(i => i.gst_rate > 0) && (
-                  <span className="text-xs font-normal text-gray-400 ml-1">incl. GST</span>
+                  <span style={{ fontSize: 11, fontWeight: 400, color: C.textMuted, marginLeft: 6 }}>
+                    incl. GST
+                  </span>
                 )}
               </p>
             </div>
             <button
+              type="button"
               onClick={handleSubmit}
-              disabled={state === STATE.SUBMITTING || orderedItemCount === 0}
-              className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 text-white font-semibold text-sm px-6 py-3 rounded-xl transition-colors disabled:cursor-not-allowed"
+              disabled={submitDisabled}
+              style={{
+                border: 'none',
+                borderRadius: 12,
+                padding: '12px 24px',
+                fontSize: 14,
+                fontWeight: 600,
+                fontFamily: FONTS.body,
+                color: '#fff',
+                background: submitDisabled ? C.textMuted : C.emerald,
+                cursor: submitDisabled ? 'default' : 'pointer',
+                opacity: submitDisabled && state !== STATE.SUBMITTING ? 0.7 : 1,
+              }}
             >
-              {state === STATE.SUBMITTING ? 'Submitting…' : 'Submit Reservation →'}
+              {state === STATE.SUBMITTING ? 'Submitting…' : 'Submit'}
             </button>
           </div>
         </div>
-      </div>
+      </footer>
     </div>
   );
 }
