@@ -6,8 +6,9 @@
 //
 // Features:
 //  - Show all catalog items with default price vs client override side-by-side
-//  - Inline click-to-edit price per item (highlighted when overridden)
-//  - Save all changes in one shot (bulk PUT)
+//  - Discount % between Default and Client Price (bidirectional with price)
+//  - Inline click-to-edit price / discount per item
+//  - Save all changes in one shot (bulk PUT) — persists absolute client price only
 //  - Reset single item to default (DELETE override)
 //  - Copy ratecard from another client
 // ============================================================================
@@ -24,6 +25,8 @@ const CATEGORIES = [
   'Meat & Seafood', 'Dry Goods', 'Oils & Fats', 'Spices', 'Packaging', 'Other',
 ];
 
+const GRID_COLS = '1fr 100px 90px 120px 80px';
+
 function supplyToken() { return localStorage.getItem('supply_token') || ''; }
 
 function Spinner({ size = 18 }) {
@@ -36,6 +39,31 @@ function Spinner({ size = 18 }) {
   );
 }
 
+/** discount % from default vs client price; null when not meaningful */
+function discountFromPrices(defaultPrice, clientPrice) {
+  const d = Number(defaultPrice);
+  const c = Number(clientPrice);
+  if (!Number.isFinite(d) || d <= 0 || !Number.isFinite(c)) return null;
+  const pct = (1 - c / d) * 100;
+  if (!Number.isFinite(pct)) return null;
+  return Math.round(pct * 100) / 100;
+}
+
+/** client price from default and discount % */
+function priceFromDiscount(defaultPrice, discountPct) {
+  const d = Number(defaultPrice);
+  const pct = Number(discountPct);
+  if (!Number.isFinite(d) || !Number.isFinite(pct)) return null;
+  const clamped = Math.min(100, Math.max(0, pct));
+  return Math.round(d * (1 - clamped / 100) * 100) / 100;
+}
+
+function formatDiscount(pct) {
+  if (pct === null || pct === undefined || Number.isNaN(Number(pct))) return '';
+  const n = Number(pct);
+  return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/\.?0+$/, '') || '0';
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function SupplyRatecard({ onLogout }) {
@@ -43,24 +71,23 @@ export default function SupplyRatecard({ onLogout }) {
   const navigate = useNavigate();
 
   const [client,       setClient]       = useState(null);
-  const [ratecard,     setRatecard]     = useState([]);   // annotated items from API
+  const [ratecard,     setRatecard]     = useState([]);
   const [loading,      setLoading]      = useState(true);
   const [saving,       setSaving]       = useState(false);
   const [error,        setError]        = useState('');
   const [toast,        setToast]        = useState(null);
 
-  // Pending local edits: { [item_id]: string (price input value) }
-  const [edits,        setEdits]        = useState({});
-  // Which cell is being edited
-  const [activeEdit,   setActiveEdit]   = useState(null);
+  // Pending local edits: { [item_id]: string (price) | null (reset) }
+  const [edits,          setEdits]          = useState({});
+  // Draft discount strings while typing: { [item_id]: string }
+  const [discountDrafts, setDiscountDrafts] = useState({});
+  // { id, field: 'price' | 'discount' } | null
+  const [activeEdit,     setActiveEdit]     = useState(null);
 
-  // Copy modal state
   const [copyOpen,     setCopyOpen]     = useState(false);
   const [clients,      setClients]      = useState([]);
   const [copyFrom,     setCopyFrom]     = useState('');
   const [copying,      setCopying]      = useState(false);
-
-  // ── Fetch ratecard ──────────────────────────────────────────────────────────
 
   const fetchRatecard = useCallback(async () => {
     setLoading(true);
@@ -75,6 +102,8 @@ export default function SupplyRatecard({ onLogout }) {
       setClient(json.client);
       setRatecard(json.ratecard || []);
       setEdits({});
+      setDiscountDrafts({});
+      setActiveEdit(null);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -84,42 +113,128 @@ export default function SupplyRatecard({ onLogout }) {
 
   useEffect(() => { fetchRatecard(); }, [fetchRatecard]);
 
-  // ── Toast ────────────────────────────────────────────────────────────────────
-
   function showToast(msg, type = 'success') {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3200);
   }
 
-  // ── Edit helpers ─────────────────────────────────────────────────────────────
+  function clearDiscountDraft(itemId) {
+    setDiscountDrafts(prev => {
+      if (!(itemId in prev)) return prev;
+      const next = { ...prev };
+      delete next[itemId];
+      return next;
+    });
+  }
 
-  function startEdit(itemId, currentEffective) {
-    setActiveEdit(itemId);
+  function startPriceEdit(itemId, currentEffective) {
+    setActiveEdit({ id: itemId, field: 'price' });
+    clearDiscountDraft(itemId);
     if (!(itemId in edits)) {
       setEdits(prev => ({ ...prev, [itemId]: String(currentEffective) }));
     }
   }
 
-  function commitEdit(itemId) {
-    setActiveEdit(null);
-    const val = edits[itemId];
-    // If value equals the default price, treat as "remove override"
-    const item = ratecard.find(r => r.id === itemId);
-    if (item && Number(val) === Number(item.default_price)) {
-      // Mark for deletion rather than keeping same-as-default override
-      setEdits(prev => ({ ...prev, [itemId]: null }));
+  function startDiscountEdit(itemId, defaultPrice, displayPrice, isOverridden) {
+    if (!(Number(defaultPrice) > 0)) return;
+    setActiveEdit({ id: itemId, field: 'discount' });
+    if (!(itemId in discountDrafts)) {
+      const derived = isOverridden
+        ? discountFromPrices(defaultPrice, displayPrice)
+        : null;
+      setDiscountDrafts(prev => ({
+        ...prev,
+        [itemId]: derived === null ? '' : formatDiscount(derived),
+      }));
+    }
+    if (!(itemId in edits)) {
+      setEdits(prev => ({
+        ...prev,
+        [itemId]: isOverridden ? String(displayPrice) : String(defaultPrice),
+      }));
     }
   }
 
+  function onPriceChange(itemId, raw) {
+    setEdits(prev => ({ ...prev, [itemId]: raw }));
+    clearDiscountDraft(itemId);
+  }
+
+  function onDiscountChange(itemId, defaultPrice, raw) {
+    setDiscountDrafts(prev => ({ ...prev, [itemId]: raw }));
+    if (raw === '' || raw === '-') {
+      // Keep edits marked but don't force a price until blur
+      if (!(itemId in edits)) {
+        setEdits(prev => ({ ...prev, [itemId]: String(defaultPrice) }));
+      }
+      return;
+    }
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return;
+    const price = priceFromDiscount(defaultPrice, n);
+    if (price === null) return;
+    setEdits(prev => ({ ...prev, [itemId]: String(price) }));
+  }
+
+  function commitPriceEdit(itemId) {
+    setActiveEdit(null);
+    const val = edits[itemId];
+    const item = ratecard.find(r => r.id === itemId);
+    if (item && (val === null || Number(val) === Number(item.default_price))) {
+      setEdits(prev => ({ ...prev, [itemId]: null }));
+    }
+    clearDiscountDraft(itemId);
+  }
+
+  function commitDiscountEdit(itemId) {
+    setActiveEdit(null);
+    const item = ratecard.find(r => r.id === itemId);
+    if (!item) return;
+    const raw = discountDrafts[itemId];
+    if (raw === undefined || raw === '' || raw === '-') {
+      // Empty discount → reset to default
+      setEdits(prev => ({ ...prev, [itemId]: null }));
+      clearDiscountDraft(itemId);
+      return;
+    }
+    let n = Number(raw);
+    if (!Number.isFinite(n)) {
+      showToast('Invalid discount %', 'error');
+      clearDiscountDraft(itemId);
+      return;
+    }
+    if (n < 0 || n > 100) {
+      n = Math.min(100, Math.max(0, n));
+      showToast('Discount clamped to 0–100%', 'error');
+    }
+    const price = priceFromDiscount(item.default_price, n);
+    if (price === null) {
+      clearDiscountDraft(itemId);
+      return;
+    }
+    if (Number(price) === Number(item.default_price)) {
+      setEdits(prev => ({ ...prev, [itemId]: null }));
+    } else {
+      setEdits(prev => ({ ...prev, [itemId]: String(price) }));
+    }
+    clearDiscountDraft(itemId);
+  }
+
   function resetItem(itemId) {
-    setEdits(prev => ({ ...prev, [itemId]: null })); // null = delete override
+    setEdits(prev => ({ ...prev, [itemId]: null }));
+    clearDiscountDraft(itemId);
+    setActiveEdit(null);
+  }
+
+  function discardEdits() {
+    setEdits({});
+    setDiscountDrafts({});
+    setActiveEdit(null);
   }
 
   function hasChanges() {
     return Object.keys(edits).length > 0;
   }
-
-  // ── Save all pending edits ────────────────────────────────────────────────────
 
   async function handleSaveAll() {
     const items = Object.entries(edits).map(([item_id, price]) => ({
@@ -129,8 +244,7 @@ export default function SupplyRatecard({ onLogout }) {
 
     if (!items.length) return;
 
-    // Validate numbers
-    const invalid = items.filter(i => i.price !== null && isNaN(i.price));
+    const invalid = items.filter(i => i.price !== null && (isNaN(i.price) || i.price < 0));
     if (invalid.length) {
       showToast('Some prices are invalid', 'error'); return;
     }
@@ -152,8 +266,6 @@ export default function SupplyRatecard({ onLogout }) {
       setSaving(false);
     }
   }
-
-  // ── Copy ratecard ─────────────────────────────────────────────────────────────
 
   async function openCopyModal() {
     try {
@@ -188,8 +300,6 @@ export default function SupplyRatecard({ onLogout }) {
     }
   }
 
-  // ── Group ratecard by category ────────────────────────────────────────────────
-
   const grouped = CATEGORIES.reduce((acc, cat) => {
     const catItems = ratecard.filter(i => i.category === cat);
     if (catItems.length) acc[cat] = catItems;
@@ -199,13 +309,10 @@ export default function SupplyRatecard({ onLogout }) {
   const pendingCount = Object.keys(edits).length;
   const overrideCount = ratecard.filter(i => i.has_override).length;
 
-  // ── Render ────────────────────────────────────────────────────────────────────
-
   return (
     <div style={{ minHeight: '100vh', background: C.pageBg, paddingBottom: 80 }}>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
 
-      {/* Header */}
       <div style={{
         background: C.cardBg, borderBottom: `1px solid ${C.border}`,
         padding: '16px 24px', display: 'flex', alignItems: 'center',
@@ -222,7 +329,7 @@ export default function SupplyRatecard({ onLogout }) {
             Ratecard — {client?.name || '…'}
           </div>
           <div style={{ fontSize: 12, color: C.textMuted, marginTop: 2 }}>
-            {overrideCount} override{overrideCount !== 1 ? 's' : ''} · click a price to edit
+            {overrideCount} override{overrideCount !== 1 ? 's' : ''} · edit discount % or client price
           </div>
         </div>
         <button
@@ -251,18 +358,16 @@ export default function SupplyRatecard({ onLogout }) {
         )}
       </div>
 
-      {/* Legend */}
       <div style={{
         background: C.primaryLight, borderBottom: `1px solid ${C.primaryBorder}`,
-        padding: '8px 24px', display: 'flex', gap: 24,
+        padding: '8px 24px', display: 'flex', gap: 24, flexWrap: 'wrap',
       }}>
         <LegendItem color={C.textMuted} label="Default price" />
         <LegendItem color={C.primary} label="Client override (highlighted)" />
         <LegendItem color={C.warning} label="Unsaved change" />
       </div>
 
-      {/* Content */}
-      <div style={{ maxWidth: 860, margin: '0 auto', padding: '20px 24px' }}>
+      <div style={{ maxWidth: 960, margin: '0 auto', padding: '20px 24px' }}>
         {error && (
           <div style={{
             padding: '12px 16px', background: C.dangerLight,
@@ -287,20 +392,20 @@ export default function SupplyRatecard({ onLogout }) {
               <div style={{ ...SECTION_LABEL, marginBottom: 8 }}>
                 {category} · {catItems.length}
               </div>
-              {/* Column headers */}
               <div style={{
-                display: 'grid', gridTemplateColumns: '1fr 120px 120px 80px',
+                display: 'grid', gridTemplateColumns: GRID_COLS,
                 padding: '6px 16px', gap: 8,
               }}>
-                {['Item', 'Default', 'Client Price', ''].map(h => (
-                  <div key={h} style={{ fontSize: 11, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</div>
+                {['Item', 'Default', 'Discount %', 'Client Price', ''].map(h => (
+                  <div key={h || 'actions'} style={{ fontSize: 11, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</div>
                 ))}
               </div>
               <div style={{ ...CARD, padding: 0, overflow: 'hidden' }}>
                 {catItems.map((item, idx) => {
                   const hasPendingEdit  = item.id in edits;
                   const pendingVal      = edits[item.id];
-                  const isEditing       = activeEdit === item.id;
+                  const isEditingPrice  = activeEdit?.id === item.id && activeEdit?.field === 'price';
+                  const isEditingDisc   = activeEdit?.id === item.id && activeEdit?.field === 'discount';
                   const displayPrice    = hasPendingEdit
                     ? (pendingVal === null ? item.default_price : pendingVal)
                     : item.effective_price;
@@ -308,17 +413,23 @@ export default function SupplyRatecard({ onLogout }) {
                     ? (pendingVal !== null && Number(pendingVal) !== Number(item.default_price))
                     : item.has_override;
                   const isChanged       = hasPendingEdit;
+                  const canDiscount     = Number(item.default_price) > 0;
+                  const derivedDisc     = isOverridden
+                    ? discountFromPrices(item.default_price, displayPrice)
+                    : null;
+                  const discountDisplay = isEditingDisc && (item.id in discountDrafts)
+                    ? discountDrafts[item.id]
+                    : (derivedDisc === null ? '' : formatDiscount(derivedDisc));
 
                   return (
                     <div key={item.id} style={{
-                      display: 'grid', gridTemplateColumns: '1fr 120px 120px 80px',
+                      display: 'grid', gridTemplateColumns: GRID_COLS,
                       alignItems: 'center', gap: 8,
                       padding: '11px 16px',
                       borderBottom: idx === catItems.length - 1 ? 'none' : `1px solid ${C.border}`,
                       background: isChanged ? C.warningLight : C.cardBg,
                       transition: 'background 0.15s',
                     }}>
-                      {/* Item name + unit */}
                       <div>
                         <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{item.name}</div>
                         <div style={{ fontSize: 11, color: C.textMuted, marginTop: 1 }}>
@@ -329,39 +440,48 @@ export default function SupplyRatecard({ onLogout }) {
                         </div>
                       </div>
 
-                      {/* Default price */}
                       <div style={{ fontSize: 13, color: C.textSub }}>
                         ₹{Number(item.default_price).toFixed(2)}
                       </div>
 
-                      {/* Client price — click to edit */}
+                      {/* Discount % */}
                       <div
-                        onClick={() => startEdit(item.id, item.effective_price)}
-                        title="Click to edit"
+                        onClick={() => canDiscount && startDiscountEdit(
+                          item.id,
+                          item.default_price,
+                          displayPrice,
+                          isOverridden,
+                        )}
+                        title={canDiscount ? 'Click to edit discount %' : 'Default price is 0 — discount unavailable'}
                         style={{
-                          cursor: 'pointer',
+                          cursor: canDiscount ? 'pointer' : 'not-allowed',
                           borderRadius: 6,
-                          border: isEditing
+                          border: isEditingDisc
                             ? `2px solid ${C.primary}`
                             : isOverridden
                               ? `1.5px solid ${C.primaryBorder}`
                               : `1px dashed ${C.borderStrong}`,
-                          background: isEditing
+                          background: isEditingDisc
                             ? C.cardBg
                             : isOverridden ? C.primaryLight : 'transparent',
                           padding: '3px 8px',
                           minHeight: 32,
                           display: 'flex', alignItems: 'center',
+                          opacity: canDiscount ? 1 : 0.45,
                         }}
                       >
-                        {isEditing ? (
+                        {isEditingDisc ? (
                           <input
                             autoFocus
-                            type="number" min="0" step="0.01"
-                            value={edits[item.id] ?? item.effective_price}
-                            onChange={e => setEdits(prev => ({ ...prev, [item.id]: e.target.value }))}
-                            onBlur={() => commitEdit(item.id)}
-                            onKeyDown={e => { if (e.key === 'Enter') commitEdit(item.id); }}
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.01"
+                            value={discountDisplay}
+                            onChange={e => onDiscountChange(item.id, item.default_price, e.target.value)}
+                            onBlur={() => commitDiscountEdit(item.id)}
+                            onKeyDown={e => { if (e.key === 'Enter') commitDiscountEdit(item.id); }}
+                            onClick={e => e.stopPropagation()}
                             style={{
                               width: '100%', border: 'none', outline: 'none',
                               background: 'transparent', fontSize: 13,
@@ -373,7 +493,55 @@ export default function SupplyRatecard({ onLogout }) {
                             fontSize: 13, fontWeight: 700,
                             color: isOverridden ? C.primaryDark : C.textFaint,
                           }}>
-                            {isOverridden || hasPendingEdit
+                            {isOverridden && derivedDisc !== null
+                              ? `${formatDiscount(derivedDisc)}%`
+                              : '+ %'
+                            }
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Client price */}
+                      <div
+                        onClick={() => startPriceEdit(item.id, item.effective_price)}
+                        title="Click to edit client price"
+                        style={{
+                          cursor: 'pointer',
+                          borderRadius: 6,
+                          border: isEditingPrice
+                            ? `2px solid ${C.primary}`
+                            : isOverridden
+                              ? `1.5px solid ${C.primaryBorder}`
+                              : `1px dashed ${C.borderStrong}`,
+                          background: isEditingPrice
+                            ? C.cardBg
+                            : isOverridden ? C.primaryLight : 'transparent',
+                          padding: '3px 8px',
+                          minHeight: 32,
+                          display: 'flex', alignItems: 'center',
+                        }}
+                      >
+                        {isEditingPrice ? (
+                          <input
+                            autoFocus
+                            type="number" min="0" step="0.01"
+                            value={edits[item.id] ?? item.effective_price}
+                            onChange={e => onPriceChange(item.id, e.target.value)}
+                            onBlur={() => commitPriceEdit(item.id)}
+                            onKeyDown={e => { if (e.key === 'Enter') commitPriceEdit(item.id); }}
+                            onClick={e => e.stopPropagation()}
+                            style={{
+                              width: '100%', border: 'none', outline: 'none',
+                              background: 'transparent', fontSize: 13,
+                              fontWeight: 700, color: C.text,
+                            }}
+                          />
+                        ) : (
+                          <span style={{
+                            fontSize: 13, fontWeight: 700,
+                            color: isOverridden ? C.primaryDark : C.textFaint,
+                          }}>
+                            {isOverridden || (hasPendingEdit && pendingVal !== null)
                               ? `₹${Number(displayPrice).toFixed(2)}`
                               : '+ set price'
                             }
@@ -381,7 +549,6 @@ export default function SupplyRatecard({ onLogout }) {
                         )}
                       </div>
 
-                      {/* Actions */}
                       <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
                         {(item.has_override || (hasPendingEdit && pendingVal !== null)) && (
                           <button
@@ -406,7 +573,6 @@ export default function SupplyRatecard({ onLogout }) {
         )}
       </div>
 
-      {/* Floating save bar */}
       {hasChanges() && (
         <div style={{
           position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 20,
@@ -418,7 +584,7 @@ export default function SupplyRatecard({ onLogout }) {
           </span>
           <div style={{ display: 'flex', gap: 8 }}>
             <button
-              onClick={() => { setEdits({}); setActiveEdit(null); }}
+              onClick={discardEdits}
               style={{ padding: '8px 16px', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', background: C.surfaceBg, border: `1px solid ${C.border}`, color: C.textSub }}
             >
               Discard
@@ -439,7 +605,6 @@ export default function SupplyRatecard({ onLogout }) {
         </div>
       )}
 
-      {/* Copy modal */}
       {copyOpen && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 200,
@@ -495,7 +660,6 @@ export default function SupplyRatecard({ onLogout }) {
         </div>
       )}
 
-      {/* Toast */}
       {toast && (
         <div style={{
           position: 'fixed', bottom: 80, right: 24, zIndex: 9999,
@@ -509,8 +673,6 @@ export default function SupplyRatecard({ onLogout }) {
     </div>
   );
 }
-
-// ── Legend item ───────────────────────────────────────────────────────────────
 
 function LegendItem({ color, label }) {
   return (
