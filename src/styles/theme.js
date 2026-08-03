@@ -1,58 +1,64 @@
 // ─── Autom8 Unified Design System ────────────────────────────────────────────
-// Import this in all three portals for a consistent visual language.
+// Surfaces / pills used by denser Supply screens (Catalog, Ratecard).
+// Brand colors come from theme/brand.js (Munafe emerald/gold) — keep in sync.
+
+import { C as BrandC } from '../theme/brand';
 
 export const C = {
-  // Brand
-  primary:       "#378ADD",
-  primaryDark:   "#185FA5",
-  primaryLight:  "#E6F1FB",
-  primaryBorder: "#B5D4F4",
+  // Brand core (Munafe — same as theme/brand)
+  primary:       BrandC.primary,
+  primaryDark:   BrandC.primaryDark,
+  primaryLight:  BrandC.primaryLight,
+  primaryBorder: BrandC.primaryBorder,
 
-  // Semantic — success
-  success:       "#1D9E75",
-  successLight:  "#E1F5EE",
-  successBorder: "#9FE1CB",
-  successDark:   "#085041",
+  emerald:       BrandC.emerald,
+  emeraldDark:   BrandC.emeraldDark,
+  emeraldLight:  BrandC.emeraldLight,
+  emeraldBorder: BrandC.emeraldBorder,
+  gold:          BrandC.gold,
 
-  // Semantic — warning
-  warning:       "#BA7517",
-  warningLight:  "#FAEEDA",
-  warningBorder: "#FAC775",
-  warningDark:   "#633806",
+  // Semantic
+  success:       BrandC.success,
+  successLight:  BrandC.successLight,
+  successBorder: BrandC.successBorder,
+  successDark:   BrandC.successDark,
 
-  // Semantic — danger
-  danger:        "#A32D2D",
-  dangerLight:   "#FCEBEB",
-  dangerBorder:  "#F7C1C1",
-  dangerDark:    "#791F1F",
+  warning:       BrandC.warning,
+  warningLight:  BrandC.warningLight,
+  warningBorder: BrandC.warningBorder,
+  warningDark:   BrandC.warningDark,
 
-  // Accent (Claude / AI)
-  accent:        "#7B61FF",
-  accentLight:   "#EEEDFE",
-  accentBorder:  "#CECBF6",
-  accentDark:    "#3C3489",
+  danger:        BrandC.danger,
+  dangerLight:   BrandC.dangerLight,
+  dangerBorder:  BrandC.dangerBorder,
+  dangerDark:    BrandC.dangerDark,
+
+  accent:        BrandC.accent,
+  accentLight:   BrandC.accentLight,
+  accentBorder:  BrandC.accentBorder,
+  accentDark:    BrandC.accentDark,
 
   // Surfaces
-  pageBg:        "#F5F5F3",
-  cardBg:        "#ffffff",
-  surfaceBg:     "#F5F5F3",
-  border:        "#E8E8E5",
-  borderStrong:  "#D0D0CC",
+  pageBg:        BrandC.pageBg,
+  cardBg:        BrandC.cardBg,
+  surfaceBg:     BrandC.surfaceBg,
+  border:        BrandC.border,
+  borderStrong:  BrandC.borderStrong,
 
   // Text
-  text:          "#111111",
-  textSub:       "#555555",
-  textMuted:     "#999999",
-  textFaint:     "#C0C0BC",
+  text:          BrandC.text,
+  textSub:       BrandC.textSub,
+  textMuted:     BrandC.textMuted,
+  textFaint:     '#C0C0BC',
 };
 
 export const PILL_VARIANTS = {
   blue:   { color: C.primaryDark,  bg: C.primaryLight,  border: C.primaryBorder  },
   teal:   { color: C.successDark,  bg: C.successLight,  border: C.successBorder  },
-  green:  { color: "#27500A",      bg: "#EAF3DE",       border: "#C0DD97"        },
+  green:  { color: '#27500A',      bg: '#EAF3DE',       border: '#C0DD97'        },
   amber:  { color: C.warningDark,  bg: C.warningLight,  border: C.warningBorder  },
   red:    { color: C.dangerDark,   bg: C.dangerLight,   border: C.dangerBorder   },
-  gray:   { color: "#444441",      bg: "#F1EFE8",       border: "#D3D1C7"        },
+  gray:   { color: '#444441',      bg: '#F1EFE8',       border: '#D3D1C7'        },
   purple: { color: C.accentDark,   bg: C.accentLight,   border: C.accentBorder   },
 };
 
@@ -63,19 +69,18 @@ export const ALERT_VARIANTS = {
   error: { bg: C.dangerLight,   border: C.dangerBorder,   color: C.dangerDark   },
 };
 
-// Shared component styles (use as style={...CARD} or spread)
 export const CARD = {
   background:   C.cardBg,
   border:       `0.5px solid ${C.border}`,
   borderRadius: 12,
-  padding:      "16px 20px",
+  padding:      '16px 20px',
 };
 
 export const SECTION_LABEL = {
   fontSize:      11,
   fontWeight:    500,
   color:         C.textMuted,
-  letterSpacing: "0.06em",
-  textTransform: "uppercase",
+  letterSpacing: '0.06em',
+  textTransform: 'uppercase',
   marginBottom:  10,
 };

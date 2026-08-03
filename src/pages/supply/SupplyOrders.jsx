@@ -10,7 +10,7 @@ const API = resolveSupplyApiBase();
 
 const STATUS_META = {
   requested:           { label: 'Requested',            color: 'bg-purple-100 text-purple-800' },
-  confirmed:           { label: 'Confirmed',           color: 'bg-blue-100 text-blue-800'   },
+  confirmed:           { label: 'Confirmed',           color: 'bg-emerald-100 text-emerald-900' },
   out_for_delivery:    { label: 'Out for Delivery',     color: 'bg-yellow-100 text-yellow-800' },
   delivered:           { label: 'Delivered',            color: 'bg-green-100 text-green-800' },
   partially_delivered: { label: 'Partial Delivery',     color: 'bg-orange-100 text-orange-800' },
@@ -174,7 +174,7 @@ export default function SupplyOrders() {
           title="Delivery date (IST)"
           aria-label="Delivery date"
           onChange={e => setFilter('date', e.target.value)}
-          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600/40"
         />
         <select
           value={status}
@@ -185,7 +185,7 @@ export default function SupplyOrders() {
             p.delete('bucket');
             setSearchParams(p);
           }}
-          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600/40"
         >
           <option value="">All statuses</option>
           {Object.entries(STATUS_META).map(([k, v]) => (
@@ -195,7 +195,7 @@ export default function SupplyOrders() {
         {date !== todayISO() && (
           <button
             onClick={() => setFilter('date', todayISO())}
-            className="text-sm text-indigo-600 hover:underline"
+            className="text-sm text-emerald-800 hover:underline"
           >
             Today
           </button>
@@ -257,7 +257,7 @@ export default function SupplyOrders() {
                 <div className="flex items-center gap-2 flex-wrap mt-3">
                   <Link
                     to={`/supply/orders/${order.id}`}
-                    className="text-xs text-indigo-600 hover:underline"
+                    className="text-xs text-emerald-800 hover:underline"
                   >
                     View details
                   </Link>
@@ -267,7 +267,7 @@ export default function SupplyOrders() {
                       <button
                         onClick={() => updateStatus(order.id, 'confirmed')}
                         disabled={isUpdating}
-                        className="text-xs bg-blue-50 hover:bg-blue-100 text-blue-800 px-2.5 py-1 rounded-lg font-medium disabled:opacity-50"
+                        className="text-xs bg-emerald-50 hover:bg-emerald-100 text-emerald-900 px-2.5 py-1 rounded-lg font-medium disabled:opacity-50"
                       >
                         {isUpdating ? '…' : '✓ Accept'}
                       </button>

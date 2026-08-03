@@ -66,7 +66,7 @@ function prevMonth() {
 
 function SummaryCard({ icon: Icon, label, value, sub, accent }) {
   const colors = {
-    blue:   'bg-blue-50 text-blue-600 border-blue-100',
+    blue:   'bg-emerald-50 text-emerald-800 border-emerald-100',
     red:    'bg-red-50 text-red-600 border-red-100',
     orange: 'bg-orange-50 text-orange-600 border-orange-100',
     green:  'bg-emerald-50 text-emerald-600 border-emerald-100',

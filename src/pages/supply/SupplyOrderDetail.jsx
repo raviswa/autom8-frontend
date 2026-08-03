@@ -49,7 +49,7 @@ export default function SupplyOrderDetail() {
 
 const styles = {
   page: { maxWidth: 760, margin: '0 auto', padding: 24, fontFamily: "'Inter', system-ui, sans-serif" },
-  back: { color: '#2563eb', textDecoration: 'none', fontWeight: 700, fontSize: 13 },
+  back: { color: '#0F5B4C', textDecoration: 'none', fontWeight: 700, fontSize: 13 },
   title: { margin: '14px 0 4px', fontSize: 26, color: '#0f172a' },
   meta: { color: '#64748b', marginTop: 0 },
   card: { border: '1px solid #e2e8f0', borderRadius: 8, background: '#fff', padding: 14 },

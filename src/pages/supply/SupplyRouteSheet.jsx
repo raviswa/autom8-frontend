@@ -101,7 +101,7 @@ export default function SupplyRouteSheet() {
         <div key={group.pincode} className="mb-6 print:mb-4 print:break-inside-avoid">
           {/* Pincode group header */}
           <div className="flex items-center gap-2 mb-2">
-            <div className="bg-indigo-600 text-white text-xs font-bold px-3 py-1 rounded-full print:bg-gray-800">
+            <div className="bg-emerald-800 text-white text-xs font-bold px-3 py-1 rounded-full print:bg-gray-800">
               📍 {group.pincode}
             </div>
             <span className="text-xs text-gray-400">{group.stops.length} stop{group.stops.length !== 1 ? 's' : ''}</span>
@@ -130,7 +130,7 @@ export default function SupplyRouteSheet() {
                       className={`mt-0.5 w-5 h-5 rounded border-2 flex-shrink-0 flex items-center justify-center print:hidden
                         ${isDelivered
                           ? 'bg-green-500 border-green-500 text-white'
-                          : 'border-gray-300 hover:border-indigo-400'}
+                          : 'border-gray-300 hover:border-emerald-600'}
                       `}
                     >
                       {isDelivered && <span className="text-xs leading-none">✓</span>}
@@ -161,7 +161,7 @@ export default function SupplyRouteSheet() {
                       <div className="mt-2">
                         <button
                           onClick={() => toggleExpand(stop.order_id)}
-                          className="text-xs text-indigo-500 hover:underline print:hidden"
+                          className="text-xs text-emerald-700 hover:underline print:hidden"
                         >
                           {isExpanded ? 'Hide items ▲' : `${stop.items.length} item${stop.items.length !== 1 ? 's' : ''} ▼`}
                         </button>
@@ -204,7 +204,7 @@ export default function SupplyRouteSheet() {
 
       {/* Summary footer (screen) */}
       {!loading && data && data.total_stops > 0 && (
-        <div className="print:hidden mt-6 bg-indigo-50 rounded-xl p-4 text-sm text-indigo-800">
+        <div className="print:hidden mt-6 bg-emerald-50 rounded-xl p-4 text-sm text-emerald-900">
           <div className="flex justify-between">
             <span>Total deliveries</span>
             <span className="font-bold">{data.total_stops}</span>

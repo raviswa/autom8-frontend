@@ -581,7 +581,7 @@ const s = {
     color:    '#64748b',
   },
   addBtn: {
-    background:   '#0ea5e9',
+    background:   '#0F5B4C',
     color:        '#fff',
     border:       'none',
     borderRadius: 8,
@@ -733,8 +733,8 @@ const s = {
     whiteSpace:   'nowrap',
   },
   actionBtnPrimary: {
-    background:  '#0ea5e9',
-    borderColor: '#0ea5e9',
+    background:  '#0F5B4C',
+    borderColor: '#0F5B4C',
     color:       '#fff',
   },
   emptyCell: {
@@ -823,7 +823,7 @@ const s = {
     border:       'none',
     borderRadius: 8,
     fontSize:     14,
-    background:   '#0ea5e9',
+    background:   '#0F5B4C',
     cursor:       'pointer',
     color:        '#fff',
     fontWeight:   700,
@@ -871,8 +871,8 @@ const s = {
     cursor:       'pointer',
   },
   dayChipActive: {
-    background:  '#0ea5e9',
-    borderColor: '#0ea5e9',
+    background:  '#0F5B4C',
+    borderColor: '#0F5B4C',
     color:       '#fff',
   },
   checkRow: {
