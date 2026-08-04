@@ -1369,6 +1369,197 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
   const [compareRows, setCompareRows] = useState(null);
   const [compareError, setCompareError] = useState('');
 
+  const ECOM_PROVIDERS = [
+    {
+      id: 'shopify',
+      label: 'Shopify',
+      fields: [
+        { key: 'api_endpoint', label: 'Store URL', placeholder: 'your-store.myshopify.com' },
+        { key: 'access_token', label: 'Admin API access token', secret: true, placeholder: 'shpat_…' },
+      ],
+    },
+    {
+      id: 'woocommerce',
+      label: 'WooCommerce',
+      fields: [
+        { key: 'api_endpoint', label: 'Store URL', placeholder: 'https://yourstore.com' },
+        { key: 'access_token', label: 'Consumer Key', secret: true, placeholder: 'ck_…' },
+        { key: 'webhook_secret', label: 'Consumer Secret', secret: true, placeholder: 'cs_…' },
+      ],
+    },
+    {
+      id: 'wix',
+      label: 'Wix',
+      fields: [
+        { key: 'site_id', label: 'Site ID', config: true, placeholder: 'Wix site id' },
+        { key: 'access_token', label: 'API Key', secret: true, placeholder: 'API key' },
+      ],
+    },
+    {
+      id: 'dukaan',
+      label: 'Dukaan',
+      fields: [
+        { key: 'store_id', label: 'Store ID', config: true, placeholder: 'Store id' },
+        { key: 'access_token', label: 'API Token', secret: true, placeholder: 'Bearer token' },
+      ],
+    },
+    {
+      id: 'instamojo',
+      label: 'Instamojo',
+      fields: [
+        { key: 'access_token', label: 'API Key', secret: true, placeholder: 'API key' },
+        { key: 'webhook_secret', label: 'Auth Token', secret: true, placeholder: 'Auth token' },
+      ],
+    },
+    {
+      id: 'webhook',
+      label: 'Other (webhook)',
+      fields: [
+        { key: 'webhook_url', label: 'Webhook URL', config: true, placeholder: 'https://…' },
+        { key: 'access_token', label: 'Bearer token (optional)', secret: true, placeholder: 'Optional' },
+      ],
+    },
+    {
+      id: 'ondc',
+      label: 'ONDC',
+      comingSoon: true,
+      fields: [],
+    },
+  ];
+
+  const emptyEcomForm = () => {
+    const o = {};
+    for (const p of ECOM_PROVIDERS) {
+      o[p.id] = {
+        is_active: false,
+        api_endpoint: '',
+        access_token: '',
+        webhook_secret: '',
+        site_id: '',
+        store_id: '',
+        webhook_url: '',
+        access_token_configured: false,
+        webhook_secret_configured: false,
+        coming_soon: !!p.comingSoon,
+        saving: false,
+        testing: false,
+      };
+    }
+    return o;
+  };
+
+  const [ecomForms, setEcomForms] = useState(emptyEcomForm);
+  const [ecomLoaded, setEcomLoaded] = useState(false);
+
+  useEffect(() => {
+    apiClient.get('/api/restaurants/ecommerce-integrations')
+      .then((res) => {
+        const list = res.data?.integrations || [];
+        setEcomForms((prev) => {
+          const next = { ...prev };
+          for (const row of list) {
+            const id = row.provider;
+            if (!next[id]) continue;
+            next[id] = {
+              ...next[id],
+              is_active: !!row.is_active,
+              api_endpoint: row.api_endpoint || '',
+              access_token: '',
+              webhook_secret: '',
+              site_id: row.config?.site_id || '',
+              store_id: row.config?.store_id || '',
+              webhook_url: row.config?.webhook_url || '',
+              access_token_configured: !!row.access_token_configured,
+              webhook_secret_configured: !!row.webhook_secret_configured,
+              coming_soon: !!row.coming_soon,
+              saving: false,
+              testing: false,
+            };
+          }
+          return next;
+        });
+        setEcomLoaded(true);
+      })
+      .catch(() => setEcomLoaded(true));
+  }, [apiClient]);
+
+  function setEcom(provider, key, value) {
+    setEcomForms((prev) => ({
+      ...prev,
+      [provider]: { ...prev[provider], [key]: value },
+    }));
+  }
+
+  async function saveEcomProvider(providerId) {
+    const f = ecomForms[providerId];
+    if (!f) return;
+    setEcom(providerId, 'saving', true);
+    try {
+      const body = {
+        is_active: !!f.is_active,
+        api_endpoint: f.api_endpoint || '',
+        config: {
+          site_id: f.site_id || '',
+          store_id: f.store_id || '',
+          webhook_url: f.webhook_url || '',
+        },
+      };
+      if (String(f.access_token || '').trim()) body.access_token = f.access_token.trim();
+      if (String(f.webhook_secret || '').trim()) body.webhook_secret = f.webhook_secret.trim();
+
+      const res = await apiClient.put(`/api/restaurants/ecommerce-integrations/${providerId}`, body);
+      const row = res.data?.integration || {};
+      setEcomForms((prev) => ({
+        ...prev,
+        [providerId]: {
+          ...prev[providerId],
+          is_active: !!row.is_active,
+          api_endpoint: row.api_endpoint || prev[providerId].api_endpoint,
+          access_token: '',
+          webhook_secret: '',
+          site_id: row.config?.site_id || '',
+          store_id: row.config?.store_id || '',
+          webhook_url: row.config?.webhook_url || '',
+          access_token_configured: !!row.access_token_configured,
+          webhook_secret_configured: !!row.webhook_secret_configured,
+          saving: false,
+        },
+      }));
+      showToast(`${PROVIDER_LABEL(providerId)} saved`, 'success');
+    } catch (e) {
+      showToast(e.response?.data?.error || 'Save failed', 'error');
+      setEcom(providerId, 'saving', false);
+    }
+  }
+
+  function PROVIDER_LABEL(id) {
+    return ECOM_PROVIDERS.find((p) => p.id === id)?.label || id;
+  }
+
+  async function testEcomProvider(providerId) {
+    const f = ecomForms[providerId];
+    if (!f) return;
+    setEcom(providerId, 'testing', true);
+    try {
+      const body = {
+        api_endpoint: f.api_endpoint || '',
+        access_token: f.access_token || '',
+        webhook_secret: f.webhook_secret || '',
+        config: {
+          site_id: f.site_id || '',
+          store_id: f.store_id || '',
+          webhook_url: f.webhook_url || '',
+        },
+      };
+      await apiClient.post(`/api/restaurants/ecommerce-integrations/${providerId}/test`, body);
+      showToast(`${PROVIDER_LABEL(providerId)} connection OK`, 'success');
+    } catch (e) {
+      showToast(e.response?.data?.error || 'Connection failed', 'error');
+    } finally {
+      setEcom(providerId, 'testing', false);
+    }
+  }
+
   useEffect(() => {
     Promise.all([
       apiClient.get('/api/dashboard/waba'),
@@ -2462,6 +2653,104 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
         </div>
       )}
       </>
+      )}
+
+      <SectionTitle id="ecommerce-integrations">E-commerce integrations</SectionTitle>
+      <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 12, lineHeight: 1.5 }}>
+        Push paid WhatsApp / webcart orders to your own store (Shopify, WooCommerce, etc.).
+        Optional — configure anytime. Failures never block Munafe order completion.
+      </div>
+      {!ecomLoaded ? (
+        <div style={{ padding: '12px 0' }}><Spinner size={20} /></div>
+      ) : (
+        ECOM_PROVIDERS.map((p) => {
+          const f = ecomForms[p.id] || {};
+          return (
+            <div
+              key={p.id}
+              style={{
+                border: `0.5px solid ${C.border}`,
+                borderRadius: 10,
+                padding: '12px 14px',
+                marginBottom: 10,
+                background: C.cardBg,
+              }}
+            >
+              <ToggleRow
+                label={p.label}
+                checked={!!f.is_active}
+                onToggle={() => {
+                  const next = !f.is_active;
+                  setEcom(p.id, 'is_active', next);
+                  if (!next) {
+                    // Persist disable immediately so push stops without re-opening fields.
+                    apiClient.put(`/api/restaurants/ecommerce-integrations/${p.id}`, { is_active: false })
+                      .then(() => showToast(`${p.label} disabled`, 'success'))
+                      .catch((e) => showToast(e.response?.data?.error || 'Save failed', 'error'));
+                  }
+                }}
+              />
+              {p.comingSoon && (
+                <div style={{ fontSize: 11, color: C.textMuted, marginTop: 6 }}>
+                  Preference saved when you tap Save. Order push coming soon.
+                </div>
+              )}
+              {f.is_active && !p.comingSoon && (
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    {p.fields.map((field) => {
+                      const val = f[field.key] || '';
+                      const configured = field.key === 'access_token'
+                        ? f.access_token_configured
+                        : field.key === 'webhook_secret'
+                          ? f.webhook_secret_configured
+                          : false;
+                      return (
+                        <div key={field.key} style={p.fields.length === 1 ? { gridColumn: '1 / -1' } : undefined}>
+                          <Label>{field.label}</Label>
+                          <Input
+                            value={val}
+                            onChange={(v) => setEcom(p.id, field.key, v)}
+                            type={field.secret ? 'password' : 'text'}
+                            placeholder={
+                              field.secret && configured
+                                ? 'Saved — enter only to replace'
+                                : (field.placeholder || '')
+                            }
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                    <Btn
+                      variant="secondary"
+                      loading={f.testing}
+                      disabled={f.testing || f.saving}
+                      onClick={() => testEcomProvider(p.id)}
+                    >
+                      Test Connection
+                    </Btn>
+                    <Btn
+                      loading={f.saving}
+                      disabled={f.saving || f.testing}
+                      onClick={() => saveEcomProvider(p.id)}
+                    >
+                      Save
+                    </Btn>
+                  </div>
+                </div>
+              )}
+              {f.is_active && p.comingSoon && (
+                <div style={{ marginTop: 10 }}>
+                  <Btn loading={f.saving} disabled={f.saving} onClick={() => saveEcomProvider(p.id)}>
+                    Save preference
+                  </Btn>
+                </div>
+              )}
+            </div>
+          );
+        })
       )}
 
       <SaveBar onSave={save} loading={saving} saved={saved} />

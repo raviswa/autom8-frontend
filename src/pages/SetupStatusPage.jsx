@@ -369,6 +369,20 @@ export default function SetupStatusPage() {
               </Link>
             ) : null}
           />
+          <CheckRow
+            ok
+            warn={false}
+            label="Optional — connect your store"
+            detail="Push paid orders to Shopify, WooCommerce, Wix, or a webhook. Not required to finish setup."
+            action={(
+              <Link
+                to="/settings?tab=kitchen#ecommerce-integrations"
+                className="text-sm font-semibold text-emerald-800 underline"
+              >
+                Open E-commerce settings
+              </Link>
+            )}
+          />
           {showPhonepeRow ? (
             <CheckRow
               ok={phonepeOk}
