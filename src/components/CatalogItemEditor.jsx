@@ -36,6 +36,7 @@ const BLANK = {
   made_on_date: '',
   ingredients: '',
   how_to_use: '',
+  how_to_store: '',
   allergens: '',
   bundle_components_text: '',
   low_stock_alert_units: '5',
@@ -95,6 +96,7 @@ function itemToForm(item) {
     made_on_date: item.made_on_date ? String(item.made_on_date).slice(0, 10) : '',
     ingredients: item.ingredients || '',
     how_to_use: item.how_to_use || '',
+    how_to_store: item.how_to_store || '',
     allergens: item.allergens || '',
     bundle_components_text: formatBundleComponents(components),
     low_stock_alert_units: item.low_stock_alert_units != null ? String(item.low_stock_alert_units) : '5',
@@ -169,7 +171,12 @@ function UrlPreview({ url }) {
         width: 44, height: 44, borderRadius: 6, objectFit: 'cover',
         border: `0.5px solid ${C.border}`, marginTop: 6,
       }}
-      onError={(e) => { e.target.style.display = 'none'; }}
+      onError={(e) => {
+        // #region agent log
+        fetch('http://127.0.0.1:7380/ingest/982e28a2-86ba-4a90-a485-a232585f9d4f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6ce792'},body:JSON.stringify({sessionId:'6ce792',hypothesisId:'H1_H3',location:'CatalogItemEditor.jsx:UrlPreview',message:'editor image preview failed',data:{host:(()=>{try{return new URL(url).hostname}catch(_){return'invalid'}})(),hasWhitespace:/\s/.test(String(url||'')),urlLen:String(url||'').length},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+        e.target.style.display = 'none';
+      }}
     />
   );
 }
@@ -258,6 +265,8 @@ export default function CatalogItemEditor({
         : null;
       payload.made_on_date = form.made_on_date || null;
       payload.ingredients = form.ingredients.trim() || null;
+      payload.how_to_use = form.how_to_use.trim() || null;
+      payload.how_to_store = form.how_to_store.trim() || null;
       payload.allergens = form.allergens.trim() || null;
       payload.bundle_components = components;
       payload.low_stock_alert_units = form.low_stock_alert_units !== ''
@@ -289,6 +298,7 @@ export default function CatalogItemEditor({
       payload.colour = form.colour.trim() || null;
       payload.ingredients = form.ingredients.trim() || null;
       payload.how_to_use = form.how_to_use.trim() || null;
+      payload.how_to_store = form.how_to_store.trim() || null;
       payload.shelf_life_days = form.shelf_life_days !== ''
         ? parseInt(form.shelf_life_days, 10) || null
         : null;
@@ -576,7 +586,10 @@ export default function CatalogItemEditor({
               <textarea style={{ ...inputStyle, minHeight: 56, resize: 'vertical' }} value={form.ingredients} onChange={(e) => setField('ingredients', e.target.value)} />
             </FormField>
             <FormField label="How to use">
-              <textarea style={{ ...inputStyle, minHeight: 56, resize: 'vertical' }} value={form.how_to_use} onChange={(e) => setField('how_to_use', e.target.value)} />
+              <textarea style={{ ...inputStyle, minHeight: 56, resize: 'vertical' }} value={form.how_to_use} onChange={(e) => setField('how_to_use', e.target.value)} placeholder="e.g. Mix 1 tsp with warm water" />
+            </FormField>
+            <FormField label="How to store">
+              <textarea style={{ ...inputStyle, minHeight: 56, resize: 'vertical' }} value={form.how_to_store} onChange={(e) => setField('how_to_store', e.target.value)} placeholder="e.g. Cool dry place, away from sunlight" />
             </FormField>
             <FormField label="Shelf life (days)">
               <input style={inputStyle} type="number" min={0} value={form.shelf_life_days} onChange={(e) => setField('shelf_life_days', e.target.value)} />
@@ -622,6 +635,12 @@ export default function CatalogItemEditor({
             </FormField>
             <FormField label="Allergens">
               <input style={inputStyle} value={form.allergens} onChange={(e) => setField('allergens', e.target.value)} />
+            </FormField>
+            <FormField label="How to use">
+              <textarea style={{ ...inputStyle, minHeight: 56, resize: 'vertical' }} value={form.how_to_use} onChange={(e) => setField('how_to_use', e.target.value)} placeholder="e.g. Best with hot rice or dosa" />
+            </FormField>
+            <FormField label="How to store">
+              <textarea style={{ ...inputStyle, minHeight: 56, resize: 'vertical' }} value={form.how_to_store} onChange={(e) => setField('how_to_store', e.target.value)} placeholder="e.g. Cool dry place; refrigerate after opening" />
             </FormField>
 
             <SectionTitle>Availability</SectionTitle>

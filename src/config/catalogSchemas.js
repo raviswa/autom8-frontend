@@ -187,7 +187,7 @@ export const LOB_SCHEMAS = {
       ...BASE_TEMPLATE_HEADERS,
       'item_type', 'variant_group_id', 'pack_size_label', 'weight_grams', 'current_stock',
       'availability_status', 'launch_at', 'deposit_amount',
-      'shelf_life_days', 'made_on_date', 'ingredients', 'allergens',
+      'shelf_life_days', 'made_on_date', 'ingredients', 'allergens', 'how_to_use', 'how_to_store',
       'bundle_components',
       'image_url_2', 'image_url_3', 'image_url_4', 'image_url_5',
       'discount_percent', 'discount_days',
@@ -228,7 +228,7 @@ export const LOB_SCHEMAS = {
       ['availability_status - blank/in_stock | sold_out | coming_soon | preorder'],
       ['launch_at - ISO date for coming_soon (e.g. 2026-08-01)'],
       ['deposit_amount - optional preorder deposit (INR)'],
-      ['shelf_life_days / made_on_date (YYYY-MM-DD) / ingredients / allergens - trust fields'],
+      ['shelf_life_days / made_on_date (YYYY-MM-DD) / ingredients / allergens / how_to_use / how_to_store - customer trust fields'],
       ['bundle_components - for BUNDLE only: retailer_id:qty, e.g. MP-100:3,GARLIC-100:3'],
       ['image_url_2 … image_url_5 - extra gallery photos for storefront / Instagram carousel'],
       ['discount_percent + discount_days - optional time-bound sale (e.g. 20 and 7 = 20% off for 7 days from upload)'],
@@ -280,6 +280,8 @@ export const LOB_SCHEMAS = {
         made_on_date: parseMadeOnDate(row['made_on_date'] ?? row['Made On'] ?? row['made_on']),
         ingredients: strOrNull(row['ingredients'] ?? row['Ingredients']),
         allergens: strOrNull(row['allergens'] ?? row['Allergens']),
+        how_to_use: strOrNull(row['how_to_use'] ?? row['How To Use'] ?? row['how to use']),
+        how_to_store: strOrNull(row['how_to_store'] ?? row['How To Store'] ?? row['how to store']),
         bundle_components: components,
         meta: Object.keys(meta).length ? meta : undefined,
         image_url_2: strOrNull(row['image_url_2'] ?? row['Image URL 2']),
@@ -326,7 +328,7 @@ export const LOB_SCHEMAS = {
     templateHeaders: [
       ...BASE_TEMPLATE_HEADERS,
       'condition', 'original_mrp', 'warranty_days', 'colour',
-      'ingredients', 'how_to_use', 'shelf_life_days',
+      'ingredients', 'how_to_use', 'how_to_store', 'shelf_life_days',
       'image_url_2', 'image_url_3', 'image_url_4', 'image_url_5',
     ],
     templateColWidths: [
@@ -344,7 +346,7 @@ export const LOB_SCHEMAS = {
       ['category - customer-facing menu tab, e.g. Phones, Accessories'],
       ['condition - New / Refurbished / Used (shown in webcart product detail)'],
       ['original_mrp - optional; webcart shows a discount badge when higher than price'],
-      ['ingredients / how_to_use / shelf_life_days - optional trust fields for ingredient-led retail (no FSSAI gate)'],
+      ['ingredients / how_to_use / how_to_store / shelf_life_days - optional trust fields for ingredient-led retail (no FSSAI gate)'],
       ['image_link - primary image; image_url_2 … image_url_5 for extra gallery photos'],
     ],
     previewColumns: [
@@ -367,6 +369,7 @@ export const LOB_SCHEMAS = {
         colour: strOrNull(row['colour'] ?? row['Colour'] ?? row['color'] ?? row['Color']),
         ingredients: strOrNull(row['ingredients'] ?? row['Ingredients']),
         how_to_use: strOrNull(row['how_to_use'] ?? row['How To Use'] ?? row['how to use']),
+        how_to_store: strOrNull(row['how_to_store'] ?? row['How To Store'] ?? row['how to store']),
         shelf_life_days: row['shelf_life_days'] != null && row['shelf_life_days'] !== ''
           ? parseInt(String(row['shelf_life_days']).replace(/\D/g, ''), 10) || null
           : null,
