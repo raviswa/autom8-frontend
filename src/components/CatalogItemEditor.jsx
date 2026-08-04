@@ -171,12 +171,7 @@ function UrlPreview({ url }) {
         width: 44, height: 44, borderRadius: 6, objectFit: 'cover',
         border: `0.5px solid ${C.border}`, marginTop: 6,
       }}
-      onError={(e) => {
-        // #region agent log
-        fetch('http://127.0.0.1:7380/ingest/982e28a2-86ba-4a90-a485-a232585f9d4f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6ce792'},body:JSON.stringify({sessionId:'6ce792',hypothesisId:'H1_H3',location:'CatalogItemEditor.jsx:UrlPreview',message:'editor image preview failed',data:{host:(()=>{try{return new URL(url).hostname}catch(_){return'invalid'}})(),hasWhitespace:/\s/.test(String(url||'')),urlLen:String(url||'').length},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
-        e.target.style.display = 'none';
-      }}
+      onError={(e) => { e.target.style.display = 'none'; }}
     />
   );
 }
