@@ -39,7 +39,7 @@ export function AuthProvider({ children }) {
       const refreshTokenValue = localStorage.getItem('refreshToken');
 
       const onLoginPage = typeof window !== 'undefined'
-        && ['/login', '/forgot-password', '/reset-password', '/platform'].includes(window.location.pathname);
+        && ['/login', '/signup', '/forgot-password', '/reset-password', '/platform'].includes(window.location.pathname);
 
       if (token && !onLoginPage) {
         try {
@@ -93,6 +93,7 @@ const requestInterceptor = apiClient.interceptors.request.use(
 
         const url = String(originalRequest.url || '');
         const isPublicAuth = url.includes('/api/auth/login')
+          || url.includes('/api/auth/register')
           || url.includes('/api/auth/signup')
           || url.includes('/api/auth/refresh')
           || url.includes('/api/auth/forgot-password')
@@ -225,6 +226,50 @@ const requestInterceptor = apiClient.interceptors.request.use(
       setError(message);
       throw new Error(message);
     }
+  }, []);
+
+  /** Email-first merchant registration — shell tenant + session. */
+  const registerOwner = useCallback(async ({ email, password, full_name }) => {
+    setError(null);
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('refreshToken');
+    localStorage.removeItem('userData');
+    delete apiClient.defaults.headers.common['Authorization'];
+    setUser(null);
+
+    try {
+      const response = await apiClient.post('/api/auth/register', {
+        email,
+        password,
+        full_name,
+      });
+      const { user: userData, token, refreshToken } = response.data;
+      localStorage.setItem('authToken', token);
+      localStorage.setItem('refreshToken', refreshToken);
+      localStorage.setItem('userData', JSON.stringify(userData));
+      apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      await supabase.auth.setSession({
+        access_token: token,
+        refresh_token: refreshToken,
+      });
+      setUser(userData);
+      return userData;
+    } catch (err) {
+      const message = err.response?.data?.error
+        || (err.code === 'ERR_NETWORK' ? 'Cannot reach API server. Please try again.' : null)
+        || err.message
+        || 'Registration failed';
+      setError(message);
+      throw new Error(message);
+    }
+  }, []);
+
+  const updateUser = useCallback((patch) => {
+    setUser((prev) => {
+      const next = { ...(prev || {}), ...patch };
+      try { localStorage.setItem('userData', JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
   }, []);
 
   const logout = useCallback(async () => {
@@ -377,6 +422,8 @@ const requestInterceptor = apiClient.interceptors.request.use(
     error,
     loginWithEmail,
     loginWithFacebook,
+    registerOwner,
+    updateUser,
     signup,
     logout,
     refreshToken,

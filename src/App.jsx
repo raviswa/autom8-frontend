@@ -18,6 +18,8 @@ import WalkInForm from './pages/WalkInForm';
 import FeatureWall from './pages/FeatureWall';
 import NotFound from './pages/NotFound';
 import SetupStatusPage from './pages/SetupStatusPage';
+import SignupPage from './pages/SignupPage';
+import OnboardingWizardPage from './pages/OnboardingWizardPage';
 import BillingPage from './pages/BillingPage';
 import AccountPage from './pages/AccountPage';
 import SoftLockPage from './pages/SoftLockPage';
@@ -72,8 +74,46 @@ function Spinner() {
 function ProtectedRoute({ children, allowedRoles }) {
   const { user, loading } = useAuth();
   if (loading) return <Spinner />;
-  if (!user) return <Navigate to="/login" />;
+  if (!user) return <Navigate to="/signup" />;
   if (allowedRoles && !allowedRoles.includes(user.role)) return <Navigate to="/unauthorized" />;
+  return children;
+}
+
+/**
+ * Shell tenants (lifecycle_status=onboarding) must finish /onboarding before dashboards.
+ */
+function OnboardingGate({ children }) {
+  const { user, apiClient } = useAuth();
+  const [state, setState] = React.useState({ loading: true, redirect: null });
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!user || user.role !== 'owner') {
+        if (!cancelled) setState({ loading: false, redirect: null });
+        return;
+      }
+      if (user.lifecycle_status === 'onboarding') {
+        if (!cancelled) setState({ loading: false, redirect: '/onboarding' });
+        return;
+      }
+      try {
+        const res = await apiClient.get('/api/onboarding/status');
+        if (cancelled) return;
+        if (res.data?.lifecycle_status === 'onboarding') {
+          setState({ loading: false, redirect: '/onboarding' });
+        } else {
+          setState({ loading: false, redirect: null });
+        }
+      } catch {
+        if (!cancelled) setState({ loading: false, redirect: null });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user, apiClient]);
+
+  if (state.loading) return <Spinner />;
+  if (state.redirect) return <Navigate to={state.redirect} replace />;
   return children;
 }
 
@@ -148,6 +188,11 @@ function SetupGate({ children }) {
         return;
       }
 
+      if (user.lifecycle_status === 'onboarding') {
+        if (!cancelled) setState({ loading: false, redirect: '/onboarding' });
+        return;
+      }
+
       const restaurantId = user.restaurant_id || user.outlets?.[0]?.id || 'unknown';
       const seenKey = `autom8_setup_seen_${restaurantId}`;
 
@@ -162,8 +207,11 @@ function SetupGate({ children }) {
       try {
         const res = await apiClient.get('/api/onboarding/status');
         if (cancelled) return;
+        if (res.data?.lifecycle_status === 'onboarding') {
+          setState({ loading: false, redirect: '/onboarding' });
+          return;
+        }
         if (res.data?.lifetime) {
-          // Demo / platform-owner outlet — never trap on Setup
           try { sessionStorage.setItem(seenKey, '1'); } catch { /* ignore */ }
           setState({ loading: false, redirect: null });
         } else if (res.data && res.data.setup_complete === false) {
@@ -172,11 +220,9 @@ function SetupGate({ children }) {
           try { sessionStorage.setItem(seenKey, '1'); } catch { /* ignore */ }
           setState({ loading: false, redirect: null });
         } else {
-          // Unexpected payload — send owner to activation checklist
           setState({ loading: false, redirect: '/setup' });
         }
       } catch (err) {
-        // Never treat API failure / tenant_missing as "setup complete"
         if (!cancelled) setState({ loading: false, redirect: '/setup' });
       }
     })();
@@ -219,6 +265,7 @@ function AppRoutes() {
     <Routes>
       {/* ── Public ── */}
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/signup" element={<SignupPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       {/* Autom8 Works platform owner console (KDS secret; not restaurant JWT) */}
@@ -226,6 +273,14 @@ function AppRoutes() {
       <Route path="/churn-feedback" element={<ChurnFeedbackPage />} />
 
       {/* ── Setup / Billing / Soft-lock ── */}
+      <Route
+        path="/onboarding"
+        element={
+          <ProtectedRoute allowedRoles={['owner', 'brand_owner']}>
+            <OnboardingWizardPage />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/setup"
         element={
@@ -343,6 +398,7 @@ function AppRoutes() {
             <SupplyLobGate>
               <RequireRestaurantId restaurantId={restaurantId}>
                 <SubscriptionGate>
+                  <OnboardingGate>
                   <SetupGate>
                     <>
                       <SetupProgressBar />
@@ -355,6 +411,7 @@ function AppRoutes() {
                       />
                     </>
                   </SetupGate>
+                  </OnboardingGate>
                 </SubscriptionGate>
               </RequireRestaurantId>
             </SupplyLobGate>

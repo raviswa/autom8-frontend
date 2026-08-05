@@ -21,7 +21,11 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const user = await loginWithEmail(email, password);
-      navigate(resolveEmployeeHomePath(user));
+      if (user?.lifecycle_status === 'onboarding') {
+        navigate('/onboarding', { replace: true });
+      } else {
+        navigate(resolveEmployeeHomePath(user));
+      }
     } catch (err) {
       setLocalError(err.message);
     } finally {
@@ -104,8 +108,14 @@ export default function LoginPage() {
           </form>
 
           <div style={{ marginTop: 28, paddingTop: 20, borderTop: `0.5px solid ${C.border}`, textAlign: 'center' }}>
-            <p style={{ fontSize: 12, color: C.textMuted, margin: 0, lineHeight: 1.6 }}>
-              Need access? Ask your restaurant administrator or use forgot password above.
+            <p style={{ fontSize: 13, color: C.textMuted, margin: 0, lineHeight: 1.6 }}>
+              New here?{' '}
+              <Link to="/signup" style={{ color: C.primary, fontWeight: 600, textDecoration: 'none' }}>
+                Create an account
+              </Link>
+            </p>
+            <p style={{ fontSize: 12, color: C.textMuted, margin: '10px 0 0', lineHeight: 1.6 }}>
+              Staff access? Ask your administrator or use forgot password above.
             </p>
           </div>
         </div>
