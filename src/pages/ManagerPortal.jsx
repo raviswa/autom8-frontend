@@ -479,6 +479,9 @@ async function downloadCatalogTemplate(apiClient, showToast, currentMenuItems = 
           made_on_date: item.made_on_date || '',
           ingredients: item.ingredients || '',
           allergens: item.allergens || '',
+          how_to_use: item.how_to_use || '',
+          how_to_store: item.how_to_store || '',
+          days_to_empty: item.days_to_empty ?? '',
           bundle_components: Array.isArray(item.meta?.bundle_components)
             ? item.meta.bundle_components.map(c => `${c.retailer_id}:${c.qty || 1}`).join(',')
             : '',
@@ -657,7 +660,7 @@ export default function ManagerPortal() {
   const [tokens,         setTokens]         = useState([]);
   const [assigningToken, setAssigningToken] = useState(null);
   const [assignTableSel, setAssignTableSel] = useState({});
-  const [lobType,        setLobType]        = useState('restaurant');
+  const [lobType,        setLobType]        = useState(() => user?.lob_type || 'restaurant');
   const [businessTaxonomy, setBusinessTaxonomy] = useState(null);
   const [allowManagerUpload, setAllowManagerUpload] = useState(false);
   const [shippingProvider, setShippingProvider] = useState('shiprocket');
@@ -833,21 +836,25 @@ const fetchRestaurantMeta = useCallback(async () => {
     const r = await apiClient.get('/api/dashboard/waba');
     const rest = r.data?.restaurant;
     if (rest) {
-      setLobType(rest.lob_type || 'restaurant');
+      setLobType(rest.lob_type || user?.lob_type || 'restaurant');
       setBusinessTaxonomy({
         business_family: rest.business_family || null,
         business_vertical: rest.business_vertical || null,
         business_vertical_other: rest.business_vertical_other || null,
-        lob_type: rest.lob_type || 'restaurant',
+        lob_type: rest.lob_type || user?.lob_type || 'restaurant',
       });
       setAllowManagerUpload(!!rest.allow_manager_menu_upload);
       setShippingProvider(rest.shipping_provider === 'custom' ? 'custom' : 'shiprocket');
       setInstagramHandle(rest.instagram_handle || '');
       setInstagramUserId(rest.instagram_user_id || '');
       setOrderOpsMode(rest.order_ops_mode === 'split' ? 'split' : 'combined');
+    } else if (user?.lob_type) {
+      setLobType(user.lob_type);
     }
-  } catch (e) { /* non-fatal — falls back to restaurant schema */ }
-}, [apiClient]);
+  } catch (e) {
+    if (user?.lob_type) setLobType(user.lob_type);
+  }
+}, [apiClient, user?.lob_type]);
 
   const fetchJourneyOrders = useCallback(async () => {
     try {

@@ -1623,6 +1623,9 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
         packaging_weight_grams: d.packaging_weight_grams ?? 0,
         cod_enabled_city: !!d.cod_enabled_city,
         cod_enabled_outstation: !!d.cod_enabled_outstation,
+        refill_reminders_enabled: !!d.refill_reminders_enabled,
+        refill_lead_time_days: d.refill_lead_time_days ?? 7,
+        refill_safety_buffer_days: d.refill_safety_buffer_days ?? 3,
       });
       // Fulfillment sections
       const secs = d.fulfillment_sections ?? [];
@@ -1790,6 +1793,9 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
         packaging_weight_grams: Math.max(0, parseInt(form.packaging_weight_grams, 10) || 0),
         cod_enabled_city: !!form.cod_enabled_city,
         cod_enabled_outstation: !!form.cod_enabled_outstation,
+        refill_reminders_enabled: !!form.refill_reminders_enabled,
+        refill_lead_time_days: Math.min(90, Math.max(0, parseInt(form.refill_lead_time_days, 10) || 0)),
+        refill_safety_buffer_days: Math.min(90, Math.max(0, parseInt(form.refill_safety_buffer_days, 10) || 0)),
       });
       if (res.data?.restaurant) {
         const r = res.data.restaurant;
@@ -1939,6 +1945,47 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
               </div>
             </>
           )}
+        </>
+      )}
+
+      {['food_products', 'retail'].includes(String(form.lob_type || lobType || '').toLowerCase()) && (
+        <>
+          <SectionTitle id="refill-reminders">Refill reminders</SectionTitle>
+          <div style={{ fontSize: 12, color: C.textSub, marginBottom: 12, lineHeight: 1.55 }}>
+            WhatsApp customers when a consumable they bought may be running low.
+            Set <code>days_to_empty</code> on catalog items to enable per-SKU reminders.
+          </div>
+          <ToggleRow
+            label="Send refill reminders"
+            checked={!!form.refill_reminders_enabled}
+            onToggle={() => set('refill_reminders_enabled', !form.refill_reminders_enabled)}
+          />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
+            <div>
+              <Label>Lead time (days)</Label>
+              <Input
+                type="number"
+                value={form.refill_lead_time_days ?? 7}
+                onChange={(v) => set('refill_lead_time_days', v)}
+                placeholder="7"
+              />
+              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+                Typical delivery time — remind this many days before empty.
+              </div>
+            </div>
+            <div>
+              <Label>Safety buffer (days)</Label>
+              <Input
+                type="number"
+                value={form.refill_safety_buffer_days ?? 3}
+                onChange={(v) => set('refill_safety_buffer_days', v)}
+                placeholder="3"
+              />
+              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+                Extra cushion subtracted when scheduling the first reminder.
+              </div>
+            </div>
+          </div>
         </>
       )}
 

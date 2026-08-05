@@ -37,6 +37,7 @@ const BLANK = {
   ingredients: '',
   how_to_use: '',
   how_to_store: '',
+  days_to_empty: '',
   allergens: '',
   bundle_components_text: '',
   low_stock_alert_units: '5',
@@ -97,6 +98,7 @@ function itemToForm(item) {
     ingredients: item.ingredients || '',
     how_to_use: item.how_to_use || '',
     how_to_store: item.how_to_store || '',
+    days_to_empty: item.days_to_empty != null ? String(item.days_to_empty) : '',
     allergens: item.allergens || '',
     bundle_components_text: formatBundleComponents(components),
     low_stock_alert_units: item.low_stock_alert_units != null ? String(item.low_stock_alert_units) : '5',
@@ -262,6 +264,12 @@ export default function CatalogItemEditor({
       payload.ingredients = form.ingredients.trim() || null;
       payload.how_to_use = form.how_to_use.trim() || null;
       payload.how_to_store = form.how_to_store.trim() || null;
+      payload.days_to_empty = form.days_to_empty !== ''
+        ? (() => {
+            const n = parseInt(form.days_to_empty, 10);
+            return Number.isFinite(n) && n > 0 && n <= 3650 ? n : null;
+          })()
+        : null;
       payload.allergens = form.allergens.trim() || null;
       payload.bundle_components = components;
       payload.low_stock_alert_units = form.low_stock_alert_units !== ''
@@ -296,6 +304,12 @@ export default function CatalogItemEditor({
       payload.how_to_store = form.how_to_store.trim() || null;
       payload.shelf_life_days = form.shelf_life_days !== ''
         ? parseInt(form.shelf_life_days, 10) || null
+        : null;
+      payload.days_to_empty = form.days_to_empty !== ''
+        ? (() => {
+            const n = parseInt(form.days_to_empty, 10);
+            return Number.isFinite(n) && n > 0 && n <= 3650 ? n : null;
+          })()
         : null;
     }
 
@@ -580,7 +594,7 @@ export default function CatalogItemEditor({
             <FormField label="Ingredients">
               <textarea style={{ ...inputStyle, minHeight: 56, resize: 'vertical' }} value={form.ingredients} onChange={(e) => setField('ingredients', e.target.value)} />
             </FormField>
-            <FormField label="How to use">
+            <FormField label="How to use" hint="Shown on the storefront product page.">
               <textarea style={{ ...inputStyle, minHeight: 56, resize: 'vertical' }} value={form.how_to_use} onChange={(e) => setField('how_to_use', e.target.value)} placeholder="e.g. Mix 1 tsp with warm water" />
             </FormField>
             <FormField label="How to store">
@@ -588,6 +602,39 @@ export default function CatalogItemEditor({
             </FormField>
             <FormField label="Shelf life (days)">
               <input style={inputStyle} type="number" min={0} value={form.shelf_life_days} onChange={(e) => setField('shelf_life_days', e.target.value)} />
+            </FormField>
+            <FormField label="Days to empty" hint="Typical days until a unit runs out — used for WhatsApp refill reminders.">
+              <input style={inputStyle} type="number" min={1} value={form.days_to_empty || ''} onChange={(e) => setField('days_to_empty', e.target.value)} placeholder="e.g. 30" />
+            </FormField>
+          </>
+        )}
+
+        {/* Trust before Images so how_to_* fields are visible without scrolling past gallery URLs */}
+        {isFood && (
+          <>
+            <SectionTitle>Trust</SectionTitle>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <FormField label="Shelf life (days)">
+                <input style={inputStyle} type="number" min={0} value={form.shelf_life_days} onChange={(e) => setField('shelf_life_days', e.target.value)} />
+              </FormField>
+              <FormField label="Made on">
+                <input style={inputStyle} type="date" value={form.made_on_date} onChange={(e) => setField('made_on_date', e.target.value)} />
+              </FormField>
+            </div>
+            <FormField label="Ingredients">
+              <textarea style={{ ...inputStyle, minHeight: 56, resize: 'vertical' }} value={form.ingredients} onChange={(e) => setField('ingredients', e.target.value)} />
+            </FormField>
+            <FormField label="Allergens">
+              <input style={inputStyle} value={form.allergens} onChange={(e) => setField('allergens', e.target.value)} />
+            </FormField>
+            <FormField label="How to use">
+              <textarea style={{ ...inputStyle, minHeight: 56, resize: 'vertical' }} value={form.how_to_use} onChange={(e) => setField('how_to_use', e.target.value)} placeholder="e.g. Best with hot rice or dosa" />
+            </FormField>
+            <FormField label="How to store" hint="Shown on the storefront product page.">
+              <textarea style={{ ...inputStyle, minHeight: 56, resize: 'vertical' }} value={form.how_to_store} onChange={(e) => setField('how_to_store', e.target.value)} placeholder="e.g. Cool dry place; refrigerate after opening" />
+            </FormField>
+            <FormField label="Days to empty" hint="Typical days until a unit runs out — used for WhatsApp refill reminders.">
+              <input style={inputStyle} type="number" min={1} value={form.days_to_empty || ''} onChange={(e) => setField('days_to_empty', e.target.value)} placeholder="e.g. 45" />
             </FormField>
           </>
         )}
@@ -616,28 +663,6 @@ export default function CatalogItemEditor({
 
         {isFood && (
           <>
-            <SectionTitle>Trust</SectionTitle>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <FormField label="Shelf life (days)">
-                <input style={inputStyle} type="number" min={0} value={form.shelf_life_days} onChange={(e) => setField('shelf_life_days', e.target.value)} />
-              </FormField>
-              <FormField label="Made on">
-                <input style={inputStyle} type="date" value={form.made_on_date} onChange={(e) => setField('made_on_date', e.target.value)} />
-              </FormField>
-            </div>
-            <FormField label="Ingredients">
-              <textarea style={{ ...inputStyle, minHeight: 56, resize: 'vertical' }} value={form.ingredients} onChange={(e) => setField('ingredients', e.target.value)} />
-            </FormField>
-            <FormField label="Allergens">
-              <input style={inputStyle} value={form.allergens} onChange={(e) => setField('allergens', e.target.value)} />
-            </FormField>
-            <FormField label="How to use">
-              <textarea style={{ ...inputStyle, minHeight: 56, resize: 'vertical' }} value={form.how_to_use} onChange={(e) => setField('how_to_use', e.target.value)} placeholder="e.g. Best with hot rice or dosa" />
-            </FormField>
-            <FormField label="How to store">
-              <textarea style={{ ...inputStyle, minHeight: 56, resize: 'vertical' }} value={form.how_to_store} onChange={(e) => setField('how_to_store', e.target.value)} placeholder="e.g. Cool dry place; refrigerate after opening" />
-            </FormField>
-
             <SectionTitle>Availability</SectionTitle>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <FormField label="Status">
