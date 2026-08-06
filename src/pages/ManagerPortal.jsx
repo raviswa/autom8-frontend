@@ -670,6 +670,8 @@ export default function ManagerPortal() {
   const [instagramHandle, setInstagramHandle] = useState('');
   const [instagramUserId, setInstagramUserId] = useState('');
   const [igCanPublish, setIgCanPublish] = useState(false);
+  const [igPublishHint, setIgPublishHint] = useState('');
+  const [igTokenSource, setIgTokenSource] = useState(null);
   const [generatingStoryId, setGeneratingStoryId] = useState(null);
   const [discountDraft, setDiscountDraft] = useState({});
   const [discountSaving, setDiscountSaving] = useState(null);
@@ -1655,10 +1657,16 @@ const fetchRestaurantMeta = useCallback(async () => {
       ]);
       const draft = draftRes.data?.draft;
       if (!draft) throw new Error('No draft returned');
-      setIgCanPublish(!!(statusRes.data?.can_publish || draft.publish?.connected));
+      const status = statusRes.data || {};
+      const canPub = !!(status.can_publish || draft.publish?.connected);
+      setIgCanPublish(canPub);
+      setIgTokenSource(status.token_source || draft.publish?.token_source || null);
+      setIgPublishHint(status.setup_hint || draft.publish?.setup_hint || '');
+      if (status.instagram_user_id) setInstagramUserId(status.instagram_user_id);
       setPromoCaption(draft.feed_caption || '');
-      setPromoPublishFeed(true);
-      setPromoPublishStory(true);
+      const hasImages = (draft.product?.image_urls || []).length > 0;
+      setPromoPublishFeed(hasImages);
+      setPromoPublishStory(hasImages);
       setPromoModal({ ...draft, item });
     } catch (err) {
       showToast(err.response?.data?.error || err.message || 'Could not prepare Instagram promo');
@@ -1669,6 +1677,15 @@ const fetchRestaurantMeta = useCallback(async () => {
 
   const publishPromo = async () => {
     if (!promoModal?.item_id && !promoModal?.item?.id) return;
+    const hasImages = (promoModal.product?.image_urls || []).length > 0;
+    if (promoPublishFeed && !hasImages) {
+      showToast('Feed/Carousel needs at least one public product image URL');
+      return;
+    }
+    if (promoPublishStory && !hasImages) {
+      showToast('Story API publish needs a public image URL — download Story SVG instead');
+      return;
+    }
     setPromoPublishing(true);
     try {
       const itemId = promoModal.item_id || promoModal.item.id;
@@ -1682,7 +1699,11 @@ const fetchRestaurantMeta = useCallback(async () => {
       });
       const feedId = res.data?.results?.feed?.id;
       const storyId = res.data?.results?.story?.id;
-      showToast(`Published${feedId ? ` · feed ${feedId}` : ''}${storyId ? ` · story ${storyId}` : ''}`);
+      const mirror = res.data?.results?.mirror;
+      let msg = `Published${feedId ? ` · feed ${feedId}` : ''}${storyId ? ` · story ${storyId}` : ''}`;
+      if (mirror?.ok) msg += ' · mirrored to Autom8 Works';
+      else if (mirror?.ok === false) msg += ' · mirror failed (your post is live)';
+      showToast(msg);
       setPromoModal(null);
     } catch (err) {
       showToast(err.response?.data?.error || err.message || 'Instagram publish failed');
@@ -4598,21 +4619,35 @@ const fetchRestaurantMeta = useCallback(async () => {
               />
 
               <div style={{ display: 'flex', gap: 16, margin: '12px 0', flexWrap: 'wrap' }}>
-                <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <input type="checkbox" checked={promoPublishFeed} onChange={(e) => setPromoPublishFeed(e.target.checked)} />
+                <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, opacity: (promoModal.product?.image_urls || []).length ? 1 : 0.5 }}>
+                  <input
+                    type="checkbox"
+                    checked={promoPublishFeed}
+                    disabled={!(promoModal.product?.image_urls || []).length}
+                    onChange={(e) => setPromoPublishFeed(e.target.checked)}
+                  />
                   Publish Feed / Carousel
                 </label>
-                <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <input type="checkbox" checked={promoPublishStory} onChange={(e) => setPromoPublishStory(e.target.checked)} />
+                <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, opacity: (promoModal.product?.image_urls || []).length ? 1 : 0.5 }}>
+                  <input
+                    type="checkbox"
+                    checked={promoPublishStory}
+                    disabled={!(promoModal.product?.image_urls || []).length}
+                    onChange={(e) => setPromoPublishStory(e.target.checked)}
+                  />
                   Publish Story
                 </label>
               </div>
 
               <AlertBanner type={igCanPublish ? 'good' : 'warn'}>
                 {igCanPublish
-                  ? `Instagram publishing is connected${instagramUserId ? ` (IG ${instagramUserId})` : ''}. Confirm to push Feed and/or Story.`
-                  : (promoModal.publish?.setup_hint
+                  ? `Instagram publishing is connected${instagramUserId ? ` (IG ${instagramUserId})` : ''}${igTokenSource ? ` · token: ${igTokenSource}` : ''}. Confirm to push Feed and/or Story.`
+                  : (igPublishHint
+                    || promoModal.publish?.setup_hint
                     || 'Handle alone is not enough — set Instagram user ID + Meta publish token in Settings. You can still download the Story SVG.')}
+                {igCanPublish && igTokenSource === 'whatsapp_token'
+                  ? ' Using WhatsApp token as fallback — add a dedicated Instagram publish token in Settings if publish fails.'
+                  : ''}
                 {(promoModal.publish_readiness?.note) ? ` ${promoModal.publish_readiness.note}` : ''}
               </AlertBanner>
 

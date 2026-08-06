@@ -6,6 +6,7 @@ import { C, FONTS } from '../theme/brand';
 const PURPOSE_COPY = {
   delete_account: 'Confirm with a WhatsApp code before deleting your account.',
   whatsapp_bind: 'Confirm with a WhatsApp code before connecting or changing WhatsApp.',
+  instagram_bind: 'Confirm with a WhatsApp code before saving or exchanging the Instagram publish token.',
   change_owner_phone_old: 'We will send a code to your current personal WhatsApp.',
   change_owner_phone_new: 'We will send a code to the new WhatsApp number.',
   change_owner_email: 'Confirm with a WhatsApp code before changing the owner login email.',

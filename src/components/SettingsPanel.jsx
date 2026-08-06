@@ -458,6 +458,24 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
   const [resolvingPickup, setResolvingPickup] = useState(false);
   const [invoiceRange, setInvoiceRange] = useState({ from: '', to: '' });
   const [exportingInvoices, setExportingInvoices] = useState(false);
+  const [igTokenInput, setIgTokenInput] = useState('');
+  const [igTokenConfigured, setIgTokenConfigured] = useState(false);
+  const [igTokenExpiresAt, setIgTokenExpiresAt] = useState(null);
+  const [igTokenSaving, setIgTokenSaving] = useState(false);
+  const [igTokenExchanging, setIgTokenExchanging] = useState(false);
+
+  const loadIgIntegration = useCallback(() => {
+    apiClient.get('/api/restaurants/integration', { params: { channel: 'instagram' } })
+      .then((r) => {
+        const row = r.data?.integration;
+        setIgTokenConfigured(!!row?.access_token_configured);
+        setIgTokenExpiresAt(row?.token_expires_at || row?.config?.token_expires_at || null);
+      })
+      .catch(() => {
+        setIgTokenConfigured(false);
+        setIgTokenExpiresAt(null);
+      });
+  }, [apiClient]);
 
   useEffect(() => {
     apiClient.get('/api/dashboard/waba').then(r => {
@@ -485,6 +503,7 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
         weekly_promo_drafts_enabled: d.weekly_promo_drafts_enabled !== false,
         instagram_handle: d.instagram_handle ?? '',
         instagram_user_id: d.instagram_user_id ?? '',
+        instagram_feature_on_autom8: !!d.instagram_feature_on_autom8,
         logo_url:      d.logo_url      ?? '',
         about_enabled: !!d.about_enabled,
         about_note: d.about_note ?? '',
@@ -505,9 +524,54 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
         pickup_coords_source: lat && lng ? 'saved' : '',
       });
     }).catch(() => showToast('Failed to load business info', 'error'));
-  }, [apiClient, showToast]);
+    loadIgIntegration();
+  }, [apiClient, showToast, loadIgIntegration]);
 
   const set = (k, v) => { setSaved(false); setForm(p => ({ ...p, [k]: v })); };
+
+  const saveIgPublishToken = async ({ exchange = false } = {}) => {
+    const token = String(igTokenInput || '').trim();
+    if (!token) {
+      showToast('Paste a Meta token first (System User recommended, or short/long-lived User token)', 'error');
+      return;
+    }
+    const igId = String(form?.instagram_user_id || '').trim();
+    if (igId && !/^\d{5,}$/.test(igId)) {
+      showToast('Instagram user ID must be numeric digits only (not the @handle)', 'error');
+      return;
+    }
+    if (exchange) setIgTokenExchanging(true);
+    else setIgTokenSaving(true);
+    try {
+      const stepTok = await requestStepUpToken({
+        purpose: 'instagram_bind',
+        title: exchange ? 'Verify to exchange Instagram token' : 'Verify to save Instagram publish token',
+      });
+      if (!stepTok) return;
+      if (exchange) {
+        await apiClient.post('/api/instagram/token/exchange', {
+          short_lived_token: token,
+        }, { headers: stepUpHeaders(stepTok) });
+        showToast('Exchanged to long-lived token (~60 days). System User tokens are preferred for production.');
+      } else {
+        await apiClient.put('/api/restaurants/integration', {
+          provider: 'meta',
+          channel: 'instagram',
+          access_token: token,
+          is_active: true,
+          config: { token_type: 'manual' },
+        }, { headers: stepUpHeaders(stepTok) });
+        showToast('Instagram publish token saved');
+      }
+      setIgTokenInput('');
+      loadIgIntegration();
+    } catch (e) {
+      showToast(e.response?.data?.error ?? e.message ?? 'Could not save Instagram token', 'error');
+    } finally {
+      setIgTokenSaving(false);
+      setIgTokenExchanging(false);
+    }
+  };
 
   const applyMapsLink = (link) => {
     const coords = parseGoogleMapsCoords(link);
@@ -808,9 +872,48 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
               placeholder="17841…"
             />
             <p style={{ fontSize: 11, color: C.textMuted, margin: '6px 0 0' }}>
-              Professional (Business/Creator) account ID linked to your Facebook Page. Required for Confirm &amp; publish — handle alone is not enough. Use a Meta token with instagram_content_publish (WhatsApp Meta token may work if the same app has that permission).
+              Numeric Instagram Business/Creator account ID linked to your Facebook Page (not the @handle).
+              Required for Confirm &amp; publish.
             </p>
           </div>
+          <div style={{ marginBottom: 12 }}>
+            <Label>Instagram publish token</Label>
+            <Input
+              type="password"
+              value={igTokenInput}
+              onChange={setIgTokenInput}
+              placeholder={igTokenConfigured ? '•••• configured — paste to replace' : 'Paste Meta token with instagram_content_publish'}
+            />
+            <p style={{ fontSize: 11, color: C.textMuted, margin: '6px 0 0', lineHeight: 1.45 }}>
+              {igTokenConfigured
+                ? `Token configured${igTokenExpiresAt ? ` · expires ${String(igTokenExpiresAt).slice(0, 10)}` : ''}.`
+                : 'No dedicated Instagram token yet — publish may fall back to WhatsApp Meta token (often fails).'}
+              {' '}Prefer a <strong>System User</strong> token (no expiry). Short-lived Graph Explorer tokens expire in ~1–2 hours — use Exchange for a ~60-day long-lived User token.
+            </p>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+              <Btn onClick={() => saveIgPublishToken({ exchange: false })} loading={igTokenSaving} disabled={igTokenExchanging}>
+                {igTokenSaving ? 'Saving…' : 'Save token'}
+              </Btn>
+              <Btn
+                variant="secondary"
+                onClick={() => saveIgPublishToken({ exchange: true })}
+                loading={igTokenExchanging}
+                disabled={igTokenSaving}
+              >
+                {igTokenExchanging ? 'Exchanging…' : 'Exchange short → long-lived'}
+              </Btn>
+            </div>
+          </div>
+          <ToggleRow
+            label="Feature my posts on Autom8 Works"
+            checked={!!form.instagram_feature_on_autom8}
+            onToggle={() => set('instagram_feature_on_autom8', !form.instagram_feature_on_autom8)}
+          />
+          <p style={{ fontSize: 11, color: C.textMuted, margin: '0 0 12px', lineHeight: 1.45 }}>
+            Opt-in only (default off). When enabled, successful Feed publishes may be re-posted to Autom8 Works with credit
+            (&quot;New post from @yourhandle — powered by Autom8 Works&quot;). Turn off anytime to stop future mirrors. By enabling,
+            you grant Autom8 permission to re-publish those promo creatives on Autom8 Works — update your customer-facing terms if needed.
+          </p>
           <ToggleRow
             label="Daily settlement WhatsApp (evening summary)"
             checked={!!form.daily_settlement_enabled}
