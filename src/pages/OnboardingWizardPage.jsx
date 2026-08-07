@@ -16,6 +16,12 @@ const STEPS = [
   { id: 5, label: 'Ready' },
 ];
 
+/** Bump when disclosure wording changes — must match backend META_UTILITY_DISCLOSURE_VERSION */
+const META_UTILITY_DISCLOSURE_VERSION = '2026-08-07';
+
+const META_UTILITY_DISCLAIMER =
+  'WhatsApp (Meta) charges Autom8 Works for utility messages sent to your customers (order confirmations, shipping updates, etc). To offset this, Autom8 Works adds a small platform charge to the buyer: ₹1 for minimal/utility-only conversations, and ₹2 per order for restaurant/cloud-kitchen type businesses. You can choose whether this charge is shown to your customers at checkout.';
+
 const inputStyle = {
   width: '100%', padding: '10px 12px', borderRadius: 8, boxSizing: 'border-box',
   border: `1px solid ${C.border}`, fontSize: 14, outline: 'none', fontFamily: 'inherit',
@@ -57,6 +63,10 @@ export default function OnboardingWizardPage() {
 
   // Step 4
   const [phonepeMid, setPhonepeMid] = useState('');
+
+  // Step 5 — Meta utility disclosure
+  const [platformChargeEnabled, setPlatformChargeEnabled] = useState(false);
+  const [disclosureAccepted, setDisclosureAccepted] = useState(false);
 
   const refreshUserLifecycle = useCallback((patch) => {
     if (typeof updateUser === 'function') updateUser(patch);
@@ -115,10 +125,19 @@ export default function OnboardingWizardPage() {
   const skipStep = async (n) => putStep(n, { skip: true });
 
   const complete = async () => {
+    if (!disclosureAccepted) {
+      setError('Please confirm you have read the Meta utility-messaging cost disclosure.');
+      return;
+    }
     setSaving(true);
     setError('');
     try {
-      const res = await apiClient.post('/api/onboarding/wizard/complete');
+      const res = await apiClient.post('/api/onboarding/wizard/complete', {
+        disclosure_accepted: true,
+        disclosure_version: META_UTILITY_DISCLOSURE_VERSION,
+        disclosure_accepted_at: new Date().toISOString(),
+        platform_charge_enabled: !!platformChargeEnabled,
+      });
       refreshUserLifecycle({ lifecycle_status: 'active', onboarding_step: 5 });
       setWizard((w) => ({ ...w, ...res.data, lifecycle_status: 'active' }));
       setStep(5);
@@ -371,9 +390,50 @@ export default function OnboardingWizardPage() {
                 {wizard?.lifecycle_status === 'active' ? 'Your store is ready' : 'Almost there'}
               </h2>
               {wizard?.lifecycle_status !== 'active' && (
-                <button type="button" disabled={saving} onClick={complete} style={primaryBtn(saving)}>
-                  {saving ? 'Finishing…' : 'Finish setup'}
-                </button>
+                <>
+                  <div style={{
+                    padding: '14px 16px', borderRadius: 10,
+                    background: '#E8F5F0', border: '1px solid #b8e0d0',
+                  }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: C.primary || '#1B7A5A', marginBottom: 8 }}>
+                      Meta utility messaging — cost disclosure
+                    </div>
+                    <p style={{ margin: '0 0 12px', fontSize: 13, lineHeight: 1.55, color: C.textSub || '#374151' }}>
+                      {META_UTILITY_DISCLAIMER}
+                    </p>
+                    <label style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      gap: 12, fontSize: 13, marginBottom: 12, cursor: 'pointer',
+                    }}>
+                      <span>Add platform charge at customer checkout</span>
+                      <input
+                        type="checkbox"
+                        checked={platformChargeEnabled}
+                        onChange={(e) => setPlatformChargeEnabled(e.target.checked)}
+                      />
+                    </label>
+                    <label style={{
+                      display: 'flex', alignItems: 'flex-start', gap: 10,
+                      fontSize: 13, lineHeight: 1.45, cursor: 'pointer',
+                    }}>
+                      <input
+                        type="checkbox"
+                        checked={disclosureAccepted}
+                        onChange={(e) => setDisclosureAccepted(e.target.checked)}
+                        style={{ marginTop: 2 }}
+                      />
+                      <span>I have read and understand the Meta utility-messaging cost disclosure above.</span>
+                    </label>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={saving || !disclosureAccepted}
+                    onClick={complete}
+                    style={primaryBtn(saving || !disclosureAccepted)}
+                  >
+                    {saving ? 'Finishing…' : 'Finish setup'}
+                  </button>
+                </>
               )}
               {(wizard?.webcart_url || wizard?.lifecycle_status === 'active') && (
                 <>

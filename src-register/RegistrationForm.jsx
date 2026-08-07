@@ -324,12 +324,22 @@ const makeDefault = () => ({
   utm_source: "",
   utm_campaign: "",
 
+  // Meta utility disclosure + optional platform charge (Step 5)
+  platform_charge_enabled: false,
+  disclosure_accepted: false,
+
   // Internal
   contact_phone: "", manager_phone: "", address_line1: "",
   idempotency_key: (typeof crypto !== "undefined" && crypto.randomUUID)
     ? crypto.randomUUID()
     : `reg_${Date.now()}_${Math.random().toString(36).slice(2)}`,
 });
+
+/** Bump when disclosure wording changes — must match backend META_UTILITY_DISCLOSURE_VERSION */
+const META_UTILITY_DISCLOSURE_VERSION = "2026-08-07";
+
+const META_UTILITY_DISCLAIMER =
+  "WhatsApp (Meta) charges Autom8 Works for utility messages sent to your customers (order confirmations, shipping updates, etc). To offset this, Autom8 Works adds a small platform charge to the buyer: ₹1 for minimal/utility-only conversations, and ₹2 per order for restaurant/cloud-kitchen type businesses. You can choose whether this charge is shown to your customers at checkout.";
 
 // ── Validation rules per step ─────────────────────────────────────────────────
 const REQUIRED = {
@@ -545,6 +555,21 @@ const CSS = `
   #munafe-registration-root .mn-toggle-label { font-size:14px; color:var(--mn-text); }
   #munafe-registration-root .mn-toggle-track { width:40px; height:22px; border-radius:11px; cursor:pointer; position:relative; transition:background .2s; flex-shrink:0; }
   #munafe-registration-root .mn-toggle-thumb { position:absolute; top:3px; width:16px; height:16px; border-radius:50%; background:#fff; transition:left .2s; }
+  #munafe-registration-root .mn-disclosure {
+    margin: 16px 0 12px; padding: 14px 16px; border-radius: 10px;
+    background: var(--mn-green-lt); border: 1px solid #b8e0d0;
+  }
+  #munafe-registration-root .mn-disclosure-title {
+    font-size: 13px; font-weight: 600; color: var(--mn-green); margin: 0 0 8px;
+  }
+  #munafe-registration-root .mn-disclosure-body {
+    font-size: 13px; line-height: 1.55; color: var(--mn-text); margin: 0 0 12px;
+  }
+  #munafe-registration-root .mn-disclosure-check {
+    display: flex; align-items: flex-start; gap: 10px; margin-top: 12px;
+    font-size: 13px; line-height: 1.45; color: var(--mn-text); cursor: pointer;
+  }
+  #munafe-registration-root .mn-disclosure-check input { margin-top: 2px; flex-shrink: 0; }
 
   /* Drop zone */
   #munafe-registration-root .mn-dropzone {
@@ -1349,6 +1374,7 @@ function Step5({ form, set, onRedirect }) {
   // Drafts never persist the password (security) — after a "Resume" it is
   // empty, so let the user set it right here instead of failing on submit.
   const pwMissing = !form.owner_password || String(form.owner_password).length < 8;
+  const disclosureOk = !!form.disclosure_accepted;
 
   const summaryRows = [
     ["Business type",   formatBusinessLabel({
@@ -1386,6 +1412,11 @@ function Step5({ form, set, onRedirect }) {
     if (pwMissing) {
       setStatus("error");
       setErrMsg("Please set your owner password below (min 8 characters) before creating the account.");
+      return;
+    }
+    if (!disclosureOk) {
+      setStatus("error");
+      setErrMsg("Please confirm you have read the Meta utility-messaging cost disclosure.");
       return;
     }
     setStatus("loading"); setErrMsg(""); setAttentionMsg("");
@@ -1452,10 +1483,27 @@ function Step5({ form, set, onRedirect }) {
     h("div", { className: "mn-alert info" },
       "After submit, your account is created and WhatsApp is linked. You'll go to the app login to start your trial."
     ),
+    h("div", { className: "mn-disclosure" },
+      h("div", { className: "mn-disclosure-title" }, "Meta utility messaging — cost disclosure"),
+      h("p", { className: "mn-disclosure-body" }, META_UTILITY_DISCLAIMER),
+      h(Toggle, {
+        checked: !!form.platform_charge_enabled,
+        onChange: (v) => set("platform_charge_enabled", v),
+        label: "Add platform charge at customer checkout",
+      }),
+      h("label", { className: "mn-disclosure-check" },
+        h("input", {
+          type: "checkbox",
+          checked: !!form.disclosure_accepted,
+          onChange: (e) => set("disclosure_accepted", !!e.target.checked),
+        }),
+        h("span", null, "I have read and understand the Meta utility-messaging cost disclosure above.")
+      )
+    ),
     h("div", { style: { marginTop: 12 } },
       h("button", {
         className: "mn-btn mn-btn-primary",
-        disabled: status === "loading" || status === "needs_attention",
+        disabled: status === "loading" || status === "needs_attention" || pwMissing || !disclosureOk,
         onClick: handleSubmit,
       }, status === "loading" ? "Processing…" : "Create account & continue →")
     )
@@ -1522,6 +1570,10 @@ function buildPayload(form) {
     signup_source_detail: form.signup_source_detail || null,
     utm_source: form.utm_source || null,
     utm_campaign: form.utm_campaign || null,
+    disclosure_accepted: !!form.disclosure_accepted,
+    disclosure_version: META_UTILITY_DISCLOSURE_VERSION,
+    disclosure_accepted_at: new Date().toISOString(),
+    platform_charge_enabled: !!form.platform_charge_enabled,
   };
 }
 

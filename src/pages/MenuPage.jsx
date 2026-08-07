@@ -95,7 +95,7 @@ export default function MenuPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [categorySlots, setCategorySlots] = useState({});
-  const [lobType, setLobType] = useState('restaurant');
+  const [lobType, setLobType] = useState(() => user?.lob_type || 'restaurant');
   const [allowManagerUpload, setAllowManagerUpload] = useState(false);
   const [businessName, setBusinessName] = useState('');
   const [logoUrl, setLogoUrl] = useState('');
@@ -161,12 +161,14 @@ export default function MenuPage() {
     try {
       const r = await apiClient.get('/api/dashboard/waba');
       const rest = r.data?.restaurant || {};
-      setLobType(rest.lob_type || 'restaurant');
+      setLobType(rest.lob_type || user?.lob_type || 'restaurant');
       setAllowManagerUpload(!!rest.allow_manager_menu_upload);
       setBusinessName(rest.display_name || rest.name || '');
       setLogoUrl(rest.logo_url || '');
-    } catch (_e) { /* ignore */ }
-  }, [apiClient]);
+    } catch (_e) {
+      if (user?.lob_type) setLobType(user.lob_type);
+    }
+  }, [apiClient, user?.lob_type]);
 
   useEffect(() => {
     fetchMenu();

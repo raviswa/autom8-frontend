@@ -34,6 +34,11 @@ import {
 // ─── Design tokens (shared brand theme — same as ManagerPortal / owner portal) ─
 import { C } from '../theme/brand';
 
+/** Bump when disclosure wording changes — must match backend META_UTILITY_DISCLOSURE_VERSION */
+const META_UTILITY_DISCLOSURE_VERSION = '2026-08-07';
+const META_UTILITY_DISCLAIMER =
+  'WhatsApp (Meta) charges Autom8 Works for utility messages sent to your customers (order confirmations, shipping updates, etc). To offset this, Autom8 Works adds a small platform charge to the buyer: ₹1 for minimal/utility-only conversations, and ₹2 per order for restaurant/cloud-kitchen type businesses. You can choose whether this charge is shown to your customers at checkout.';
+
 const CARD = {
   background: C.cardBg,
   border: `0.5px solid ${C.border}`,
@@ -457,6 +462,7 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
   const [saved,  setSaved]  = useState(false);
   const [resolvingPickup, setResolvingPickup] = useState(false);
   const [invoiceRange, setInvoiceRange] = useState({ from: '', to: '' });
+  const [disclosureReaccept, setDisclosureReaccept] = useState(false);
   const [exportingInvoices, setExportingInvoices] = useState(false);
   const [igTokenInput, setIgTokenInput] = useState('');
   const [igTokenConfigured, setIgTokenConfigured] = useState(false);
@@ -498,6 +504,17 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
         gstin:         d.gstin         ?? '',
         fssai_license: d.fssai_license ?? '',
         sac_code:      d.sac_code      ?? '',
+        gst_rate:      d.gst_rate != null && d.gst_rate !== '' ? String(d.gst_rate) : '5',
+        gst_inclusive: !!d.gst_inclusive,
+        platform_charge_enabled: !!d.platform_charge_enabled,
+        platform_charge_conversation: d.platform_charge_conversation != null
+          ? Number(d.platform_charge_conversation)
+          : 1,
+        platform_charge_per_order: d.platform_charge_per_order != null
+          ? Number(d.platform_charge_per_order)
+          : 2,
+        disclosure_version: d.disclosure_version || '',
+        disclosure_accepted_at: d.disclosure_accepted_at || null,
         receipt_tagline: d.receipt_tagline ?? '',
         daily_settlement_enabled: d.daily_settlement_enabled !== false,
         weekly_promo_drafts_enabled: d.weekly_promo_drafts_enabled !== false,
@@ -692,14 +709,39 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
           coordsWarning = true;
         }
       }
-      const { pickup_maps_link, pickup_coords_source, ...toSave } = form;
-      const res = await apiClient.put('/api/restaurants/me', {
+      const { pickup_maps_link, pickup_coords_source, disclosure_accepted_at,
+        platform_charge_conversation, platform_charge_per_order, ...toSave } = form;
+      const hasCurrentDisclosure = String(form.disclosure_version || '') === META_UTILITY_DISCLOSURE_VERSION;
+      const enablingCharge = !!toSave.platform_charge_enabled;
+      if (enablingCharge && !hasCurrentDisclosure && !disclosureReaccept) {
+        showToast('Accept the Meta utility-messaging cost disclosure before enabling the platform charge.', 'error');
+        setSaving(false);
+        return;
+      }
+      const payload = {
         ...toSave,
+        gst_rate: toSave.gst_rate === '' || toSave.gst_rate == null
+          ? null
+          : Number(toSave.gst_rate),
+        gst_inclusive: !!toSave.gst_inclusive,
+        platform_charge_enabled: !!toSave.platform_charge_enabled,
         pickup_latitude: lat || null,
         pickup_longitude: lng || null,
         maps_url: pickup_maps_link || undefined,
-      });
+      };
+      // Don't send disclosure_version as a free-form update field — only with acceptance
+      delete payload.disclosure_version;
+      if (enablingCharge && (!hasCurrentDisclosure || disclosureReaccept)) {
+        payload.disclosure_accepted = true;
+        payload.disclosure_version = META_UTILITY_DISCLOSURE_VERSION;
+        payload.disclosure_accepted_at = new Date().toISOString();
+      }
+      const res = await apiClient.put('/api/restaurants/me', payload);
       setSaved(true);
+      if (payload.disclosure_accepted) {
+        set('disclosure_version', META_UTILITY_DISCLOSURE_VERSION);
+        setDisclosureReaccept(false);
+      }
       if (coordsWarning) {
         showToast('Saved. Pickup coordinates are not set yet — use Resolve location or a pin link for accurate delivery distance.', 'warning');
       } else {
@@ -771,6 +813,77 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
             placeholder={isRestaurantLob(lobType || form.lob_type) ? '996331' : '996511'}
           />
         </div>
+      </div>
+      <div style={{ ...grid2, marginTop: 12 }}>
+        <div>
+          <Label>GST rate (%)</Label>
+          <Input
+            value={form.gst_rate}
+            onChange={v => set('gst_rate', v)}
+            placeholder="5"
+            type="number"
+          />
+          <p style={{ fontSize: 11, color: C.textMuted, margin: '6px 0 0' }}>
+            Applied on webcart checkout and shown on receipts.
+          </p>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+          <ToggleRow
+            label="Catalog prices already include GST"
+            checked={!!form.gst_inclusive}
+            onToggle={() => set('gst_inclusive', !form.gst_inclusive)}
+          />
+          <p style={{ fontSize: 11, color: C.textMuted, margin: '4px 0 0', lineHeight: 1.4 }}>
+            When on, checkout does not add GST again — GST is only back-calculated for invoice disclosure.
+          </p>
+        </div>
+      </div>
+      <div style={{
+        marginTop: 16, padding: '14px 16px', borderRadius: 10,
+        background: '#F7F5F0', border: `1px solid ${C.border}`,
+      }}>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Platform charge (Autom8 Works)</div>
+        <p style={{ fontSize: 12, color: C.textMuted, margin: '0 0 10px', lineHeight: 1.45 }}>
+          Optional GST-exempt pass-through at webcart checkout: ₹{Number(form.platform_charge_conversation || 1)} per conversation
+          (non-restaurant LOBs) or ₹{Number(form.platform_charge_per_order || 2)} per order (restaurant / cloud kitchen).
+        </p>
+        {String(form.disclosure_version || '') !== META_UTILITY_DISCLOSURE_VERSION && (
+          <div style={{
+            marginBottom: 12, padding: '12px 14px', borderRadius: 8,
+            background: '#E8F5F0', border: '1px solid #b8e0d0',
+          }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.emerald || '#1B7A5A', marginBottom: 6 }}>
+              Meta utility messaging — cost disclosure
+            </div>
+            <p style={{ margin: '0 0 10px', fontSize: 12, lineHeight: 1.5, color: C.textSub || '#374151' }}>
+              {META_UTILITY_DISCLAIMER}
+            </p>
+            <label style={{
+              display: 'flex', alignItems: 'flex-start', gap: 10,
+              fontSize: 12, lineHeight: 1.45, cursor: 'pointer',
+            }}>
+              <input
+                type="checkbox"
+                checked={disclosureReaccept}
+                onChange={(e) => setDisclosureReaccept(e.target.checked)}
+                style={{ marginTop: 2 }}
+              />
+              <span>I have read and understand the Meta utility-messaging cost disclosure above.</span>
+            </label>
+          </div>
+        )}
+        <ToggleRow
+          label="Add platform charge at customer checkout"
+          checked={!!form.platform_charge_enabled}
+          onToggle={() => {
+            const next = !form.platform_charge_enabled;
+            if (next && String(form.disclosure_version || '') !== META_UTILITY_DISCLOSURE_VERSION && !disclosureReaccept) {
+              showToast('Accept the disclosure above before enabling the platform charge.', 'error');
+              return;
+            }
+            set('platform_charge_enabled', next);
+          }}
+        />
       </div>
       <div style={{ marginTop: 12 }}>
         <Label>Receipt tagline</Label>

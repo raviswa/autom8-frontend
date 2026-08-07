@@ -595,7 +595,7 @@ function OrderItemRow({ item, onAdvance, onVoid, packingMode = false }) {
   );
 }
 
-function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll, packingMode = false, apiClient = null, combinedMode = true }) {
+function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll, packingMode = false, apiClient = null, combinedMode = true, onRequestShipmentDetails = null }) {
   const { anchor, items, orderNumber, serviceType, aggregateStatus, createdAt } = order;
   const handleReprint = () => printKOT(buildKOTFromFeedItem(anchor, allItems));
   const tokenLabel = anchor.token_number ? formatTokenDisplay(anchor.token_number) : null;
@@ -653,6 +653,7 @@ function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll, pac
           orderNumber={anchor.order_item?.order?.order_number || null}
           fullyPacked={fullyPacked}
           combinedMode={combinedMode}
+          onRequestShipmentDetails={onRequestShipmentDetails}
         />
       )}
 
@@ -679,12 +680,13 @@ function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll, pac
   );
 }
 
-function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked, combinedMode = true }) {
+function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked, combinedMode = true, onRequestShipmentDetails = null }) {
   const [shipment, setShipment] = useState(null);
   const [bookingId, setBookingId] = useState(null);
   const [channel, setChannel] = useState(null);
   const [channelStatus, setChannelStatus] = useState(null);
   const [fulfillmentType, setFulfillmentType] = useState(null);
+  const [ownTeamMode, setOwnTeamMode] = useState(null);
   const [skipReason, setSkipReason] = useState(null);
   const [loading, setLoading] = useState(false);
   const [retrying, setRetrying] = useState(false);
@@ -707,6 +709,7 @@ function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked,
       setChannel(res.data.delivery_channel || null);
       setChannelStatus(res.data.delivery_channel_status || null);
       setFulfillmentType(res.data.fulfillment_type || null);
+      setOwnTeamMode(res.data.shipment?.own_team_mode || res.data.own_team_mode || null);
       setSkipReason(res.data.skip_reason || null);
     } catch (err) {
       if (err.response?.status === 404) {
@@ -715,6 +718,7 @@ function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked,
         setChannel(null);
         setChannelStatus(null);
         setFulfillmentType(null);
+        setOwnTeamMode(null);
         setSkipReason(null);
       } else {
         setError(err.response?.data?.error || err.message || 'Shipment lookup failed');
@@ -757,11 +761,15 @@ function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked,
   const track = shipment?.tracking_url
     || (hasAwb ? `https://shiprocket.co/tracking/${encodeURIComponent(shipment.awb)}` : null);
   const isPickup = String(fulfillmentType || '').toLowerCase() === 'pickup';
-  const isOwnTeam = String(channel || '').toLowerCase() === 'own_team';
+  const isOwnTeam = String(channel || '').toLowerCase() === 'own_team'
+    || String(channel || '').toLowerCase() === 'custom';
   const isPending = String(channelStatus || '') === 'pending_manager';
   const shiprocketReady = String(channel || '').toLowerCase() === 'shiprocket'
     && ['confirmed', 'auto_accepted'].includes(String(channelStatus || 'confirmed'));
   const needsRetry = fullyPacked && shiprocketReady && (!hasAwb || failed) && !isOwnTeam && !isPickup;
+  const needsDeliveryDetails = fullyPacked && isOwnTeam && !isPickup
+    && !['shipped', 'own_team', 'awb_assigned'].includes(status)
+    && !hasAwb;
 
   const skipLabels = {
     shiprocket_not_connected: 'Add Shiprocket API user in Settings',
@@ -778,10 +786,16 @@ function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked,
   let label = loading ? 'Fulfillment…' : 'Fulfillment';
   if (isPickup) label = 'Store pickup · captain QR at collection';
   else if (isPending) label = 'Shiprocket · awaiting manager approval';
+  else if (needsDeliveryDetails) label = 'Packed · how is this being delivered?';
   else if (isOwnTeam) {
-    label = channelStatus === 'rejected_to_own_team'
-      ? 'Own delivery team (courier declined)'
-      : 'Own delivery team';
+    const mode = String(ownTeamMode || shipment?.own_team_mode || '').toLowerCase();
+    if (mode === 'local_rider_app') label = `Local rider · ${shipment?.courier_name || 'details saved'}`;
+    else if (mode === 'parcel_courier') label = `Parcel · ${shipment?.courier_name || 'courier'}${hasAwb ? ` · ${shipment.awb}` : ''}`;
+    else {
+      label = channelStatus === 'rejected_to_own_team'
+        ? 'Own delivery team (courier declined)'
+        : 'Own delivery team';
+    }
   } else if (srId && hasAwb) {
     label = `SR #${srId} · ${shipment.courier_name || 'Courier'} · AWB ${shipment.awb}`;
   } else if (srId) label = `SR order #${srId} · awaiting AWB`;
@@ -800,8 +814,22 @@ function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked,
   }
 
   return (
-    <div className={`kds-ship-bar ${failed ? 'kds-ship-bar-fail' : hasAwb || isOwnTeam || isPickup ? 'kds-ship-bar-ok' : isPending ? 'kds-ship-bar-fail' : ''}`}>
+    <div className={`kds-ship-bar ${failed ? 'kds-ship-bar-fail' : hasAwb || (isOwnTeam && !needsDeliveryDetails) || isPickup ? 'kds-ship-bar-ok' : isPending || needsDeliveryDetails ? 'kds-ship-bar-fail' : ''}`}>
       <span className="kds-ship-label" title={error || shipment?.shiprocket_last_error || ''}>{label}</span>
+      {needsDeliveryDetails && bookingId && onRequestShipmentDetails && (
+        <button
+          type="button"
+          className="kds-ship-retry"
+          onClick={() => onRequestShipmentDetails({
+            booking_id: bookingId,
+            own_team_mode: ownTeamMode || 'own_driver',
+            tokenNumber,
+            orderNumber,
+          })}
+        >
+          Set delivery
+        </button>
+      )}
       {srId && (
         <button
           type="button"
@@ -1106,11 +1134,68 @@ export default function KDSScreen() {
   const [compliance, setCompliance] = useState(null);
   const [sound,    setSound]      = useState(true);
   const [printMsg, setPrintMsg]   = useState('');   // transient "Printing KOT…" toast
+  const [shipmentModal, setShipmentModal] = useState(null);
+  // { bookingId, tokenNumber, orderNumber, mode, courierName, awb, driverName, driverPhone, saving, error }
 
   // Track order numbers that have already been auto-printed this session
   // so a polling refresh doesn't re-print the same KOT
   const printedOrders = useRef(new Set());
 
+  const openShipmentDetailsModal = useCallback((payload = {}) => {
+    setShipmentModal({
+      bookingId: payload.booking_id || payload.bookingId || null,
+      tokenNumber: payload.tokenNumber || null,
+      orderNumber: payload.orderNumber || null,
+      mode: payload.own_team_mode || 'own_driver',
+      courierName: '',
+      awb: '',
+      driverName: '',
+      driverPhone: '',
+      saving: false,
+      error: '',
+    });
+  }, []);
+
+  const submitShipmentDetails = async () => {
+    if (!shipmentModal?.bookingId) {
+      setShipmentModal((m) => m ? { ...m, error: 'Booking not linked — open Manager → Orders to mark shipped' } : m);
+      return;
+    }
+    const mode = shipmentModal.mode || 'own_driver';
+    const courierName = String(shipmentModal.courierName || '').trim();
+    const awb = String(shipmentModal.awb || '').trim();
+    if (mode === 'local_rider_app' && !courierName) {
+      setShipmentModal((m) => m ? { ...m, error: 'Enter rider service name (Dunzo / Rapido / Porter)' } : m);
+      return;
+    }
+    if (mode === 'parcel_courier' && (!courierName || !awb)) {
+      setShipmentModal((m) => m ? { ...m, error: 'Parcel courier requires courier name and AWB' } : m);
+      return;
+    }
+    setShipmentModal((m) => m ? { ...m, saving: true, error: '' } : m);
+    try {
+      await apiClient.post('/api/dashboard/shipment/manual', {
+        booking_id: shipmentModal.bookingId,
+        own_team_mode: mode,
+        courier_name: courierName || (mode === 'own_driver' ? 'Own delivery' : ''),
+        awb: mode === 'parcel_courier' ? awb : (awb || undefined),
+        tracking_url: mode === 'local_rider_app' ? (awb || undefined) : undefined,
+        driver_name: shipmentModal.driverName || undefined,
+        driver_phone: shipmentModal.driverPhone || undefined,
+        status: 'Shipped',
+      });
+      setShipmentModal(null);
+      setPrintMsg(mode === 'own_driver' ? 'Customer notified — on the way' : 'Customer notified with tracking');
+      setTimeout(() => setPrintMsg(''), 2500);
+      fetchFeed();
+    } catch (err) {
+      setShipmentModal((m) => m ? {
+        ...m,
+        saving: false,
+        error: err.response?.data?.error || err.message || 'Failed to save shipment details',
+      } : m);
+    }
+  };
   // ── Fetch feed ──────────────────────────────────────────────────────────────
 const fetchFeed = useCallback(async () => {
   const token = localStorage.getItem('authToken');
@@ -1312,9 +1397,18 @@ const fetchFeed = useCallback(async () => {
   const advanceItem = async (kdsId, currentStatus) => {
     if (currentStatus === 'ready' || currentStatus === 'cancelled') return;
     const nextStatus = currentStatus === 'pending' ? 'in_progress' : 'ready';
+    const prevItem = allItems.find((i) => i.id === kdsId);
     setAllItems(prev => prev.map(i => i.id === kdsId ? { ...i, status: nextStatus } : i));
     try {
-      await apiClient.put(`/api/kds/${kdsId}/status`, { status: nextStatus });
+      const res = await apiClient.put(`/api/kds/${kdsId}/status`, { status: nextStatus });
+      if (packingMode && nextStatus === 'ready' && res.data?.awaiting_shipment_details) {
+        openShipmentDetailsModal({
+          booking_id: res.data.booking_id,
+          own_team_mode: res.data.own_team_mode || 'own_driver',
+          tokenNumber: prevItem?.token_number,
+          orderNumber: prevItem?.order_item?.order?.order_number,
+        });
+      }
       fetchFeed();
     } catch (err) {
       console.error('[KDS] advanceItem error:', err);
@@ -1357,6 +1451,127 @@ const fetchFeed = useCallback(async () => {
       {printMsg && (
         <div className="kds-print-toast">
           🖨 {printMsg}
+        </div>
+      )}
+
+      {shipmentModal && (
+        <div className="kds-ship-modal-backdrop" role="dialog" aria-modal="true">
+          <div className="kds-ship-modal">
+            <h3>How is this order being delivered?</h3>
+            <p className="kds-ship-modal-sub">
+              {shipmentModal.orderNumber || shipmentModal.tokenNumber
+                ? `Order ${shipmentModal.orderNumber || shipmentModal.tokenNumber}`
+                : 'Customer is notified after you confirm.'}
+            </p>
+
+            <label className="kds-ship-radio">
+              <input
+                type="radio"
+                name="own_team_mode"
+                checked={shipmentModal.mode === 'own_driver'}
+                onChange={() => setShipmentModal((m) => ({ ...m, mode: 'own_driver', error: '' }))}
+              />
+              Own delivery staff
+            </label>
+            <label className="kds-ship-radio">
+              <input
+                type="radio"
+                name="own_team_mode"
+                checked={shipmentModal.mode === 'local_rider_app'}
+                onChange={() => setShipmentModal((m) => ({ ...m, mode: 'local_rider_app', error: '' }))}
+              />
+              Local rider (Dunzo / Rapido / Porter)
+            </label>
+            <label className="kds-ship-radio">
+              <input
+                type="radio"
+                name="own_team_mode"
+                checked={shipmentModal.mode === 'parcel_courier'}
+                onChange={() => setShipmentModal((m) => ({ ...m, mode: 'parcel_courier', error: '' }))}
+              />
+              Parcel courier (India Post / DTDC / etc.)
+            </label>
+
+            {shipmentModal.mode === 'own_driver' && (
+              <div className="kds-ship-fields">
+                <input
+                  placeholder="Driver name (optional)"
+                  value={shipmentModal.driverName}
+                  onChange={(e) => setShipmentModal((m) => ({ ...m, driverName: e.target.value }))}
+                />
+                <input
+                  placeholder="Driver phone (optional)"
+                  value={shipmentModal.driverPhone}
+                  onChange={(e) => setShipmentModal((m) => ({ ...m, driverPhone: e.target.value }))}
+                />
+              </div>
+            )}
+
+            {shipmentModal.mode === 'local_rider_app' && (
+              <div className="kds-ship-fields">
+                <input
+                  placeholder="Rider service — Dunzo, Rapido, Porter…"
+                  value={shipmentModal.courierName}
+                  onChange={(e) => setShipmentModal((m) => ({ ...m, courierName: e.target.value }))}
+                />
+                <input
+                  placeholder="Tracking link or rider phone (optional)"
+                  value={shipmentModal.awb}
+                  onChange={(e) => setShipmentModal((m) => ({ ...m, awb: e.target.value }))}
+                />
+              </div>
+            )}
+
+            {shipmentModal.mode === 'parcel_courier' && (
+              <div className="kds-ship-fields">
+                <select
+                  value={['India Post', 'DTDC', 'Professional Couriers', 'Delhivery'].includes(shipmentModal.courierName)
+                    ? shipmentModal.courierName
+                    : (shipmentModal.courierName ? '__other__' : '')}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setShipmentModal((m) => ({
+                      ...m,
+                      courierName: v === '__other__' ? '' : v,
+                      _courierOther: v === '__other__',
+                    }));
+                  }}
+                >
+                  <option value="">Select courier…</option>
+                  <option value="India Post">India Post</option>
+                  <option value="DTDC">DTDC</option>
+                  <option value="Professional Couriers">Professional Couriers</option>
+                  <option value="Delhivery">Delhivery</option>
+                  <option value="__other__">Other</option>
+                </select>
+                {(shipmentModal._courierOther
+                  || (shipmentModal.courierName
+                    && !['India Post', 'DTDC', 'Professional Couriers', 'Delhivery'].includes(shipmentModal.courierName))) && (
+                  <input
+                    placeholder="Courier name"
+                    value={shipmentModal.courierName}
+                    onChange={(e) => setShipmentModal((m) => ({ ...m, courierName: e.target.value, _courierOther: true }))}
+                  />
+                )}
+                <input
+                  placeholder="AWB / tracking number (required)"
+                  value={shipmentModal.awb}
+                  onChange={(e) => setShipmentModal((m) => ({ ...m, awb: e.target.value }))}
+                />
+              </div>
+            )}
+
+            {shipmentModal.error && <p className="kds-ship-modal-error">{shipmentModal.error}</p>}
+
+            <div className="kds-ship-modal-actions">
+              <button type="button" className="kds-ship-modal-cancel" onClick={() => setShipmentModal(null)} disabled={shipmentModal.saving}>
+                Later
+              </button>
+              <button type="button" className="kds-ship-modal-submit" onClick={submitShipmentDetails} disabled={shipmentModal.saving}>
+                {shipmentModal.saving ? 'Notifying…' : 'Confirm & notify customer'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1561,6 +1776,7 @@ const fetchFeed = useCallback(async () => {
                     packingMode={packingMode}
                     apiClient={apiClient}
                     combinedMode={orderOpsMode !== 'split'}
+                    onRequestShipmentDetails={openShipmentDetailsModal}
                   />
                 ))
               )}
@@ -1882,6 +2098,47 @@ const KDS_CSS = `
   }
   .kds-ship-retry:hover:not(:disabled) { background: #fbbf24; color: #111; }
   .kds-ship-retry:disabled { opacity: 0.55; cursor: default; }
+
+  .kds-ship-modal-backdrop {
+    position: fixed; inset: 0; z-index: 80;
+    background: rgba(0,0,0,.65);
+    display: flex; align-items: center; justify-content: center;
+    padding: 16px;
+  }
+  .kds-ship-modal {
+    width: min(420px, 100%);
+    background: #161616; border: 1px solid #333; border-radius: 12px;
+    padding: 20px; color: #f0f0f0;
+  }
+  .kds-ship-modal h3 { margin: 0 0 6px; font-size: 16px; }
+  .kds-ship-modal-sub { margin: 0 0 14px; font-size: 12px; color: #9ca3af; }
+  .kds-ship-radio {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; margin-bottom: 8px; cursor: pointer;
+  }
+  .kds-ship-fields {
+    display: flex; flex-direction: column; gap: 8px;
+    margin: 10px 0 4px;
+  }
+  .kds-ship-fields input, .kds-ship-fields select {
+    width: 100%; box-sizing: border-box;
+    padding: 8px 10px; border-radius: 8px;
+    border: 1px solid #333; background: #0d0d0d; color: #f0f0f0;
+    font-size: 13px;
+  }
+  .kds-ship-modal-error { color: #fca5a5; font-size: 12px; margin: 8px 0 0; }
+  .kds-ship-modal-actions {
+    display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;
+  }
+  .kds-ship-modal-cancel {
+    border: 1px solid #444; background: transparent; color: #aaa;
+    border-radius: 8px; padding: 8px 12px; font-size: 12px; cursor: pointer;
+  }
+  .kds-ship-modal-submit {
+    border: none; background: #166534; color: #fff;
+    border-radius: 8px; padding: 8px 14px; font-size: 12px; font-weight: 600; cursor: pointer;
+  }
+  .kds-ship-modal-submit:disabled, .kds-ship-modal-cancel:disabled { opacity: 0.55; cursor: default; }
 
   .kds-ticket-footer {
     display: grid; grid-template-columns: 1fr 1fr; gap: 0;
