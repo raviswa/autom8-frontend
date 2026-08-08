@@ -197,7 +197,7 @@ function ImageUrlField({
       const uploaded = await uploadCatalogImage(apiClient, prepared, file.name);
       if (!uploaded?.url) throw new Error('Upload returned no URL');
       onChange(uploaded.url);
-      showToast?.('Image uploaded');
+      showToast?.('Image uploaded — click Save item to keep it');
     } catch (err) {
       const msg = err?.response?.data?.error || err.message || 'Image upload failed';
       showToast?.(msg, 'error');

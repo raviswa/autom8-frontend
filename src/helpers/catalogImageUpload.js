@@ -104,8 +104,20 @@ export async function prepareCatalogImage(file) {
 export async function uploadCatalogImage(apiClient, preparedFile, originalFilename) {
   const form = new FormData();
   form.append('image', preparedFile, preparedFile.name || originalFilename || 'photo.jpg');
+  // apiClient defaults to Content-Type: application/json — must clear it so the
+  // browser/axios set multipart/form-data WITH boundary, or multer sees no file.
   const res = await apiClient.post('/api/catalog/upload-image', form, {
-    headers: { 'Content-Type': 'multipart/form-data' },
+    headers: { 'Content-Type': undefined },
+    transformRequest: [(data, headers) => {
+      if (typeof FormData !== 'undefined' && data instanceof FormData) {
+        if (headers && typeof headers === 'object') {
+          delete headers['Content-Type'];
+          if (headers.common) delete headers.common['Content-Type'];
+          if (headers.post) delete headers.post['Content-Type'];
+        }
+      }
+      return data;
+    }],
   });
   return {
     url: res.data?.url,

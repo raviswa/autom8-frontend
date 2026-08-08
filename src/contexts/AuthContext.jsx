@@ -66,6 +66,15 @@ export function AuthProvider({ children }) {
     // Axios interceptor: attach stored token to every request
 const requestInterceptor = apiClient.interceptors.request.use(
   (config) => {
+    // Default Content-Type is application/json; FormData needs browser boundary.
+    if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+      if (config.headers) {
+        delete config.headers['Content-Type'];
+        if (typeof config.headers.delete === 'function') {
+          config.headers.delete('Content-Type');
+        }
+      }
+    }
     const token = localStorage.getItem('authToken');
     const isAuthRoute = String(config.url || '').includes('/api/auth/');
     if (token) {
