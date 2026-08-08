@@ -760,16 +760,21 @@ function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked,
   const srId = shipment?.shiprocket_order_id;
   const track = shipment?.tracking_url
     || (hasAwb ? `https://shiprocket.co/tracking/${encodeURIComponent(shipment.awb)}` : null);
-  const isPickup = String(fulfillmentType || '').toLowerCase() === 'pickup';
-  const isOwnTeam = String(channel || '').toLowerCase() === 'own_team'
-    || String(channel || '').toLowerCase() === 'custom';
+  const isPickup = String(fulfillmentType || '').toLowerCase() === 'pickup'
+    || String(skipReason || '') === 'pickup_or_takeaway';
+  const channelNorm = String(channel || '').toLowerCase();
+  const isOwnTeam = channelNorm === 'own_team'
+    || channelNorm === 'custom'
+    // Missing channel on a packed non-pickup order → still allow delivery capture
+    || (!channelNorm && fullyPacked && !isPickup);
   const isPending = String(channelStatus || '') === 'pending_manager';
-  const shiprocketReady = String(channel || '').toLowerCase() === 'shiprocket'
+  const shiprocketReady = channelNorm === 'shiprocket'
     && ['confirmed', 'auto_accepted'].includes(String(channelStatus || 'confirmed'));
   const needsRetry = fullyPacked && shiprocketReady && (!hasAwb || failed) && !isOwnTeam && !isPickup;
   const needsDeliveryDetails = fullyPacked && isOwnTeam && !isPickup
     && !['shipped', 'own_team', 'awb_assigned'].includes(status)
-    && !hasAwb;
+    && !hasAwb
+    && channelNorm !== 'shiprocket';
 
   const skipLabels = {
     shiprocket_not_connected: 'Add Shiprocket API user in Settings',
@@ -816,7 +821,7 @@ function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked,
   return (
     <div className={`kds-ship-bar ${failed ? 'kds-ship-bar-fail' : hasAwb || (isOwnTeam && !needsDeliveryDetails) || isPickup ? 'kds-ship-bar-ok' : isPending || needsDeliveryDetails ? 'kds-ship-bar-fail' : ''}`}>
       <span className="kds-ship-label" title={error || shipment?.shiprocket_last_error || ''}>{label}</span>
-      {needsDeliveryDetails && bookingId && onRequestShipmentDetails && (
+      {needsDeliveryDetails && onRequestShipmentDetails && (
         <button
           type="button"
           className="kds-ship-retry"
@@ -1157,7 +1162,7 @@ export default function KDSScreen() {
   }, []);
 
   const submitShipmentDetails = async () => {
-    if (!shipmentModal?.bookingId) {
+    if (!shipmentModal?.bookingId && !shipmentModal?.tokenNumber && !shipmentModal?.orderNumber) {
       setShipmentModal((m) => m ? { ...m, error: 'Booking not linked — open Manager → Orders to mark shipped' } : m);
       return;
     }
@@ -1175,7 +1180,9 @@ export default function KDSScreen() {
     setShipmentModal((m) => m ? { ...m, saving: true, error: '' } : m);
     try {
       await apiClient.post('/api/dashboard/shipment/manual', {
-        booking_id: shipmentModal.bookingId,
+        booking_id: shipmentModal.bookingId || undefined,
+        token_number: shipmentModal.tokenNumber || undefined,
+        order_ref: shipmentModal.orderNumber || undefined,
         own_team_mode: mode,
         courier_name: courierName || (mode === 'own_driver' ? 'Own delivery' : ''),
         awb: mode === 'parcel_courier' ? awb : (awb || undefined),
