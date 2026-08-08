@@ -20,7 +20,7 @@
 import { getSchemaForLob } from '../config/catalogSchemas';
 import { isPackagedLob as checkPackagedLob, isSupplyPortalLob } from '../config/dashboardProfiles';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { useAuth } from '../contexts/AuthContext';
 import { useWebSocket } from '../contexts/WebSocketContext';
@@ -36,6 +36,7 @@ import { formatBusinessLabel } from '../config/lobTaxonomy';
 import { MENU_SLOT_OPTIONS, normalizeMenuSlots, toggleMenuSlot } from '../helpers/menuSlots';
 import { ACTIVE_ORDER_STATUSES } from '../helpers/orderStatuses';
 import { formatKitchenOrderNo } from '../helpers/orderDisplay';
+import { catalogLabel, FEATURE_ROUTES } from '../config/featureNav';
 import {
   JOURNEY_STAGES,
   stageToStepperKey,
@@ -637,6 +638,7 @@ function approvalTypeLabel(type) {
 // ============================================================================
 export default function ManagerPortal() {
   const { user, apiClient, logout } = useAuth();
+  const navigate = useNavigate();
   const { updates } = useWebSocket();
   const { printConsolidated } = useKOTPrint(kotRef);
 
@@ -931,6 +933,13 @@ const fetchRestaurantMeta = useCallback(async () => {
       setActiveTab('orders');
     }
   }, [lobType, activeTab]);
+
+  // Legacy menu tab → canonical catalog route
+  useEffect(() => {
+    if (activeTab !== 'menu') return;
+    navigate(FEATURE_ROUTES.catalog, { replace: true });
+    setActiveTab(checkPackagedLob(lobType) ? 'orders' : 'queue');
+  }, [activeTab, navigate, lobType]);
 
   useEffect(() => {
     const latest = updates[0];
@@ -2472,8 +2481,8 @@ const fetchRestaurantMeta = useCallback(async () => {
   brandTo="/account"
   title="Manager portal"
   subtitle={`${businessLabel} · ${isPackagedLob
-    ? 'Manage catalog, packing and delivery orders'
-    : 'Manage tables, orders and kitchen operations'}`}
+    ? 'Orders, packing and delivery'
+    : 'Tables, orders and kitchen operations'}`}
   right={
     <>
               {kitchenStatus && (
@@ -2558,16 +2567,26 @@ const fetchRestaurantMeta = useCallback(async () => {
               >
                 {isPackagedLob ? 'Order hours →' : 'Kitchen hours →'}
               </Link>
+              <Link
+                to={FEATURE_ROUTES.catalog}
+                style={{
+                  fontSize: 11, fontWeight: 500, color: C.primaryDark, textDecoration: 'none',
+                  padding: '6px 10px', borderRadius: 8, border: `0.5px solid ${C.primaryBorder}`,
+                  background: C.primaryLight,
+                }}
+              >
+                {catalogLabel(lobType)} →
+              </Link>
               <span style={{ fontSize: 12, color: C.textSub }}>👤 {user?.full_name || user?.email}</span>
               <Link
-                to="/settings"
+                to={FEATURE_ROUTES.team}
                 style={{
                   fontSize: 12, fontWeight: 500, color: C.primaryDark, textDecoration: 'none',
                   padding: '6px 12px', borderRadius: 8, border: `0.5px solid ${C.primaryBorder}`,
                   background: C.primaryLight,
                 }}
               >
-                👥 Team
+                Team
               </Link>
               {!isPackagedLob && <Btn onClick={() => openNewOrderModal(null)}>+ New order</Btn>}
               <SupportChip />
@@ -2622,13 +2641,12 @@ const fetchRestaurantMeta = useCallback(async () => {
         </div>
         )}
 
-        {/* ── Tab bar ───────────────────────────────────────────────────── */}
+        {/* ── Tab bar (ops only — catalog is /dashboard/menu) ─────────────── */}
         <div style={{ display: 'flex', gap: 3, marginBottom: 20, background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 10, padding: 4, width: 'fit-content', flexWrap: 'wrap' }}>
           {(isPackagedLob
             ? [
                 { key: 'orders', label: `Active orders${openShipmentCount ? ` (${openShipmentCount})` : ''}` },
                 { key: 'reports', label: 'Reports' },
-                { key: 'menu', label: 'Catalog' },
               ]
             : [
                 { key: 'queue', label: `Queue${(waitingTokens.length + pendingLargePartyTokens.length) ? ` (${waitingTokens.length + pendingLargePartyTokens.length})` : ''}` },
@@ -2636,7 +2654,6 @@ const fetchRestaurantMeta = useCallback(async () => {
                 { key: 'tables', label: 'Tables' },
                 { key: 'orders', label: `Active orders${(activeDineInOrders.length + liveTakeawayTokens.length + liveDeliveryTokens.length) ? ` (${activeDineInOrders.length + liveTakeawayTokens.length + liveDeliveryTokens.length})` : ''}` },
                 { key: 'reports', label: 'Reports' },
-                { key: 'menu', label: 'Menu' },
               ]
           ).map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)} style={{
@@ -3844,730 +3861,21 @@ const fetchRestaurantMeta = useCallback(async () => {
           </div>
         )}
 
-        {/* ════════════════════════════════════════════════════════════════
-            TAB: MENU
-        ════════════════════════════════════════════════════════════════ */}
+                {/* Catalog lives at /dashboard/menu (single canonical route) */}
         {activeTab === 'menu' && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-              <div>
-                <h2 style={{ fontFamily: FONTS.heading, fontSize: 16, fontWeight: 500, color: C.text, margin: 0 }}>
-                  {isPackagedLob ? 'Catalog' : 'Menu management'}
-                </h2>
-
-                <p style={{ fontSize: 12, color: C.textMuted, margin: "4px 0 0" }}>
-                  {isPackagedLob
-                    ? <>Add, edit, or remove items here. Use Excel for <strong>bulk upload</strong> only. Prefer <strong>Record new batch</strong> for production stock.</>
-                    : <>Add, edit, or remove dishes here. Use Excel for <strong>bulk upload</strong>. Toggle stock with the in-stock switch.</>}
-                </p>
-              </div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                {canEditCatalog && (
-                  <button
-                    type="button"
-                    onClick={() => setCatalogEditor({ open: true, mode: 'create', item: null })}
-                    style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, padding: '7px 14px', borderRadius: 8, border: `0.5px solid ${C.primary}`, background: C.primary, color: '#fff', cursor: 'pointer' }}
-                  >
-                    + Add item
-                  </button>
-                )}
-                {!isPackagedLob && (
-                  <button
-                    onClick={syncMetaCatalog}
-                    disabled={metaSyncing}
-                    style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 500, padding: "7px 14px", borderRadius: 8, border: `0.5px solid ${C.primaryBorder}`, background: C.primaryLight, color: C.primaryDark, cursor: metaSyncing ? 'wait' : 'pointer' }}>
-                    {metaSyncing ? <Spinner size={14} /> : '↻'} Pull from Meta
-                  </button>
-                )}
-                {isPackagedLob && menuItems.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={openBulkBatch}
-                    style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, padding: '7px 14px', borderRadius: 8, border: `0.5px solid ${C.primary}`, background: C.primary, color: '#fff', cursor: 'pointer' }}
-                  >
-                    + Record new batch
-                  </button>
-                )}
-                <button
-                  onClick={async () => { setDownloadingTpl(true); await downloadCatalogTemplate(apiClient, showToast, menuItems, schema); setDownloadingTpl(false); }}
-                  disabled={downloadingTpl}
-                  style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 500, padding: "7px 14px", borderRadius: 8, border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.textSub, cursor: "pointer" }}>
-                  {downloadingTpl ? <Spinner size={14} /> : '↓'} Download template
-                </button>
-              </div>
-            </div>
-
-            {!isPackagedLob && (
-            <div style={{ ...CARD, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, padding: '12px 16px' }}>
-              <div style={{ fontSize: 12, color: C.textSub }}>
-                <strong>Meta catalog:</strong>{' '}
-                {metaLastSync ? `Last sync ${new Date(metaLastSync).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}` : 'Not synced yet'}
-              </div>
-              <span style={{ fontSize: 11, color: C.textMuted }}>
-                Restaurant Excel · <code style={{ fontSize: 10 }}>is_available</code> TRUE marks items in stock · no food-products stock column
-              </span>
-            </div>
-            )}
-
-            {!isPackagedLob && (
-              <AlertBanner type="info">
-                <strong>Restaurant vs Packaged Food:</strong> Your outlet uses the restaurant menu template.
-                Set <code style={{ fontSize: 11 }}>is_available</code> to TRUE (no separate <code style={{ fontSize: 11 }}>is_stocked</code> column).
-                Packaged Food / Home Baker templates use <code style={{ fontSize: 11 }}>current_stock</code> and Record batch — do not use those columns here.
-              </AlertBanner>
-            )}
-            <AlertBanner type="info">
-              <strong>Edit in app:</strong> Use <strong>Add item</strong> / row Edit for single SKUs.
-              Excel is for bulk import/update.
-              {isPackagedLob
-                ? <> Stock quantities still use <strong>Record batch</strong>.</>
-                : <> Use the in-stock toggle for availability.</>}
-            </AlertBanner>
-
-            {isPackagedLob && stockAlerts.filter((a) => !dismissedStockAlertIds.has(a.id)).length > 0 && (
-              <div style={{
-                ...CARD,
-                padding: '12px 16px',
-                border: `0.5px solid ${C.warningBorder}`,
-                background: C.warningLight,
-              }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: C.warningDark, marginBottom: 8 }}>
-                  Stock alerts today
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {stockAlerts
-                    .filter((a) => !dismissedStockAlertIds.has(a.id))
-                    .slice(0, 8)
-                    .map((alert) => {
-                      const item = menuItems.find((m) => m.id === alert.menu_item_id);
-                      const levelLabel = alert.alert_level === 'sold_out' ? 'Sold out' : 'Low stock';
-                      return (
-                        <div
-                          key={alert.id}
-                          style={{
-                            display: 'flex',
-                            flexWrap: 'wrap',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            gap: 8,
-                            fontSize: 12,
-                            color: C.text,
-                          }}
-                        >
-                          <div>
-                            <strong>{levelLabel}:</strong> {alert.name}
-                            {alert.current_stock != null ? ` · ${alert.current_stock} left` : ''}
-                          </div>
-                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                            {item && (item.is_stocked ?? item.is_available) && (
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  await toggleAvailability(item);
-                                  setDismissedStockAlertIds((prev) => new Set(prev).add(alert.id));
-                                  fetchStockAlerts();
-                                }}
-                                style={{
-                                  fontSize: 11,
-                                  fontWeight: 600,
-                                  padding: '5px 10px',
-                                  borderRadius: 6,
-                                  border: `0.5px solid ${C.dangerBorder}`,
-                                  background: C.cardBg,
-                                  color: C.dangerDark,
-                                  cursor: 'pointer',
-                                }}
-                              >
-                                Mark unavailable
-                              </button>
-                            )}
-                            {item && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  restockBatch(item);
-                                  setDismissedStockAlertIds((prev) => new Set(prev).add(alert.id));
-                                }}
-                                style={{
-                                  fontSize: 11,
-                                  fontWeight: 600,
-                                  padding: '5px 10px',
-                                  borderRadius: 6,
-                                  border: `0.5px solid ${C.primary}`,
-                                  background: C.primary,
-                                  color: '#fff',
-                                  cursor: 'pointer',
-                                }}
-                              >
-                                Extend / Record batch
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => setDismissedStockAlertIds((prev) => new Set(prev).add(alert.id))}
-                              style={{
-                                fontSize: 11,
-                                padding: '5px 10px',
-                                borderRadius: 6,
-                                border: `0.5px solid ${C.border}`,
-                                background: C.cardBg,
-                                color: C.textMuted,
-                                cursor: 'pointer',
-                              }}
-                            >
-                              Dismiss
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                </div>
-              </div>
-            )}
-
-{user?.role === 'manager' && !allowManagerUpload ? (
-  <div style={{ ...CARD, textAlign: 'center', padding: '32px 20px', color: C.textMuted, fontSize: 13 }}>
-    🔒 Menu upload is restricted to the owner for this outlet.
-    <p style={{ fontSize: 12, marginTop: 6 }}>Ask your owner to enable it in Settings → Restaurant → Staff permissions.</p>
-  </div>
-) : (
-  <>
-    {uploadStatus === 'idle' && (
-      <div
-        onDragOver={e => { e.preventDefault(); setUploadDragOver(true); }}
-        onDragLeave={() => setUploadDragOver(false)}
-        onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
-        style={{
-          border: `1px dashed ${uploadDragOver ? C.primary : C.border}`,
-          borderRadius: 12, padding: "40px 20px", textAlign: "center", cursor: "pointer",
-          background: uploadDragOver ? C.primaryLight : C.cardBg, transition: "all .2s",
-        }}>
-        <div style={{ fontSize: 32, marginBottom: 8 }}>📂</div>
-        <p style={{ fontSize: 13, fontWeight: 500, color: C.text, margin: "0 0 4px" }}>Drop your catalog Excel here</p>
-        <p style={{ fontSize: 11, color: C.textMuted, margin: 0 }}>or click to browse — .xlsx, .xls, or .csv</p>
-        <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={e => handleFileSelect(e.target.files[0])} />
-      </div>
-    )}
-
-    {uploadStatus === 'parsing' && (
-      <div style={{ ...CARD, textAlign: "center", padding: "40px 20px" }}>
-        <Spinner size={32} />
-        <p style={{ fontSize: 13, color: C.textSub, marginTop: 12 }}>Reading file…</p>
-      </div>
-    )}
-
-    {uploadStatus === 'preview' && (
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, background: C.primaryLight, border: `0.5px solid ${C.primaryBorder}`, borderRadius: 20, padding: "4px 12px", fontSize: 12, color: C.primaryDark, fontWeight: 500 }}>
-            {uploadFile?.name} — {uploadRows.length} rows
-          </div>
-          <button onClick={handleResetUpload} style={{ fontSize: 12, color: C.textMuted, background: "none", border: "none", cursor: "pointer" }}>✕ Choose different file</button>
-        </div>
-        {uploadErrors.length > 0 && (
-          <AlertBanner type="error">
-            <strong>{uploadErrors.length} issue{uploadErrors.length !== 1 ? 's' : ''} found</strong> — fix in Excel and re-upload
-            <ul style={{ listStyle: "disc", paddingLeft: 18, marginTop: 6 }}>
-              {uploadErrors.map((e, i) => <li key={i} style={{ marginTop: 2 }}>{e}</li>)}
-            </ul>
-          </AlertBanner>
-        )}
-        <div style={{ ...CARD, padding: '14px 16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 12 }}>
-          <div>
-            <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 4 }}>File comparison</div>
-            <div style={{ fontSize: 13, color: C.text, fontWeight: 500 }}>
-              {uploadMatched} matched · {uploadNew} new · {uploadMissing} not in file
-            </div>
-          </div>
-          <label style={{ fontSize: 10, color: C.textMuted }}>
-            Upload mode
-            <select
-              value={uploadMode}
-              onChange={(event) => {
-                const next = event.target.value;
-                setUploadMode(next);
-                setMissingPolicy(next === 'replace' ? 'archive' : 'keep');
+          <div style={{ background: C.cardBg, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: 28, textAlign: 'center' }}>
+            <p style={{ margin: '0 0 12px', fontSize: 14, color: C.text }}>
+              Catalog editing moved to the dedicated Catalog page.
+            </p>
+            <Link
+              to="/dashboard/menu"
+              style={{
+                display: 'inline-block', fontSize: 13, fontWeight: 600, textDecoration: 'none',
+                padding: '10px 16px', borderRadius: 8, background: C.primary, color: '#fff',
               }}
-              style={{ display: 'block', width: '100%', marginTop: 4, padding: '7px 9px', borderRadius: 8, border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.text }}
             >
-              <option value="merge">Merge safely (recommended)</option>
-              <option value="replace">Replace catalog</option>
-            </select>
-          </label>
-          <label style={{ fontSize: 10, color: C.textMuted }}>
-            Items not in this file
-            <select
-              value={missingPolicy}
-              onChange={(event) => setMissingPolicy(event.target.value)}
-              style={{ display: 'block', width: '100%', marginTop: 4, padding: '7px 9px', borderRadius: 8, border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.text }}
-            >
-              <option value="keep">Keep unchanged (recommended)</option>
-              <option value="sold_out">Mark out of stock</option>
-              <option value="archive">Archive</option>
-            </select>
-          </label>
-          {isPackagedLob ? (
-            <label style={{ fontSize: 10, color: C.textMuted }}>
-              Existing stock quantities
-              <select
-                value={stockPolicy}
-                onChange={(event) => setStockPolicy(event.target.value)}
-                style={{ display: 'block', width: '100%', marginTop: 4, padding: '7px 9px', borderRadius: 8, border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.text }}
-              >
-                <option value="leave">Leave unchanged (recommended)</option>
-                <option value="add">Add file quantity</option>
-                <option value="replace">Replace with file quantity</option>
-              </select>
-            </label>
-          ) : (
-            <div style={{ fontSize: 10, color: C.textMuted, paddingTop: 18 }}>
-              Stock: left unchanged. Prepared dishes use the In stock toggle; use Record batch only for sweets/savories with jar counts.
-            </div>
-          )}
-        </div>
-        {isPackagedLob && stockPolicy !== 'leave' && (
-          <AlertBanner type="warn">
-            This file will {stockPolicy === 'add' ? 'add to' : 'replace'} existing stock quantities. Use Record new batch for normal production receipts. Blank stock cells are left unchanged.
-          </AlertBanner>
-        )}
-        <div style={{ ...CARD, padding: 0, overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed" }}>
-            <thead>
-              <tr style={{ borderBottom: `0.5px solid ${C.border}`, background: C.surfaceBg }}>
-                {schema.previewColumns.map((col) => (
-                  <th key={col.key} style={{ textAlign: col.price ? "right" : "left", padding: "10px 14px", fontSize: 11, fontWeight: 500, color: C.textMuted, width: col.width }}>{col.label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {uploadRows.map((row, i) => {
-                const hasError = uploadErrors.some(e => e.includes(`Row ${i + 1}`));
-                return (
-                  <tr key={i} style={{ borderBottom: `0.5px solid ${C.border}`, background: hasError ? C.dangerLight : "transparent" }}>
-                    {schema.previewColumns.map((col) => {
-                      const val = row[col.key];
-                      let content;
-                      if (col.image) {
-                        content = val
-                          ? <a href={val} target="_blank" rel="noopener noreferrer" style={{ color: C.primary, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{String(val).replace(/^https?:\/\//, '').slice(0, 40)}…</a>
-                          : <span style={{ color: C.textMuted }}>—</span>;
-                      } else if (col.pill) {
-                        content = <span style={{ fontSize: 10, background: C.surfaceBg, color: C.textSub, padding: "2px 8px", borderRadius: 20, fontWeight: 500 }}>{val || '—'}</span>;
-                      } else if (col.key === 'category') {
-                        content = <span style={{ fontSize: 10, background: C.surfaceBg, color: C.textSub, padding: "2px 8px", borderRadius: 20, fontWeight: 500 }}>{val || '—'}</span>;
-                      } else if (col.price) {
-                        content = `₹${Number(val || 0).toFixed(2)}`;
-                      } else if (col.key === 'id' && row._generated_id) {
-                        content = <>{val} <span style={{ fontSize: 9, color: C.primaryDark, background: C.primaryLight, padding: '1px 5px', borderRadius: 10 }}>auto</span></>;
-                      } else {
-                        content = val ?? '—';
-                      }
-                      return (
-                        <td key={col.key} style={{
-                          padding: "8px 14px", textAlign: col.price ? "right" : "left",
-                          fontFamily: col.mono ? "monospace" : undefined,
-                          fontWeight: col.bold ? 500 : undefined,
-                          fontSize: col.mono ? 11 : undefined,
-                          color: col.mono ? C.textMuted : C.text,
-                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                        }}>
-                          {content}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-          <Btn variant="secondary" onClick={handleResetUpload}>Cancel</Btn>
-          <Btn onClick={handleConfirmUpload} disabled={uploadErrors.length > 0}>
-            Confirm {uploadMode === 'merge' ? 'merge' : 'replacement'} · {uploadRows.length} items
-          </Btn>
-        </div>
-      </div>
-    )}
-
-    {uploadStatus === 'uploading' && (
-      <div style={{ ...CARD, textAlign: "center", padding: "40px 20px" }}>
-        <Spinner size={32} />
-        <p style={{ fontSize: 13, fontWeight: 500, color: C.text, marginTop: 12 }}>Saving to database…</p>
-        <p style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
-          {uploadMode === 'merge' ? 'Matching and updating catalog items safely' : 'Replacing catalog items as requested'}
-        </p>
-      </div>
-    )}
-
-    {uploadStatus === 'done' && uploadResult && (
-      <div style={{ background: uploadResult.skipped > 0 ? C.warningLight : C.successLight, border: `0.5px solid ${uploadResult.skipped > 0 ? C.warningBorder : C.successBorder}`, borderRadius: 12, padding: "28px 24px", textAlign: "center" }}>
-        <div style={{ fontSize: 32, marginBottom: 8 }}>{uploadResult.skipped > 0 ? '⚠' : '✓'}</div>
-        <div style={{ fontSize: 15, fontWeight: 500, color: uploadResult.skipped > 0 ? C.warningDark : C.successDark, marginBottom: 4 }}>
-          {uploadResult.skipped > 0 ? 'Catalog updated with some skipped rows' : 'Catalog updated successfully'}
-        </div>
-        <div style={{ fontSize: 12, color: uploadResult.skipped > 0 ? C.warningDark : C.success, marginBottom: 12 }}>
-          {uploadResult.created || 0} added · {uploadResult.updated || 0} updated
-          {uploadResult.skipped > 0 ? ` · ${uploadResult.skipped} skipped` : ''}
-          {uploadResult.archived > 0 ? ` · ${uploadResult.archived} archived` : ''}
-          {uploadResult.marked_sold_out > 0 ? ` · ${uploadResult.marked_sold_out} marked out of stock` : ''}
-        </div>
-        {uploadResult.errors?.length > 0 && (
-          <div style={{ maxWidth: 620, margin: '0 auto 14px', textAlign: 'left', fontSize: 11, color: C.danger }}>
-            {uploadResult.errors.map((row, index) => (
-              <div key={`${row.row_id || row.row}-${index}`}>{row.row_id || `Row ${row.row || '?'}`}: {row.error}</div>
-            ))}
-          </div>
-        )}
-        <Btn variant="success" onClick={handleResetUpload}>Upload another file</Btn>
-      </div>
-    )}
-  </>
-)}
-            {/* Current menu table */}
-<div>
-  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
-    <div style={{ fontSize: 14, fontWeight: 500, color: C.text }}>
-      Current menu{' '}
-      <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 400 }}>
-        ({filteredMenuItems.length}{filteredMenuItems.length !== menuItems.length ? ` of ${menuItems.length}` : ''} items)
-      </span>
-    </div>
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-      <span style={{ fontSize: 11, color: C.textMuted }}>Toggle to mark in/out of stock instantly</span>
-      {!isPackagedLob && menuItems.some((m) => !m.archived_at && !(m.is_stocked ?? m.is_available)) && (
-        <Btn variant="secondary" onClick={markAllMenuStocked} style={{ fontSize: 11 }}>
-          Mark all in stock
-        </Btn>
-      )}
-    </div>
-  </div>
-
-  {menuItems.length > 0 && (
-    <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-      <input
-        type="search"
-        value={menuSearch}
-        onChange={e => setMenuSearch(e.target.value)}
-        placeholder="Search menu items…"
-        style={{
-          flex: '1 1 220px', minWidth: 180, fontSize: 12, padding: '8px 12px',
-          borderRadius: 8, border: `0.5px solid ${C.border}`, outline: 'none',
-        }}
-      />
-      <select
-        value={menuCategory}
-        onChange={e => setMenuCategory(e.target.value)}
-        style={{
-          fontSize: 12, padding: '8px 12px', borderRadius: 8,
-          border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.text,
-        }}
-      >
-        <option value="all">All categories</option>
-        {menuCategories.map(cat => (
-          <option key={cat} value={cat}>{cat}</option>
-        ))}
-      </select>
-    </div>
-  )}
-              {menuItems.length === 0 ? (
-                <div style={{ ...CARD, textAlign: "center", padding: "40px 20px", color: C.textMuted, fontSize: 13 }}>
-                  No menu items yet.
-                  {canEditCatalog
-                    ? ' Use Add item, or upload a catalog Excel for bulk import.'
-                    : ' Upload the catalog Excel to get started.'}
-                </div>
-              ) : filteredMenuItems.length === 0 ? (
-                <div style={{ ...CARD, textAlign: "center", padding: "32px 20px", color: C.textMuted, fontSize: 13 }}>
-                  No items match your search. Try a different term or category.
-                </div>
-              ) : (
-                <div style={{ ...CARD, padding: 0, overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                    <thead>
-                      <tr style={{ borderBottom: `0.5px solid ${C.border}`, background: C.surfaceBg }}>
-                        {(showMenuSlotColumn
-                          ? ["Name", "Category", "Station", "Slot", "Price", "Image", "In stock", "Special today"]
-                          : isPackagedLob
-                            ? ["Name", "Category", "Station", "Price", "Discount", "Image", "In stock", "Special / Promo"]
-                            : ["Name", "Category", "Station", "Price", "Image", "In stock", "Special today"]
-                        ).map((h, i) => (
-                          <th key={h} style={{ padding: "10px 14px", textAlign: i >= 3 ? "right" : "left", fontSize: 11, fontWeight: 500, color: C.textMuted }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {groupedMenuCategories.map(cat => (
-                        <React.Fragment key={cat}>
-                          <tr style={{ background: C.surfaceBg }}>
-                            <td
-                              colSpan={showMenuSlotColumn || isPackagedLob ? 8 : 7}
-                              style={{ padding: "8px 14px", fontSize: 11, fontWeight: 600, color: C.textSub, letterSpacing: '0.04em', textTransform: 'uppercase' }}
-                            >
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                                <span>{cat} ({groupedMenuItems[cat].length})</span>
-                                {!isPackagedLob && cat !== 'Uncategorized' && (
-                                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                                  <span style={{ fontSize: 10, color: C.textMuted, textTransform: 'none', letterSpacing: 0 }}>Category slots:</span>
-                                  {WEB_SLOT_OPTIONS.map(slot => {
-                                    const current = normalizeWebSlots(categorySlots[cat] || ['anytime']);
-                                    const active = current.includes(slot);
-                                    return (
-                                      <button
-                                        key={`${cat}-${slot}`}
-                                        onClick={() => {
-                                          saveCategorySlots(cat, toggleMenuSlot(current, slot));
-                                        }}
-                                        style={{
-                                          fontSize: 10,
-                                          padding: '3px 8px',
-                                          borderRadius: 999,
-                                          border: `0.5px solid ${active ? C.primary : C.border}`,
-                                          background: active ? C.primaryLight : C.cardBg,
-                                          color: active ? C.primaryDark : C.textSub,
-                                          textTransform: 'none',
-                                          letterSpacing: 0,
-                                          cursor: 'pointer',
-                                        }}
-                                      >
-                                        {WEB_SLOT_LABEL[slot] || slot}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                          {groupedMenuItems[cat].map(item => {
-                        const inStock  = item.is_stocked ?? item.is_available;
-                        const isToggle = togglingId === item.id;
-                        const isSpecialToggle = togglingSpecialId === item.id;
-                        const isSpecial = !!item.is_special_today;
-                        const slotLabel = formatMenuSlot(item.time_slot);
-                        const activeDiscount = isDiscountActive(item);
-                        const draft = ensureDiscountDraft(item);
-                        const sale = effectivePrice(item);
-                        const left = daysLeftDiscount(item.discount_ends_at);
-                        return (
-                          <tr key={item.id} style={{ borderBottom: `0.5px solid ${C.border}`, opacity: inStock ? 1 : 0.55 }}>
-                            <td style={{ padding: "10px 14px" }}>
-                              <span style={{ fontWeight: 500, color: C.text }}>{item.name}</span>
-                              {!inStock && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 500, color: C.danger, background: C.dangerLight, padding: "1px 6px", borderRadius: 20 }}>Out of stock</span>}
-                              {item.current_stock != null && (
-                                <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 500, color: C.textSub, background: C.surfaceBg, padding: "1px 6px", borderRadius: 20 }}>
-                                  {item.current_stock} in stock
-                                </span>
-                              )}
-                              {isSpecial && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 500, color: '#b45309', background: '#fef3c7', padding: "1px 6px", borderRadius: 20 }}>⭐ Special</span>}
-                              {activeDiscount && (
-                                <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 500, color: C.successDark, background: C.successLight, padding: "1px 6px", borderRadius: 20 }}>
-                                  {Math.round(Number(item.discount_percent))}% off · {left}d
-                                </span>
-                              )}
-                            </td>
-                            <td style={{ padding: "10px 14px" }}>
-                              <span style={{ fontSize: 10, background: C.primaryLight, color: C.primaryDark, padding: "2px 8px", borderRadius: 20, fontWeight: 500 }}>
-                                {displayMenuCategory(item.category)}
-                              </span>
-                            </td>
-                            <td style={{ padding: "10px 14px" }}>
-                              {item.kitchen_station
-                                ? (
-                                  <span style={{
-                                    fontSize: 10,
-                                    fontFamily: 'ui-monospace, monospace',
-                                    background: ['sweets_counter', 'packing', 'dispatch'].includes(String(item.kitchen_station).toLowerCase())
-                                      ? '#ecfdf5'
-                                      : C.surfaceBg,
-                                    color: ['sweets_counter', 'packing', 'dispatch'].includes(String(item.kitchen_station).toLowerCase())
-                                      ? '#047857'
-                                      : C.textSub,
-                                    padding: "2px 8px",
-                                    borderRadius: 20,
-                                    fontWeight: 500,
-                                  }}
-                                  >
-                                    {item.kitchen_station}
-                                  </span>
-                                )
-                                : <span style={{ color: C.textMuted }}>—</span>}
-                            </td>
-                            {showMenuSlotColumn && (
-                              <td style={{ padding: "10px 14px" }}>
-                                {slotLabel
-                                  ? <span style={{ fontSize: 10, background: C.surfaceBg, color: C.textSub, padding: "2px 8px", borderRadius: 20, fontWeight: 500 }}>{slotLabel}</span>
-                                  : <span style={{ color: C.textMuted }}>—</span>}
-                              </td>
-                            )}
-                            <td style={{ padding: "10px 14px", textAlign: "right", fontWeight: 500, color: C.text }}>
-                              {activeDiscount ? (
-                                <>
-                                  <div style={{ color: C.primary }}>₹{sale}</div>
-                                  <div style={{ fontSize: 10, color: C.textMuted, textDecoration: 'line-through', fontWeight: 400 }}>₹{Number(item.price).toFixed(0)}</div>
-                                </>
-                              ) : (
-                                <>₹{Number(item.price).toFixed(2)}</>
-                              )}
-                            </td>
-                            {isPackagedLob && (
-                              <td style={{ padding: "10px 14px", textAlign: "right", minWidth: 200 }}>
-                                <div style={{ display: 'inline-flex', gap: 4, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                                  <input
-                                    type="number" min={1} max={100} placeholder="%"
-                                    value={draft.percent}
-                                    onChange={(e) => setDiscountField(item.id, 'percent', e.target.value)}
-                                    style={{ width: 52, padding: '4px 6px', borderRadius: 6, fontSize: 11, border: `0.5px solid ${C.border}` }}
-                                  />
-                                  <span style={{ fontSize: 10, color: C.textMuted }}>×</span>
-                                  <input
-                                    type="number" min={1} max={365} placeholder="days"
-                                    value={draft.days}
-                                    onChange={(e) => setDiscountField(item.id, 'days', e.target.value)}
-                                    style={{ width: 58, padding: '4px 6px', borderRadius: 6, fontSize: 11, border: `0.5px solid ${C.border}` }}
-                                  />
-                                  <button
-                                    type="button"
-                                    disabled={discountSaving === item.id}
-                                    onClick={() => saveDiscount(item)}
-                                    style={{ fontSize: 10, fontWeight: 600, padding: '4px 8px', borderRadius: 6, border: 'none', background: C.primary, color: '#fff', cursor: 'pointer' }}
-                                  >
-                                    {discountSaving === item.id ? '…' : 'Apply'}
-                                  </button>
-                                  {(activeDiscount || Number(item.discount_percent) > 0) && (
-                                    <button
-                                      type="button"
-                                      disabled={discountSaving === item.id}
-                                      onClick={() => saveDiscount(item, { clear: true })}
-                                      style={{ fontSize: 10, fontWeight: 600, padding: '4px 8px', borderRadius: 6, border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.textSub, cursor: 'pointer' }}
-                                    >
-                                      Clear
-                                    </button>
-                                  )}
-                                </div>
-                              </td>
-                            )}
-                            <td style={{ padding: "10px 14px", textAlign: "right" }}>
-                              {item.image_url
-                                ? <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
-                                    <img src={item.image_url} alt={item.name} style={{ width: 28, height: 28, borderRadius: 4, objectFit: "cover", border: `0.5px solid ${C.border}` }} onError={e => { e.target.style.display = 'none'; }} />
-                                    <a href={item.image_url} target="_blank" rel="noopener noreferrer" style={{ color: C.primary, fontSize: 10 }}>View</a>
-                                  </div>
-                                : <span style={{ color: C.textMuted }}>—</span>}
-                            </td>
-                            <td style={{ padding: "10px 14px", textAlign: "right" }}>
-                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                              {canEditCatalog && (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={() => setCatalogEditor({ open: true, mode: 'edit', item })}
-                                    style={{
-                                      fontSize: 10, fontWeight: 600, padding: '4px 8px', borderRadius: 8,
-                                      border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.textSub, cursor: 'pointer',
-                                    }}
-                                  >
-                                    Edit
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => removeCatalogItem(item)}
-                                    disabled={catalogRemovingId === item.id}
-                                    style={{
-                                      fontSize: 10, fontWeight: 600, padding: '4px 8px', borderRadius: 8,
-                                      border: `0.5px solid ${C.dangerBorder || C.border}`, background: C.dangerLight || C.cardBg,
-                                      color: C.dangerDark || C.danger, cursor: 'pointer',
-                                    }}
-                                  >
-                                    {catalogRemovingId === item.id ? '…' : 'Remove'}
-                                  </button>
-                                </>
-                              )}
-                              <button onClick={() => restockBatch(item)} disabled={isToggle}
-                                title="Add / set batch stock"
-                                style={{
-                                  fontSize: 10, fontWeight: 600, padding: '4px 8px', borderRadius: 8,
-                                  border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.textSub, cursor: 'pointer',
-                                }}>
-                                + Record batch
-                              </button>
-                              {['coming_soon', 'preorder'].includes(String(item.availability_status || '').toLowerCase()) && (
-                                <button onClick={() => launchNow(item)} disabled={launchingId === item.id}
-                                  title="Make this item live now and notify its waitlist"
-                                  style={{
-                                    fontSize: 10, fontWeight: 600, padding: '4px 8px', borderRadius: 8,
-                                    border: `0.5px solid ${C.success}`, background: C.successLight, color: C.successDark, cursor: 'pointer',
-                                  }}>
-                                  {launchingId === item.id ? '…' : '🚀 Launch now'}
-                                </button>
-                              )}
-                              {!isPackagedLob && (
-                              <button onClick={() => generateStory(item)} disabled={generatingStoryId === item.id || !instagramHandle}
-                                title={instagramHandle
-                                  ? 'Download an Instagram story template for this item'
-                                  : 'Add your Instagram handle in Settings to enable story templates'}
-                                style={{
-                                  fontSize: 10, fontWeight: 600, padding: '4px 8px', borderRadius: 8,
-                                  border: `0.5px solid ${C.border}`,
-                                  background: instagramHandle ? C.cardBg : C.surfaceBg,
-                                  color: instagramHandle ? C.textSub : C.textMuted,
-                                  cursor: instagramHandle ? 'pointer' : 'not-allowed',
-                                }}>
-                                {generatingStoryId === item.id ? '…' : '📸 Story'}
-                              </button>
-                              )}
-                              <button onClick={() => toggleAvailability(item)} disabled={isToggle}
-                                title={inStock ? 'In stock — tap to mark out of stock' : 'Out of stock — tap to mark in stock'}
-                                style={{
-                                  position: "relative", display: "inline-flex", width: 36, height: 20, borderRadius: 10,
-                                  background: isToggle ? C.borderStrong : inStock ? C.success : C.border,
-                                  border: "none", cursor: "pointer", padding: 0, flexShrink: 0, transition: "background .2s",
-                                }}>
-                                {isToggle
-                                  ? <Spinner size={12} />
-                                  : <span style={{ position: "absolute", top: 3, left: inStock ? 19 : 3, width: 14, height: 14, borderRadius: "50%", background: "#fff", transition: "left .2s" }} />}
-                              </button>
-                              </div>
-                            </td>
-                            <td style={{ padding: "10px 14px", textAlign: "right" }}>
-                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
-                              <button onClick={() => toggleSpecialToday(item)} disabled={isSpecialToggle}
-                                title={isSpecial ? "Remove from today's specials" : "Mark as today's special"}
-                                style={{
-                                  position: "relative", display: "inline-flex", width: 36, height: 20, borderRadius: 10,
-                                  background: isSpecialToggle ? C.borderStrong : isSpecial ? '#f59e0b' : C.border,
-                                  border: "none", cursor: "pointer", padding: 0, flexShrink: 0, transition: "background .2s",
-                                }}>
-                                {isSpecialToggle
-                                  ? <Spinner size={12} />
-                                  : <span style={{ position: "absolute", top: 3, left: isSpecial ? 19 : 3, width: 14, height: 14, borderRadius: "50%", background: "#fff", transition: "left .2s" }} />}
-                              </button>
-                              {isPackagedLob && (
-                                <button
-                                  onClick={() => openPromoDraft(item)}
-                                  disabled={promoLoading}
-                                  title="Generate sales pitch + preview Instagram Feed/Story"
-                                  style={{
-                                    fontSize: 10, fontWeight: 600, padding: '4px 8px', borderRadius: 8,
-                                    border: `0.5px solid ${C.primaryBorder}`, background: C.primaryLight, color: C.primaryDark, cursor: 'pointer',
-                                  }}
-                                >
-                                  {promoLoading ? '…' : '📣 Promo'}
-                                </button>
-                              )}
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                          })}
-                        </React.Fragment>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
+              Open catalog →
+            </Link>
           </div>
         )}
 

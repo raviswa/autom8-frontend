@@ -418,8 +418,8 @@ export default function AccountPage() {
               WhatsApp
             </h2>
             <p style={{ margin: '6px 0 16px', fontSize: 13, color: C.textMuted, lineHeight: 1.5 }}>
-              Business number connection, Embedded Signup, manager alert phone, and templates live here.
-              Kitchen hours and catalog stay in Settings. First-time activation may also start from Setup.
+              Business number connection, Embedded Signup, manager alert phone, and templates.
+              Catalog is at Menu/Catalog; order hours are under Settings → Orders / Kitchen.
             </p>
             <WhatsAppAccountPanel
               apiClient={apiClient}
@@ -429,18 +429,19 @@ export default function AccountPage() {
           </section>
         )}
 
-        {/* Business & settings */}
+        {/* Business & settings — deep-links to canonical Settings routes */}
         <section style={card}>
           <h2 style={{ margin: 0, fontFamily: FONTS.heading, fontSize: 18, color: C.text, fontWeight: 600 }}>
             Business
           </h2>
           <p style={{ margin: '6px 0 14px', fontSize: 13, color: C.textMuted }}>
-            Outlet profile, team, kitchen hours, tables, and services.
+            Outlet profile, GST, team, and order hours live in Settings — one place each.
           </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            <Link to="/settings?tab=restaurant" style={linkChip}>Business details</Link>
-            <Link to="/settings" style={linkChip}>Business settings</Link>
+            <Link to="/settings?tab=restaurant" style={linkChip}>Business</Link>
+            <Link to="/settings?tab=kitchen#scheduled-ordering" style={linkChip}>Order hours</Link>
             <Link to="/settings?tab=staff" style={linkChip}>Team</Link>
+            <Link to="/billing" style={linkChip}>Plan &amp; billing</Link>
           </div>
         </section>
 

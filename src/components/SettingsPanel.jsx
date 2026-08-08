@@ -464,24 +464,96 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
   const [invoiceRange, setInvoiceRange] = useState({ from: '', to: '' });
   const [disclosureReaccept, setDisclosureReaccept] = useState(false);
   const [exportingInvoices, setExportingInvoices] = useState(false);
-  const [igTokenInput, setIgTokenInput] = useState('');
-  const [igTokenConfigured, setIgTokenConfigured] = useState(false);
-  const [igTokenExpiresAt, setIgTokenExpiresAt] = useState(null);
-  const [igTokenSaving, setIgTokenSaving] = useState(false);
-  const [igTokenExchanging, setIgTokenExchanging] = useState(false);
+  const [igConnecting, setIgConnecting] = useState(false);
+  const [igOauthConnected, setIgOauthConnected] = useState(false);
+  const [igOauthUsername, setIgOauthUsername] = useState('');
+  const [igPickPages, setIgPickPages] = useState(null);
+  const [igPickPageId, setIgPickPageId] = useState('');
+  const [igPickSaving, setIgPickSaving] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const loadIgIntegration = useCallback(() => {
     apiClient.get('/api/restaurants/integration', { params: { channel: 'instagram' } })
       .then((r) => {
         const row = r.data?.integration;
-        setIgTokenConfigured(!!row?.access_token_configured);
-        setIgTokenExpiresAt(row?.token_expires_at || row?.config?.token_expires_at || null);
+        const cfg = row?.config || {};
+        const configured = !!row?.access_token_configured && row?.is_active !== false;
+        setIgOauthConnected(configured);
+        setIgOauthUsername(String(cfg.username || '').replace(/^@/, ''));
+        if (cfg.ig_user_id && /^\d{5,}$/.test(String(cfg.ig_user_id))) {
+          setForm((p) => (p ? { ...p, instagram_user_id: String(cfg.ig_user_id) } : p));
+        }
+        if (cfg.username) {
+          const handle = `@${String(cfg.username).replace(/^@/, '')}`;
+          setForm((p) => (p ? { ...p, instagram_handle: p.instagram_handle || handle } : p));
+        }
       })
       .catch(() => {
-        setIgTokenConfigured(false);
-        setIgTokenExpiresAt(null);
+        setIgOauthConnected(false);
+        setIgOauthUsername('');
       });
   }, [apiClient]);
+
+  const clearIgOauthParams = useCallback(() => {
+    const next = new URLSearchParams(searchParams);
+    let changed = false;
+    ['ig_oauth', 'ig_user', 'message', 'code'].forEach((k) => {
+      if (next.has(k)) {
+        next.delete(k);
+        changed = true;
+      }
+    });
+    if (changed) setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    const status = searchParams.get('ig_oauth');
+    if (!status) return undefined;
+
+    if (status === 'connected') {
+      const user = searchParams.get('ig_user');
+      showToast(user ? `Instagram connected (@${String(user).replace(/^@/, '')})` : 'Instagram connected');
+      loadIgIntegration();
+      apiClient.get('/api/dashboard/waba').then((r) => {
+        const d = r.data.restaurant ?? {};
+        setForm((p) => (p ? {
+          ...p,
+          instagram_handle: d.instagram_handle ?? p.instagram_handle,
+          instagram_user_id: d.instagram_user_id ?? p.instagram_user_id,
+        } : p));
+      }).catch(() => {});
+      clearIgOauthParams();
+      return undefined;
+    }
+
+    if (status === 'error') {
+      showToast(searchParams.get('message') || 'Instagram connect failed', 'error');
+      clearIgOauthParams();
+      return undefined;
+    }
+
+    if (status === 'pick') {
+      setIgConnecting(true);
+      apiClient.get('/api/instagram/oauth/pending')
+        .then((r) => {
+          const pages = Array.isArray(r.data?.pages) ? r.data.pages : [];
+          setIgPickPages(pages);
+          setIgPickPageId(pages[0]?.page_id || '');
+          if (!pages.length) {
+            showToast('No Instagram pages pending — try Connect Instagram again', 'error');
+          }
+        })
+        .catch((e) => {
+          showToast(e.response?.data?.error || 'Page selection expired — connect again', 'error');
+          setIgPickPages(null);
+        })
+        .finally(() => {
+          setIgConnecting(false);
+          clearIgOauthParams();
+        });
+    }
+    return undefined;
+  }, [searchParams, apiClient, showToast, loadIgIntegration, clearIgOauthParams]);
 
   useEffect(() => {
     apiClient.get('/api/dashboard/waba').then(r => {
@@ -546,47 +618,62 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
 
   const set = (k, v) => { setSaved(false); setForm(p => ({ ...p, [k]: v })); };
 
-  const saveIgPublishToken = async ({ exchange = false } = {}) => {
-    const token = String(igTokenInput || '').trim();
-    if (!token) {
-      showToast('Paste a Meta token first (System User recommended, or short/long-lived User token)', 'error');
-      return;
-    }
-    const igId = String(form?.instagram_user_id || '').trim();
-    if (igId && !/^\d{5,}$/.test(igId)) {
-      showToast('Instagram user ID must be numeric digits only (not the @handle)', 'error');
-      return;
-    }
-    if (exchange) setIgTokenExchanging(true);
-    else setIgTokenSaving(true);
+  const connectInstagram = async () => {
+    setIgConnecting(true);
     try {
       const stepTok = await requestStepUpToken({
         purpose: 'instagram_bind',
-        title: exchange ? 'Verify to exchange Instagram token' : 'Verify to save Instagram publish token',
+        title: 'Verify to connect Instagram',
       });
       if (!stepTok) return;
-      if (exchange) {
-        await apiClient.post('/api/instagram/token/exchange', {
-          short_lived_token: token,
-        }, { headers: stepUpHeaders(stepTok) });
-        showToast('Exchanged to long-lived token (~60 days). System User tokens are preferred for production.');
-      } else {
-        await apiClient.put('/api/restaurants/integration', {
-          provider: 'meta',
-          channel: 'instagram',
-          access_token: token,
-          is_active: true,
-          config: { token_type: 'manual' },
-        }, { headers: stepUpHeaders(stepTok) });
-        showToast('Instagram publish token saved');
+      const res = await apiClient.get('/api/instagram/oauth/start', {
+        headers: stepUpHeaders(stepTok),
+      });
+      const url = res.data?.url;
+      if (!url) {
+        showToast('Could not start Instagram connect', 'error');
+        return;
       }
-      setIgTokenInput('');
+      window.location.assign(url);
+    } catch (e) {
+      showToast(e.response?.data?.error ?? e.message ?? 'Could not start Instagram connect', 'error');
+    } finally {
+      setIgConnecting(false);
+    }
+  };
+
+  const confirmIgPagePick = async () => {
+    if (!igPickPageId) {
+      showToast('Select a Facebook Page with Instagram', 'error');
+      return;
+    }
+    setIgPickSaving(true);
+    try {
+      const stepTok = await requestStepUpToken({
+        purpose: 'instagram_bind',
+        title: 'Verify to finish Instagram connect',
+      });
+      if (!stepTok) return;
+      const res = await apiClient.post('/api/instagram/oauth/select-page', {
+        page_id: igPickPageId,
+      }, { headers: stepUpHeaders(stepTok) });
+      const username = res.data?.username;
+      const igId = res.data?.ig_user_id;
+      const handle = res.data?.instagram_handle;
+      setIgPickPages(null);
+      setIgOauthConnected(true);
+      setIgOauthUsername(username || '');
+      setForm((p) => (p ? {
+        ...p,
+        ...(igId ? { instagram_user_id: String(igId) } : {}),
+        ...(handle ? { instagram_handle: handle } : {}),
+      } : p));
+      showToast(username ? `Instagram connected (@${username})` : 'Instagram connected');
       loadIgIntegration();
     } catch (e) {
-      showToast(e.response?.data?.error ?? e.message ?? 'Could not save Instagram token', 'error');
+      showToast(e.response?.data?.error ?? e.message ?? 'Could not finish Instagram connect', 'error');
     } finally {
-      setIgTokenSaving(false);
-      setIgTokenExchanging(false);
+      setIgPickSaving(false);
     }
   };
 
@@ -757,6 +844,11 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
 
   return (
     <div>
+      <p style={{ fontSize: 13, color: C.textMuted, margin: '0 0 16px', lineHeight: 1.5 }}>
+        Business profile, compliance (GST), and Autom8 platform charge.
+        Order hours, delivery, and shipping are under the{' '}
+        <strong>{isRestaurantLob(lobType || form.lob_type) ? 'Kitchen' : 'Orders'}</strong> tab.
+      </p>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
         <Btn onClick={save} loading={saving}>{saved ? '✓ Saved' : (isRestaurantLob(lobType || form.lob_type) ? 'Save restaurant details' : 'Save business details')}</Btn>
       </div>
@@ -983,39 +1075,78 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
               value={form.instagram_user_id}
               onChange={v => set('instagram_user_id', v)}
               placeholder="17841…"
+              disabled={igOauthConnected}
             />
             <p style={{ fontSize: 11, color: C.textMuted, margin: '6px 0 0' }}>
-              Numeric Instagram Business/Creator account ID linked to your Facebook Page (not the @handle).
-              Required for Confirm &amp; publish.
+              {igOauthConnected
+                ? 'Filled automatically from Connect Instagram (numeric IG Business Account ID).'
+                : 'Numeric Instagram Business/Creator account ID linked to your Facebook Page (not the @handle). Auto-filled when you Connect Instagram.'}
             </p>
           </div>
           <div style={{ marginBottom: 12 }}>
-            <Label>Instagram publish token</Label>
-            <Input
-              type="password"
-              value={igTokenInput}
-              onChange={setIgTokenInput}
-              placeholder={igTokenConfigured ? '•••• configured — paste to replace' : 'Paste Meta token with instagram_content_publish'}
-            />
-            <p style={{ fontSize: 11, color: C.textMuted, margin: '6px 0 0', lineHeight: 1.45 }}>
-              {igTokenConfigured
-                ? `Token configured${igTokenExpiresAt ? ` · expires ${String(igTokenExpiresAt).slice(0, 10)}` : ''}.`
-                : 'No dedicated Instagram token yet — publish may fall back to WhatsApp Meta token (often fails).'}
-              {' '}Prefer a <strong>System User</strong> token (no expiry). Short-lived Graph Explorer tokens expire in ~1–2 hours — use Exchange for a ~60-day long-lived User token.
-            </p>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
-              <Btn onClick={() => saveIgPublishToken({ exchange: false })} loading={igTokenSaving} disabled={igTokenExchanging}>
-                {igTokenSaving ? 'Saving…' : 'Save token'}
-              </Btn>
-              <Btn
-                variant="secondary"
-                onClick={() => saveIgPublishToken({ exchange: true })}
-                loading={igTokenExchanging}
-                disabled={igTokenSaving}
-              >
-                {igTokenExchanging ? 'Exchanging…' : 'Exchange short → long-lived'}
-              </Btn>
-            </div>
+            <Label>Instagram publishing</Label>
+            {igOauthConnected ? (
+              <div style={{
+                padding: '12px 14px', borderRadius: 10,
+                background: '#E8F5F0', border: `1px solid ${C.border}`,
+                fontSize: 13, lineHeight: 1.45,
+              }}>
+                Connected{igOauthUsername ? ` as @${igOauthUsername}` : ''}.
+                You can publish promo posts from Inventory without pasting a Meta token.
+                <div style={{ marginTop: 10 }}>
+                  <Btn variant="secondary" onClick={connectInstagram} loading={igConnecting}>
+                    {igConnecting ? 'Opening…' : 'Reconnect Instagram'}
+                  </Btn>
+                </div>
+              </div>
+            ) : (
+              <>
+                <p style={{ fontSize: 12, color: C.textMuted, margin: '0 0 10px', lineHeight: 1.45 }}>
+                  Connect the Facebook Page linked to your Instagram Professional account.
+                  Autom8 will request publish permission and save a durable Page token — no Graph Explorer paste.
+                </p>
+                <Btn onClick={connectInstagram} loading={igConnecting}>
+                  {igConnecting ? 'Opening…' : 'Connect Instagram'}
+                </Btn>
+              </>
+            )}
+            {Array.isArray(igPickPages) && igPickPages.length > 0 && (
+              <div style={{
+                marginTop: 12, padding: '12px 14px', borderRadius: 10,
+                border: `1px solid ${C.border}`, background: C.surface || '#fff',
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+                  Choose the Facebook Page to publish from
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {igPickPages.map((p) => (
+                    <label
+                      key={p.page_id}
+                      style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, cursor: 'pointer' }}
+                    >
+                      <input
+                        type="radio"
+                        name="ig-page-pick"
+                        checked={igPickPageId === p.page_id}
+                        onChange={() => setIgPickPageId(p.page_id)}
+                        style={{ marginTop: 3 }}
+                      />
+                      <span>
+                        {p.page_name || p.page_id}
+                        <span style={{ display: 'block', fontSize: 11, color: C.textMuted }}>
+                          IG id {p.ig_user_id}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <Btn onClick={confirmIgPagePick} loading={igPickSaving} disabled={!igPickPageId}>
+                    {igPickSaving ? 'Connecting…' : 'Use this Page'}
+                  </Btn>
+                </div>
+              </div>
+            )}
           </div>
           <ToggleRow
             label="Feature my posts on Autom8 Works"
@@ -2053,6 +2184,11 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
 
   return (
     <div>
+      <p style={{ fontSize: 13, color: C.textMuted, margin: '0 0 16px', lineHeight: 1.5 }}>
+        Order hours, packaging, delivery charges, and shipping (Shiprocket / own team).
+        GST rate and platform charge live under the{' '}
+        <strong>{isRestaurantLob(lobType) ? 'Restaurant' : 'Business'}</strong> tab.
+      </p>
       {showDineIn && (
         <div style={grid2}>
           <div>
@@ -3508,11 +3644,13 @@ function TabStaff({ apiClient, showToast, lobType = 'restaurant' }) {
 // ═════════════════════════════════════════════════════════════════════════════
 const TABS = [
   { id: 'tables',     label: '🪑 Tables'      },
+  // Business: identity, address, GST, platform charge, Instagram — not fulfillment
   { id: 'restaurant', label: '🍽️ Restaurant', genericLabel: '🏪 Business' },
   { id: 'services',   label: '🚀 Services'    },
+  // Orders/Kitchen: hours, delivery, Shiprocket, packaging, ops layout
   { id: 'kitchen',    label: '🍳 Kitchen', ordersLabel: '📦 Orders' },
   { id: 'promotions', label: '🏷️ Promotions' },
-  { id: 'staff',      label: '👥 Staff'       },
+  { id: 'staff',      label: '👥 Team'       },
   // Brand tab — only visible when user is brand_owner (injected below via filteredTabs)
   { id: 'brand',      label: '🔗 Brand',  brandOnly: true },
 ];

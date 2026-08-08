@@ -13,6 +13,7 @@ import BrandHeader from "../components/BrandHeader";
 import SupportChip from "../components/SupportChip";
 import { formatBusinessLabel } from "../config/lobTaxonomy";
 import { getDashboardProfile, isB2bLob, isSupplyPortalLob } from "../config/dashboardProfiles";
+import { ownerNavChips } from "../config/featureNav";
 import { normalizeLobType } from "../config/catalogSchemas";
 import { ACTIVE_ORDER_STATUSES } from "../helpers/orderStatuses";
 import SupplySeparatePortalNotice from "../components/SupplySeparatePortalNotice";
@@ -1129,44 +1130,17 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
 
   const analyticsRow2 = dashProfile?.kpiRow2 === "commerce" ? commerceRow2 : diningRow2;
 
-  const accountNav = [
-    { to: "/account?tab=whatsapp", label: "WhatsApp", chip: CHIP_SECONDARY },
-    { to: "/account", label: "Account", chip: CHIP_SECONDARY },
-  ];
-
+  const PRIMARY_CHIP_IDS = new Set(['manager', 'kitchen', 'packing', 'hours']);
   const navTabs = !lobReady
     ? []
-    : isB2b
-      ? [
-          { to: "/dashboard/manager", label: "Manager", chip: CHIP_PRIMARY },
-          { to: "/dashboard/packing", label: "Packing", chip: CHIP_PRIMARY },
-          { to: "/dashboard/menu",    label: "Catalog",  chip: CHIP_SECONDARY },
-          { to: "/settings?tab=kitchen#scheduled-ordering", label: "Order hours", chip: CHIP_PRIMARY },
-          { to: "/settings",          label: "Settings", chip: CHIP_SECONDARY },
-          ...accountNav,
-        ]
-      : isPackagedGoods
-      ? [
-          { to: "/dashboard/manager", label: "Manager", chip: CHIP_PRIMARY },
-          { to: "/dashboard/packing", label: "Packing", chip: CHIP_PRIMARY },
-          ...(hasTakeaway
-            ? [{ to: "/dashboard/captain", label: "Captain", chip: CHIP_SECONDARY }]
-            : []),
-          { to: "/dashboard/menu",    label: "Catalog",  chip: CHIP_SECONDARY },
-          { to: "/settings?tab=kitchen#scheduled-ordering", label: "Order hours", chip: CHIP_PRIMARY },
-          { to: "/settings",          label: "Settings", chip: CHIP_SECONDARY },
-          ...accountNav,
-        ]
-      : [
-          { to: "/dashboard/manager", label: "Manager", chip: CHIP_PRIMARY },
-          { to: "/dashboard/kitchen", label: "Kitchen", chip: CHIP_PRIMARY },
-          { to: "/dashboard/packing", label: "Packing", chip: CHIP_PRIMARY },
-          { to: "/dashboard/captain", label: "Captain", chip: CHIP_SECONDARY },
-          { to: "/dashboard/menu",    label: "Menu",     chip: CHIP_SECONDARY },
-          { to: "/settings?tab=kitchen#scheduled-ordering", label: "Kitchen hours", chip: CHIP_PRIMARY },
-          { to: "/settings",          label: "Settings", chip: CHIP_SECONDARY },
-          ...accountNav,
-        ];
+    : ownerNavChips({
+      lobType: rawLobType || lobType,
+      hasTakeaway,
+    }).map((t) => ({
+      to: t.to,
+      label: t.label,
+      chip: PRIMARY_CHIP_IDS.has(t.id) ? CHIP_PRIMARY : CHIP_SECONDARY,
+    }));
 
   // Supply LOB: tenant portal is not the ops surface — point to /supply/* on app.autom8.works (no SSO).
   if (lobReady && isSupplyPortalLob(rawLobType)) {
@@ -1207,7 +1181,7 @@ export default function OwnerDashboard({ restaurantId, restaurantName, onLogout,
               <span style={{ fontSize: 12, color: "#BFE0D6" }}>Loading…</span>
             )}
             {navTabs.map(t => (
-              <Link key={t.to} to={t.to} style={t.chip}>{t.label}</Link>
+              <Link key={t.to + t.label} to={t.to} style={t.chip}>{t.label}</Link>
             ))}
             <SupportChip />
             <button
