@@ -1,9 +1,9 @@
 // ============================================================================
 // Shared add/edit slide-out for catalog / menu items across LOBs.
-// Excel remains for bulk upload; images are URL fields only.
+// Excel remains for bulk upload; images support URL paste or direct upload.
 // ============================================================================
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { C, FONTS } from '../theme/brand';
 import {
   formatBundleComponents,
@@ -12,7 +12,7 @@ import {
   parseBundleComponents,
 } from '../config/catalogSchemas';
 import { isPackagedLob as checkPackagedLob } from '../config/dashboardProfiles';
-
+import { prepareCatalogImage, uploadCatalogImage } from '../helpers/catalogImageUpload';
 const BLANK = {
   name: '',
   description: '',
@@ -178,6 +178,80 @@ function UrlPreview({ url }) {
   );
 }
 
+function ImageUrlField({
+  label,
+  value,
+  onChange,
+  apiClient,
+  showToast,
+  uploading,
+  setUploading,
+}) {
+  const inputRef = useRef(null);
+
+  const onPick = async (file) => {
+    if (!file || !apiClient) return;
+    setUploading(true);
+    try {
+      const { file: prepared } = await prepareCatalogImage(file);
+      const uploaded = await uploadCatalogImage(apiClient, prepared, file.name);
+      if (!uploaded?.url) throw new Error('Upload returned no URL');
+      onChange(uploaded.url);
+      showToast?.('Image uploaded');
+    } catch (err) {
+      const msg = err?.response?.data?.error || err.message || 'Image upload failed';
+      showToast?.(msg, 'error');
+    } finally {
+      setUploading(false);
+      if (inputRef.current) inputRef.current.value = '';
+    }
+  };
+
+  return (
+    <FormField
+      label={label}
+      hint="Landscape photo · auto-compressed under 1MB, or paste a direct https URL."
+    >
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <input
+          style={{ ...inputStyle, flex: 1 }}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="https://…"
+          disabled={uploading}
+        />
+        <button
+          type="button"
+          disabled={uploading || !apiClient}
+          onClick={() => inputRef.current?.click()}
+          style={{
+            flexShrink: 0,
+            fontSize: 12,
+            fontWeight: 600,
+            padding: '8px 12px',
+            borderRadius: 8,
+            cursor: uploading ? 'wait' : 'pointer',
+            border: `0.5px solid ${C.primaryBorder || C.border}`,
+            background: C.primaryLight || C.surfaceBg,
+            color: C.primaryDark || C.text,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {uploading ? '…' : 'Upload'}
+        </button>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          style={{ display: 'none' }}
+          onChange={(e) => onPick(e.target.files?.[0])}
+        />
+      </div>
+      <UrlPreview url={value} />
+    </FormField>
+  );
+}
+
 /**
  * @param {{
  *   open: boolean,
@@ -203,6 +277,7 @@ export default function CatalogItemEditor({
   const [form, setForm] = useState(BLANK);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [uploadingSlot, setUploadingSlot] = useState(null);
 
   const schemaLob = useMemo(() => normalizeLobType(lobType, 'restaurant'), [lobType]);
   const packaged = checkPackagedLob(lobType);
@@ -639,26 +714,32 @@ export default function CatalogItemEditor({
           </>
         )}
 
-        <SectionTitle>Images (URLs)</SectionTitle>
-        <FormField label="Primary image URL">
-          <input style={inputStyle} value={form.image_url} onChange={(e) => setField('image_url', e.target.value)} placeholder="https://…" />
-          <UrlPreview url={form.image_url} />
-        </FormField>
+        <SectionTitle>Images</SectionTitle>
+        <ImageUrlField
+          label="Primary image"
+          value={form.image_url}
+          onChange={(v) => setField('image_url', v)}
+          apiClient={apiClient}
+          showToast={showToast}
+          uploading={uploadingSlot === 'image_url'}
+          setUploading={(busy) => setUploadingSlot(busy ? 'image_url' : null)}
+        />
         {showGallery && [
           ['image_url_2', 'Gallery image 2'],
           ['image_url_3', 'Gallery image 3'],
           ['image_url_4', 'Gallery image 4'],
           ['image_url_5', 'Gallery image 5'],
         ].map(([key, label]) => (
-          <FormField key={key} label={label}>
-            <input
-              style={inputStyle}
-              value={form[key]}
-              onChange={(e) => setField(key, e.target.value)}
-              placeholder="https://…"
-            />
-            <UrlPreview url={form[key]} />
-          </FormField>
+          <ImageUrlField
+            key={key}
+            label={label}
+            value={form[key]}
+            onChange={(v) => setField(key, v)}
+            apiClient={apiClient}
+            showToast={showToast}
+            uploading={uploadingSlot === key}
+            setUploading={(busy) => setUploadingSlot(busy ? key : null)}
+          />
         ))}
 
         {isFood && (

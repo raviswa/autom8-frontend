@@ -13,6 +13,11 @@ import CatalogItemEditor from '../components/CatalogItemEditor';
 import { C, FONTS } from '../theme/brand';
 import { getSchemaForLob } from '../config/catalogSchemas';
 import { MENU_SLOT_OPTIONS, normalizeMenuSlots, toggleMenuSlot } from '../helpers/menuSlots';
+import {
+  prepareCatalogImage,
+  uploadCatalogImage,
+  assignImageToUploadRows,
+} from '../helpers/catalogImageUpload';
 
 const SLOT_OPTIONS = MENU_SLOT_OPTIONS;
 const normalizeSlots = normalizeMenuSlots;
@@ -27,7 +32,8 @@ const CARD = {
 const IMAGE_SOURCE_EXAMPLES = [
   ['How to add dish images'],
   [''],
-  ['Paste a direct image URL in the image_link column.'],
+  ['Option A — Drag photos after Excel preview (recommended): name files with the item id/SKU prefix, e.g. SKU001-front.jpg'],
+  ['Option B — Paste a direct image URL in the image_link column.'],
   ['• Unsplash — https://images.unsplash.com/photo-...?w=800'],
   ['• Pexels   — https://images.pexels.com/photos/.../photo.jpeg?w=800'],
   [''],
@@ -114,6 +120,10 @@ export default function MenuPage() {
   const [uploadResult, setUploadResult] = useState(null);
   const [downloadingTpl, setDownloadingTpl] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
+  const photoInputRef = useRef(null);
+  const [photoDragOver, setPhotoDragOver] = useState(false);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoSummary, setPhotoSummary] = useState(null);
 
   // Discount draft per item: { [id]: { percent, days } }
   const [discountDraft, setDiscountDraft] = useState({});
@@ -395,7 +405,89 @@ export default function MenuPage() {
     setUploadErrors([]);
     setUploadStatus('idle');
     setUploadResult(null);
+    setPhotoSummary(null);
+    setPhotoBusy(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
+    if (photoInputRef.current) photoInputRef.current.value = '';
+  };
+
+  const rowToTemplateArray = (row) => {
+    const headers = schema.templateHeaders || [];
+    const map = {
+      id: row.id || '',
+      title: row.name || row.title || '',
+      description: row.description || '',
+      price: row.price ?? '',
+      category: row.category || '',
+      image_link: row.image_url || row.image_link || '',
+      is_available: row.is_available === false ? 'FALSE' : 'TRUE',
+      image_url_2: row.image_url_2 || '',
+      image_url_3: row.image_url_3 || '',
+      image_url_4: row.image_url_4 || '',
+      image_url_5: row.image_url_5 || '',
+      custom_label_0: row.custom_label_0 || '',
+    };
+    return headers.map((h) => (map[h] != null ? map[h] : (row[h] ?? '')));
+  };
+
+  const downloadRowsAsExcel = (rows, filename = 'catalog_with_images.xlsx') => {
+    const headers = schema.templateHeaders || ['id', 'title', 'description', 'price', 'category', 'image_link', 'is_available'];
+    const data = [headers, ...rows.map(rowToTemplateArray)];
+    const catalogSheet = XLSX.utils.aoa_to_sheet(data);
+    catalogSheet['!cols'] = schema.templateColWidths;
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, catalogSheet, 'WhatsApp Catalog');
+    XLSX.writeFile(wb, filename);
+  };
+
+  const processPhotoFiles = async (fileList) => {
+    const files = Array.from(fileList || []).filter(Boolean);
+    if (!files.length || !uploadRows.length) return;
+
+    setPhotoBusy(true);
+    let ok = 0;
+    let rejected = 0;
+    let unmatched = 0;
+    let overflow = 0;
+    let working = uploadRows.map((r) => ({ ...r }));
+
+    for (const file of files) {
+      try {
+        const { file: prepared } = await prepareCatalogImage(file);
+        const uploaded = await uploadCatalogImage(apiClient, prepared, file.name);
+        if (!uploaded?.url) {
+          rejected += 1;
+          continue;
+        }
+        const result = assignImageToUploadRows(working, uploaded.original_filename || file.name, uploaded.url);
+        working = result.rows;
+        if (result.status === 'matched') ok += 1;
+        else if (result.status === 'overflow') overflow += 1;
+        else unmatched += 1;
+      } catch (err) {
+        const code = err?.code || err?.response?.data?.code;
+        if (code === 'not_landscape' || /landscape|portrait|square/i.test(err.message || '')) {
+          rejected += 1;
+        } else if (code === 'too_large' || code === 'file_too_large' || /1MB|too large/i.test(err.message || err?.response?.data?.error || '')) {
+          rejected += 1;
+        } else {
+          rejected += 1;
+          console.warn('[catalog-photos]', err.message || err?.response?.data?.error);
+        }
+      }
+    }
+
+    setUploadRows(working);
+    setUploadErrors(working.flatMap((r, i) => schema.validateRow(r, i + 1)));
+    setPhotoSummary({
+      total: files.length,
+      ok,
+      rejected,
+      unmatched,
+      overflow,
+    });
+    setPhotoBusy(false);
+    if (photoInputRef.current) photoInputRef.current.value = '';
   };
 
   const downloadTemplate = async () => {
@@ -661,17 +753,80 @@ export default function MenuPage() {
                     {uploadRows.length > 40 && (
                       <div style={{ fontSize: 11, color: C.textMuted, marginTop: 6 }}>Showing first 40 of {uploadRows.length} rows</div>
                     )}
-                    <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+
+                    <div
+                      onDragOver={(e) => { e.preventDefault(); setPhotoDragOver(true); }}
+                      onDragLeave={() => setPhotoDragOver(false)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setPhotoDragOver(false);
+                        processPhotoFiles(e.dataTransfer.files);
+                      }}
+                      onClick={() => !photoBusy && photoInputRef.current?.click()}
+                      style={{
+                        marginTop: 14,
+                        border: `1px dashed ${photoDragOver ? C.primary : C.border}`,
+                        borderRadius: 12, padding: '24px 16px', textAlign: 'center',
+                        cursor: photoBusy ? 'wait' : 'pointer',
+                        background: photoDragOver ? C.primaryLight : C.surfaceBg,
+                        opacity: photoBusy ? 0.7 : 1,
+                      }}
+                    >
+                      <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>
+                        {photoBusy ? 'Uploading photos…' : 'Drag in your product photos'}
+                      </div>
+                      <div style={{ fontSize: 11, color: C.textMuted, marginTop: 6, lineHeight: 1.45 }}>
+                        Name each file starting with the item&apos;s SKU/id (e.g. <code>SKU001-front.jpg</code>).
+                        Landscape only · up to 5 per item · auto-compressed under 1MB.
+                      </div>
+                      <input
+                        ref={photoInputRef}
+                        type="file"
+                        multiple
+                        accept="image/jpeg,image/png,image/webp"
+                        style={{ display: 'none' }}
+                        onChange={(e) => processPhotoFiles(e.target.files)}
+                      />
+                    </div>
+
+                    {photoSummary && (
+                      <div style={{
+                        marginTop: 10, fontSize: 12, color: C.textSub, lineHeight: 1.5,
+                        padding: '8px 10px', borderRadius: 8, background: C.surfaceBg, border: `0.5px solid ${C.border}`,
+                      }}>
+                        {photoSummary.ok} of {photoSummary.total} photos uploaded.
+                        {photoSummary.rejected > 0 ? ` ${photoSummary.rejected} rejected (not landscape / too large).` : ''}
+                        {photoSummary.unmatched > 0 ? ` ${photoSummary.unmatched} didn\u2019t match any SKU.` : ''}
+                        {photoSummary.overflow > 0 ? ` ${photoSummary.overflow} extra beyond 5 ignored.` : ''}
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
                       <button
                         type="button"
                         onClick={handleConfirmUpload}
-                        disabled={uploadErrors.length > 0}
+                        disabled={uploadErrors.length > 0 || photoBusy}
                         style={{
-                          fontSize: 13, fontWeight: 600, padding: '10px 16px', borderRadius: 8, cursor: uploadErrors.length ? 'not-allowed' : 'pointer',
-                          border: 'none', background: uploadErrors.length ? C.border : C.primary, color: '#fff',
+                          fontSize: 13, fontWeight: 600, padding: '10px 16px', borderRadius: 8,
+                          cursor: (uploadErrors.length || photoBusy) ? 'not-allowed' : 'pointer',
+                          border: 'none', background: (uploadErrors.length || photoBusy) ? C.border : C.primary, color: '#fff',
                         }}
                       >
                         Confirm &amp; replace menu ({uploadRows.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          downloadRowsAsExcel(uploadRows);
+                          showToast('Spreadsheet downloaded with image URLs');
+                        }}
+                        disabled={!uploadRows.length || photoBusy}
+                        style={{
+                          fontSize: 13, padding: '10px 16px', borderRadius: 8, cursor: 'pointer',
+                          border: `0.5px solid ${C.border}`, background: C.cardBg, color: C.textSub,
+                        }}
+                      >
+                        Download spreadsheet with images
                       </button>
                       <button type="button" onClick={handleResetUpload} style={{
                         fontSize: 13, padding: '10px 16px', borderRadius: 8, cursor: 'pointer',
