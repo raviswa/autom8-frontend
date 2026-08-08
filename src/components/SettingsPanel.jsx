@@ -602,6 +602,7 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
         social_links: Array.isArray(d.social_links) ? d.social_links : [],
         restaurant_type:   d.restaurant_type ?? 'restaurant',
         lob_type:          d.lob_type ?? 'restaurant',   // ← add this line
+        supply_enabled:    !!d.supply_enabled,
         business_family:   d.business_family ?? '',
         business_vertical: d.business_vertical ?? '',
         business_vertical_other: d.business_vertical_other ?? '',
@@ -621,14 +622,8 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
   const connectInstagram = async () => {
     setIgConnecting(true);
     try {
-      const stepTok = await requestStepUpToken({
-        purpose: 'instagram_bind',
-        title: 'Verify to connect Instagram',
-      });
-      if (!stepTok) return;
-      const res = await apiClient.get('/api/instagram/oauth/start', {
-        headers: stepUpHeaders(stepTok),
-      });
+      // Meta Facebook Login verifies page/IG ownership — no WhatsApp step-up.
+      const res = await apiClient.get('/api/instagram/oauth/start');
       const url = res.data?.url;
       if (!url) {
         showToast('Could not start Instagram connect', 'error');
@@ -649,14 +644,9 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
     }
     setIgPickSaving(true);
     try {
-      const stepTok = await requestStepUpToken({
-        purpose: 'instagram_bind',
-        title: 'Verify to finish Instagram connect',
-      });
-      if (!stepTok) return;
       const res = await apiClient.post('/api/instagram/oauth/select-page', {
         page_id: igPickPageId,
-      }, { headers: stepUpHeaders(stepTok) });
+      });
       const username = res.data?.username;
       const igId = res.data?.ig_user_id;
       const handle = res.data?.instagram_handle;
@@ -1389,7 +1379,42 @@ function TabRestaurant({ apiClient, showToast, lobType = 'restaurant' }) {
   );
 })()}
 
-      
+      {/* Supply add-on — same WhatsApp, +₹500/mo when enabled */}
+      {!['b2b', 'supply', 'b2b_supply'].includes(String(form.lob_type || '').toLowerCase()) && (
+        <>
+          <SectionTitle>Supply (B2B) add-on</SectionTitle>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '14px', borderRadius: 10, marginBottom: 16,
+            background: C.surfaceBg, border: `0.5px solid ${C.border}`,
+          }}>
+            <div style={{ paddingRight: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 500, color: C.text }}>
+                Enable Autom8 Supply on this WhatsApp number
+              </div>
+              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2, lineHeight: 1.45 }}>
+                Registered buyer phones use the B2B supply chat; everyone else keeps your
+                customer storefront flow. Pricing: ₹500/mo for your catalog LOB
+                {form.supply_enabled ? ' + ₹500 for Supply = ₹1000/mo' : '; Supply adds ₹500/mo'}.
+                Portal: app.autom8.works/supply/login
+              </div>
+            </div>
+            <div
+              onClick={() => set('supply_enabled', !form.supply_enabled)}
+              style={{
+                width: 40, height: 22, borderRadius: 11, cursor: 'pointer', position: 'relative',
+                background: form.supply_enabled ? C.success : C.border,
+                transition: 'background .2s', flexShrink: 0, marginLeft: 16,
+              }}
+            >
+              <div style={{
+                position: 'absolute', top: 3, left: form.supply_enabled ? 21 : 3,
+                width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left .2s',
+              }} />
+            </div>
+          </div>
+        </>
+      )}
 
       <SectionTitle>Staff permissions</SectionTitle>
       <div style={{
