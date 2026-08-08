@@ -2537,7 +2537,7 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
               {
                 value: 'split',
                 label: 'Split (growing team)',
-                desc: 'Manager Portal shows the journey; Packing is pack-only.',
+                desc: 'Manager Portal shows the journey; Packing still captures courier / Mark Delivered on each ticket.',
               },
             ].map((opt) => (
               <button

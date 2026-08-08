@@ -595,7 +595,7 @@ function OrderItemRow({ item, onAdvance, onVoid, packingMode = false }) {
   );
 }
 
-function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll, packingMode = false, apiClient = null, combinedMode = true, onRequestShipmentDetails = null }) {
+function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll, packingMode = false, apiClient = null, shipmentRefreshKey = 0, onRequestShipmentDetails = null }) {
   const { anchor, items, orderNumber, serviceType, aggregateStatus, createdAt } = order;
   const handleReprint = () => printKOT(buildKOTFromFeedItem(anchor, allItems));
   const tokenLabel = anchor.token_number ? formatTokenDisplay(anchor.token_number) : null;
@@ -652,7 +652,7 @@ function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll, pac
           tokenNumber={anchor.token_number}
           orderNumber={anchor.order_item?.order?.order_number || null}
           fullyPacked={fullyPacked}
-          combinedMode={combinedMode}
+          refreshKey={shipmentRefreshKey}
           onRequestShipmentDetails={onRequestShipmentDetails}
         />
       )}
@@ -680,7 +680,7 @@ function OrderTicketCard({ order, allItems, onAdvance, onVoid, onAdvanceAll, pac
   );
 }
 
-function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked, combinedMode = true, onRequestShipmentDetails = null }) {
+function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked, refreshKey = 0, onRequestShipmentDetails = null }) {
   const [shipment, setShipment] = useState(null);
   const [bookingId, setBookingId] = useState(null);
   const [channel, setChannel] = useState(null);
@@ -731,8 +731,11 @@ function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked,
 
   useEffect(() => {
     load();
+  }, [load, refreshKey]);
+
+  useEffect(() => {
     if (!fullyPacked) return undefined;
-    const t = setInterval(load, 20000);
+    const t = setInterval(load, 15000);
     return () => clearInterval(t);
   }, [load, fullyPacked]);
 
@@ -779,6 +782,11 @@ function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked,
   const canMarkDelivered = fullyPacked && !isPickup
     && ['shipped', 'own_team', 'awb_assigned', 'out_for_delivery'].includes(status);
   const isDelivered = status === 'delivered';
+  const mode = String(ownTeamMode || shipment?.own_team_mode || '').toLowerCase();
+  const courierName = String(shipment?.courier_name || '').trim();
+  const driverName = String(shipment?.driver_name || '').trim();
+  const driverPhone = String(shipment?.driver_phone || '').trim();
+  const awb = String(shipment?.awb || '').trim();
 
   const markDelivered = async () => {
     if (!bookingId && !tokenNumber && !orderNumber) return;
@@ -815,87 +823,157 @@ function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked,
     not_delivery: 'Not a delivery order',
   };
 
-  let label = loading ? 'Fulfillment…' : 'Fulfillment';
-  if (isPickup) label = 'Store pickup · captain QR at collection';
-  else if (isPending) label = 'Shiprocket · awaiting manager approval';
-  else if (needsDeliveryDetails) label = 'Packed · how is this being delivered?';
-  else if (isDelivered) label = 'Delivered';
-  else if (isOwnTeam) {
-    const mode = String(ownTeamMode || shipment?.own_team_mode || '').toLowerCase();
-    if (mode === 'local_rider_app') label = `Local rider · ${shipment?.courier_name || 'details saved'}`;
-    else if (mode === 'parcel_courier') label = `Parcel · ${shipment?.courier_name || 'courier'}${hasAwb ? ` · ${shipment.awb}` : ''}`;
-    else {
-      label = channelStatus === 'rejected_to_own_team'
-        ? 'Own delivery team (courier declined)'
-        : 'Own delivery team';
-    }
+  // Stage + courier-sent detail line (same ticket box as Packed).
+  let stage = loading ? 'Fulfillment…' : 'Delivery';
+  let detail = '';
+  if (isPickup) {
+    stage = 'Store pickup';
+    detail = 'Captain QR at collection';
+  } else if (isPending) {
+    stage = 'Awaiting approval';
+    detail = 'Shiprocket · manager confirm';
+  } else if (isDelivered) {
+    stage = 'Delivered';
+    detail = [courierName || driverName, awb ? `AWB ${awb}` : ''].filter(Boolean).join(' · ');
+  } else if (needsDeliveryDetails) {
+    stage = fullyPacked ? 'Packed' : 'Delivery';
+    detail = 'How is this being delivered?';
+  } else if (mode === 'local_rider_app' || status === 'out_for_delivery') {
+    stage = 'Out for delivery';
+    detail = [courierName || 'Local rider', (awb || track) ? (awb || 'tracking saved') : '']
+      .filter(Boolean).join(' · ');
+  } else if (mode === 'parcel_courier' || (hasAwb && isOwnTeam) || status === 'shipped') {
+    stage = 'Shipped';
+    detail = [courierName || 'Courier', awb ? `AWB ${awb}` : ''].filter(Boolean).join(' · ');
+  } else if (isOwnTeam && (status === 'own_team' || mode === 'own_driver')) {
+    stage = 'Out for delivery';
+    detail = [
+      channelStatus === 'rejected_to_own_team' ? 'Own team (courier declined)' : (courierName || 'Own delivery staff'),
+      driverName,
+      driverPhone,
+    ].filter(Boolean).join(' · ');
   } else if (srId && hasAwb) {
-    label = `SR #${srId} · ${shipment.courier_name || 'Courier'} · AWB ${shipment.awb}`;
-  } else if (srId) label = `SR order #${srId} · awaiting AWB`;
-  else if (failed) label = shipment.shiprocket_last_error || 'Shiprocket failed';
-  else if (shiprocketReady) label = fullyPacked ? 'Shiprocket · creating order…' : 'Shiprocket · will create when packed';
-  else if (skipReason && skipLabels[skipReason]) label = skipLabels[skipReason];
-  else if (!bookingId && !loading) label = 'No booking linked';
-
-  if (!combinedMode) {
-    return (
-      <div className="kds-ship-bar">
-        <span className="kds-ship-label">{srId ? `SR #${srId}` : 'Pack here · full status in Manager'}</span>
-        <a className="kds-ship-retry" href="/dashboard/manager" style={{ textDecoration: 'none' }}>Manager →</a>
-      </div>
-    );
+    stage = 'Shipped';
+    detail = `SR #${srId} · ${courierName || 'Courier'} · AWB ${awb}`;
+  } else if (srId) {
+    stage = 'Shiprocket';
+    detail = `Order #${srId} · awaiting AWB`;
+  } else if (failed) {
+    stage = 'Shiprocket failed';
+    detail = shipment.shiprocket_last_error || '';
+  } else if (shiprocketReady) {
+    stage = fullyPacked ? 'Shiprocket' : 'Courier';
+    detail = fullyPacked ? 'Creating shipment…' : 'Will create when packed';
+  } else if (skipReason && skipLabels[skipReason]) {
+    stage = 'Fulfillment';
+    detail = skipLabels[skipReason];
+  } else if (!bookingId && !loading) {
+    stage = 'Delivery';
+    detail = fullyPacked ? 'No booking linked — use Set delivery with order no.' : 'Waiting for pack';
   }
 
+  const barClass = failed
+    ? 'kds-ship-bar-fail'
+    : hasAwb || isDelivered || (isOwnTeam && !needsDeliveryDetails) || isPickup
+      ? 'kds-ship-bar-ok'
+      : isPending || needsDeliveryDetails
+        ? 'kds-ship-bar-fail'
+        : '';
+
   return (
-    <div className={`kds-ship-bar ${failed ? 'kds-ship-bar-fail' : hasAwb || isDelivered || (isOwnTeam && !needsDeliveryDetails) || isPickup ? 'kds-ship-bar-ok' : isPending || needsDeliveryDetails ? 'kds-ship-bar-fail' : ''}`}>
-      <span className="kds-ship-label" title={error || shipment?.shiprocket_last_error || ''}>{label}</span>
-      {needsDeliveryDetails && onRequestShipmentDetails && (
-        <button
-          type="button"
-          className="kds-ship-retry"
-          onClick={() => onRequestShipmentDetails({
-            booking_id: bookingId,
-            own_team_mode: ownTeamMode || 'own_driver',
-            tokenNumber,
-            orderNumber,
-          })}
-        >
-          Set delivery
-        </button>
-      )}
-      {canMarkDelivered && (
-        <button
-          type="button"
-          className="kds-ship-retry"
-          onClick={markDelivered}
-          disabled={markingDelivered}
-        >
-          {markingDelivered ? 'Updating…' : 'Mark Delivered'}
-        </button>
-      )}
-      {srId && (
-        <button
-          type="button"
-          className="kds-ship-retry"
-          onClick={async () => {
-            try {
-              await navigator.clipboard.writeText(String(srId));
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            } catch (_e) { /* ignore */ }
-          }}
-        >
-          {copied ? 'Copied' : 'Copy SR #'}
-        </button>
-      )}
-      {track && (
-        <a className="kds-ship-retry" href={track} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>Track</a>
-      )}
-      {needsRetry && bookingId && (
-        <button type="button" className="kds-ship-retry" onClick={retry} disabled={retrying}>
-          {retrying ? 'Retrying…' : 'Retry pickup'}
-        </button>
-      )}
+    <div className={`kds-ship-bar ${barClass}`}>
+      <div className="kds-ship-copy" title={error || shipment?.shiprocket_last_error || detail || ''}>
+        <span className="kds-ship-stage">{stage}</span>
+        {detail ? <span className="kds-ship-detail">{detail}</span> : null}
+      </div>
+      <div className="kds-ship-actions">
+        {needsDeliveryDetails && onRequestShipmentDetails && (
+          <button
+            type="button"
+            className="kds-ship-retry"
+            onClick={() => onRequestShipmentDetails({
+              booking_id: bookingId,
+              own_team_mode: ownTeamMode || 'own_driver',
+              tokenNumber,
+              orderNumber,
+              courier_name: courierName,
+              awb,
+              tracking_url: shipment?.tracking_url || '',
+              driver_name: driverName,
+              driver_phone: driverPhone,
+            })}
+          >
+            Set delivery
+          </button>
+        )}
+        {!needsDeliveryDetails && fullyPacked && !isPickup && !isDelivered && onRequestShipmentDetails && (isOwnTeam || hasAwb || status === 'shipped' || status === 'own_team') && (
+          <button
+            type="button"
+            className="kds-ship-retry"
+            onClick={() => onRequestShipmentDetails({
+              booking_id: bookingId,
+              own_team_mode: ownTeamMode || mode || 'own_driver',
+              tokenNumber,
+              orderNumber,
+              courier_name: courierName,
+              awb,
+              tracking_url: shipment?.tracking_url || '',
+              driver_name: driverName,
+              driver_phone: driverPhone,
+            })}
+          >
+            Edit courier
+          </button>
+        )}
+        {canMarkDelivered && (
+          <button
+            type="button"
+            className="kds-ship-retry"
+            onClick={markDelivered}
+            disabled={markingDelivered}
+          >
+            {markingDelivered ? 'Updating…' : 'Mark Delivered'}
+          </button>
+        )}
+        {awb && (
+          <button
+            type="button"
+            className="kds-ship-retry"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(awb);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              } catch (_e) { /* ignore */ }
+            }}
+          >
+            {copied ? 'Copied' : 'Copy AWB'}
+          </button>
+        )}
+        {srId && !awb && (
+          <button
+            type="button"
+            className="kds-ship-retry"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(String(srId));
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              } catch (_e) { /* ignore */ }
+            }}
+          >
+            {copied ? 'Copied' : 'Copy SR #'}
+          </button>
+        )}
+        {track && (
+          <a className="kds-ship-retry" href={track} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>Track</a>
+        )}
+        {needsRetry && bookingId && (
+          <button type="button" className="kds-ship-retry" onClick={retry} disabled={retrying}>
+            {retrying ? 'Retrying…' : 'Retry pickup'}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -1179,6 +1257,7 @@ export default function KDSScreen() {
   const [printMsg, setPrintMsg]   = useState('');   // transient "Printing KOT…" toast
   const [shipmentModal, setShipmentModal] = useState(null);
   // { bookingId, tokenNumber, orderNumber, mode, courierName, awb, driverName, driverPhone, saving, error }
+  const [shipmentRefreshKey, setShipmentRefreshKey] = useState(0);
 
   // Track order numbers that have already been auto-printed this session
   // so a polling refresh doesn't re-print the same KOT
@@ -1190,10 +1269,10 @@ export default function KDSScreen() {
       tokenNumber: payload.tokenNumber || null,
       orderNumber: payload.orderNumber || null,
       mode: payload.own_team_mode || 'own_driver',
-      courierName: '',
-      awb: '',
-      driverName: '',
-      driverPhone: '',
+      courierName: payload.courier_name || '',
+      awb: payload.awb || payload.tracking_url || '',
+      driverName: payload.driver_name || '',
+      driverPhone: payload.driver_phone || '',
       saving: false,
       error: '',
     });
@@ -1230,6 +1309,7 @@ export default function KDSScreen() {
         status: 'Shipped',
       });
       setShipmentModal(null);
+      setShipmentRefreshKey((k) => k + 1);
       setPrintMsg(mode === 'own_driver' ? 'Customer notified — on the way' : 'Customer notified with tracking');
       setTimeout(() => setPrintMsg(''), 2500);
       fetchFeed();
@@ -1820,7 +1900,7 @@ const fetchFeed = useCallback(async () => {
                     onAdvanceAll={advanceAllInOrder}
                     packingMode={packingMode}
                     apiClient={apiClient}
-                    combinedMode={orderOpsMode !== 'split'}
+                    shipmentRefreshKey={shipmentRefreshKey}
                     onRequestShipmentDetails={openShipmentDetailsModal}
                   />
                 ))
@@ -2126,12 +2206,27 @@ const KDS_CSS = `
   .row-btn-done    { background: #14532d; color: #86efac; }
 
   .kds-ship-bar {
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    padding: 8px 12px; border-top: 1px solid #222;
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 10px 12px; border-top: 1px solid #222;
     background: #121212; font-size: 12px; color: #d1d5db;
   }
   .kds-ship-bar-ok { background: #052e16; color: #bbf7d0; }
   .kds-ship-bar-fail { background: #450a0a; color: #fecaca; }
+  .kds-ship-copy {
+    flex: 1; min-width: 0;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .kds-ship-stage {
+    font-size: 12px; font-weight: 700; letter-spacing: 0.01em;
+  }
+  .kds-ship-detail {
+    font-size: 11px; opacity: 0.9;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .kds-ship-actions {
+    display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end;
+    flex-shrink: 0;
+  }
   .kds-ship-label {
     flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
