@@ -47,6 +47,7 @@ export default function OnboardingWizardPage() {
   const [verticalOther, setVerticalOther] = useState('');
   const [city, setCity] = useState('');
   const [whatsapp, setWhatsapp] = useState('');
+  const [supplyEnabled, setSupplyEnabled] = useState(false);
 
   // Step 2
   const [itemName, setItemName] = useState('');
@@ -86,6 +87,7 @@ export default function OnboardingWizardPage() {
       setVerticalOther(t.business_vertical_other || '');
       setCity(t.city || '');
       setWhatsapp(t.whatsapp_number || '');
+      setSupplyEnabled(!!t.supply_enabled);
       const feats = t.subscribed_features || [];
       setTakeaway(feats.length ? feats.includes('takeaway') : true);
       setDelivery(feats.length ? feats.includes('delivery') : true);
@@ -229,6 +231,23 @@ export default function OnboardingWizardPage() {
                 <label style={labelStyle}>WhatsApp number (business)</label>
                 <input style={inputStyle} value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} placeholder="91XXXXXXXXXX" />
               </div>
+              {String(resolveBusinessTaxonomy({
+                business_family: family,
+                business_vertical: vertical || undefined,
+              }).lob_type || '').toLowerCase() !== 'b2b' && (
+                <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13, lineHeight: 1.45 }}>
+                  <input
+                    type="checkbox"
+                    checked={supplyEnabled}
+                    onChange={(e) => setSupplyEnabled(e.target.checked)}
+                    style={{ marginTop: 3 }}
+                  />
+                  <span>
+                    Also enable <strong>Autom8 Supply</strong> (B2B) on this same WhatsApp number
+                    (+₹500/mo). Buyer phones use the supplier portal; other customers keep your storefront.
+                  </span>
+                </label>
+              )}
               <button
                 type="button"
                 disabled={saving || !businessName.trim()}
@@ -246,6 +265,7 @@ export default function OnboardingWizardPage() {
                     business_vertical: tax.business_vertical,
                     business_vertical_other: tax.business_vertical_other,
                     lob_type: tax.lob_type,
+                    supply_enabled: supplyEnabled,
                   });
                 }}
                 style={primaryBtn(saving)}
