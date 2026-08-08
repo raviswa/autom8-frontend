@@ -337,19 +337,19 @@ export const LOB_SCHEMAS = {
     label: 'Retail / Electronics',
     templateHeaders: [
       ...BASE_TEMPLATE_HEADERS,
-      'condition', 'original_mrp', 'warranty_days', 'colour',
+      'condition', 'original_mrp', 'warranty_days', 'colour', 'weight_grams',
       'ingredients', 'how_to_use', 'how_to_store', 'shelf_life_days', 'days_to_empty',
       'image_url_2', 'image_url_3', 'image_url_4', 'image_url_5',
     ],
     templateColWidths: [
       { wch: 10 }, { wch: 26 }, { wch: 40 }, { wch: 8 }, { wch: 16 }, { wch: 48 }, { wch: 12 },
-      { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 12 },
+      { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 12 },
       { wch: 28 }, { wch: 28 }, { wch: 28 }, { wch: 12 }, { wch: 12 },
       { wch: 48 }, { wch: 48 }, { wch: 48 }, { wch: 48 },
     ],
     templateExamples: [
-      ['RT001', 'iPhone 12 (Refurbished, 64GB)', 'Grade A refurbished', 24999, 'Phones', 'https://images.unsplash.com/photo-1592286927505-1def25115558?w=800', 'TRUE', 'Refurbished', 32999, 180, 'Black', '', '', '', '', '', '', '', '', ''],
-      ['ORG-ENZ-50', 'Digestive Enzyme Blend (50g)', 'Plant-based enzymes for daily digestion', 499, 'Organic', '', 'TRUE', 'New', 599, '', '', 'Papaya, pineapple, fennel', 'Mix 1/2 tsp in warm water after meals', 'Cool dry place, away from sunlight', 365, 30, '', '', '', ''],
+      ['RT001', 'iPhone 12 (Refurbished, 64GB)', 'Grade A refurbished', 24999, 'Phones', 'https://images.unsplash.com/photo-1592286927505-1def25115558?w=800', 'TRUE', 'Refurbished', 32999, 180, 'Black', 250, '', '', '', '', '', '', '', '', ''],
+      ['ORG-ENZ-50', 'Digestive Enzyme Blend (50g)', 'Plant-based enzymes for daily digestion', 499, 'Organic', '', 'TRUE', 'New', 599, '', '', 50, 'Papaya, pineapple, fennel', 'Mix 1/2 tsp in warm water after meals', 'Cool dry place, away from sunlight', 365, 30, '', '', '', ''],
     ],
     columnHelp: [
       ['Column guide - Retail / Electronics'],
@@ -357,6 +357,7 @@ export const LOB_SCHEMAS = {
       ['category - customer-facing menu tab, e.g. Phones, Accessories'],
       ['condition - New / Refurbished / Used (shown in webcart product detail)'],
       ['original_mrp - optional; webcart shows a discount badge when higher than price'],
+      ['weight_grams - parcel weight for courier quotes (blank uses packaging / tenant estimate)'],
       ['ingredients / how_to_use / how_to_store / shelf_life_days - optional trust fields for ingredient-led retail (no FSSAI gate)'],
       ['days_to_empty - optional days until a typical unit runs out (WhatsApp refill reminders when enabled in Settings)'],
       ['image_link - primary image; image_url_2 … image_url_5 for extra gallery photos'],
@@ -379,6 +380,9 @@ export const LOB_SCHEMAS = {
           ? parseInt(String(row['warranty_days']).replace(/\D/g, ''), 10) || null
           : null,
         colour: strOrNull(row['colour'] ?? row['Colour'] ?? row['color'] ?? row['Color']),
+        weight_grams: row['weight_grams'] != null && row['weight_grams'] !== ''
+          ? parseInt(String(row['weight_grams']).replace(/\D/g, ''), 10) || null
+          : null,
         ingredients: strOrNull(row['ingredients'] ?? row['Ingredients']),
         how_to_use: strOrNull(row['how_to_use'] ?? row['How To Use'] ?? row['how to use']),
         how_to_store: strOrNull(row['how_to_store'] ?? row['How To Store'] ?? row['how to store']),
@@ -428,22 +432,22 @@ export const LOB_SCHEMAS = {
     templateHeaders: [
       'id', 'item_type', 'variant_group_id', 'size_label', 'flavour_group', 'scoop_count',
       'crust_options', 'toppings_allowed', 'topping_extra_price',
-      'title', 'description', 'price', 'category', 'image_link', 'is_available',
+      'title', 'description', 'price', 'category', 'image_link', 'is_available', 'weight_grams',
     ],
     templateColWidths: [
       { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 10 },
       { wch: 16 }, { wch: 14 }, { wch: 14 },
-      { wch: 26 }, { wch: 40 }, { wch: 8 }, { wch: 16 }, { wch: 48 }, { wch: 12 },
+      { wch: 26 }, { wch: 40 }, { wch: 8 }, { wch: 16 }, { wch: 48 }, { wch: 12 }, { wch: 12 },
     ],
     templateExamples: [
-      ['IC-CUP', 'CUP', '', '', 'GRP-A', 2, '', '', '', 'Double Scoop Cup', 'Pick 2 flavours', 120, 'Ice Cream', '', 'TRUE'],
-      ['IC-FV1', 'FLAVOUR', '', '', 'GRP-A', '', '', '', '', 'Vanilla', '', 0, 'Flavours', '', 'TRUE'],
-      ['IC-FV2', 'FLAVOUR', '', '', 'GRP-A,GRP-B', '', '', '', '', 'Chocolate', '', 0, 'Flavours', '', 'TRUE'],
-      ['PZ001-S', 'PIZZA', 'PZ001', 'Small', '', 1, 'Thin,Thick,Stuffed', 'TRUE', 49, 'Margherita', 'Classic tomato base, mozzarella, basil', 199, 'Pizza', 'https://images.unsplash.com/photo-1574071318508-1cdbab80d002?w=800', 'TRUE'],
-      ['PZ001-M', 'PIZZA', 'PZ001', 'Medium', '', 1, 'Thin,Thick,Stuffed', 'TRUE', 49, 'Margherita', 'Classic tomato base, mozzarella, basil', 299, 'Pizza', 'https://images.unsplash.com/photo-1574071318508-1cdbab80d002?w=800', 'TRUE'],
-      ['PZ001-L', 'PIZZA', 'PZ001', 'Large', '', 1, 'Thin,Thick,Stuffed', 'TRUE', 49, 'Margherita', 'Classic tomato base, mozzarella, basil', 449, 'Pizza', 'https://images.unsplash.com/photo-1574071318508-1cdbab80d002?w=800', 'TRUE'],
-      ['EX001', 'ADDON', '', '', '', '', '', '', '', 'Garlic Bread', 'Side', 99, 'Sides', '', 'TRUE'],
-      ['FR001', 'PRODUCT', '', '', '', '', '', '', '', 'French Fries', 'Crispy golden fries with seasoning', 79, 'Snacks', '', 'TRUE'],
+      ['IC-CUP', 'CUP', '', '', 'GRP-A', 2, '', '', '', 'Double Scoop Cup', 'Pick 2 flavours', 120, 'Ice Cream', '', 'TRUE', 350],
+      ['IC-FV1', 'FLAVOUR', '', '', 'GRP-A', '', '', '', '', 'Vanilla', '', 0, 'Flavours', '', 'TRUE', ''],
+      ['IC-FV2', 'FLAVOUR', '', '', 'GRP-A,GRP-B', '', '', '', '', 'Chocolate', '', 0, 'Flavours', '', 'TRUE', ''],
+      ['PZ001-S', 'PIZZA', 'PZ001', 'Small', '', 1, 'Thin,Thick,Stuffed', 'TRUE', 49, 'Margherita', 'Classic tomato base, mozzarella, basil', 199, 'Pizza', 'https://images.unsplash.com/photo-1574071318508-1cdbab80d002?w=800', 'TRUE', 400],
+      ['PZ001-M', 'PIZZA', 'PZ001', 'Medium', '', 1, 'Thin,Thick,Stuffed', 'TRUE', 49, 'Margherita', 'Classic tomato base, mozzarella, basil', 299, 'Pizza', 'https://images.unsplash.com/photo-1574071318508-1cdbab80d002?w=800', 'TRUE', 550],
+      ['PZ001-L', 'PIZZA', 'PZ001', 'Large', '', 1, 'Thin,Thick,Stuffed', 'TRUE', 49, 'Margherita', 'Classic tomato base, mozzarella, basil', 449, 'Pizza', 'https://images.unsplash.com/photo-1574071318508-1cdbab80d002?w=800', 'TRUE', 750],
+      ['EX001', 'ADDON', '', '', '', '', '', '', '', 'Garlic Bread', 'Side', 99, 'Sides', '', 'TRUE', 200],
+      ['FR001', 'PRODUCT', '', '', '', '', '', '', '', 'French Fries', 'Crispy golden fries with seasoning', 79, 'Snacks', '', 'TRUE', 180],
     ],
     columnHelp: [
       ['Column guide - Pizza & Ice Cream'],
@@ -456,6 +460,7 @@ export const LOB_SCHEMAS = {
       ['crust_options - comma-separated crust choices, PIZZA only (e.g. Thin,Thick,Stuffed)'],
       ['toppings_allowed - TRUE/FALSE for PIZZA crust/topping customizer'],
       ['topping_extra_price - price per topping when toppings_allowed = TRUE'],
+      ['weight_grams - parcel weight for courier quotes (blank uses packaging / tenant estimate)'],
       ['Flavours, scoops, crust, toppings, and add-ons are defined in the catalog upload schema and rendered in webcart at order time.'],
     ],
     previewColumns: [
@@ -485,6 +490,9 @@ export const LOB_SCHEMAS = {
         crust_options: strOrNull(row['crust_options'] ?? row['Crust Options']),
         toppings_allowed: parseBool(row['toppings_allowed'], false),
         topping_extra_price: parsePrice(row['topping_extra_price']),
+        weight_grams: row['weight_grams'] != null && row['weight_grams'] !== ''
+          ? parseInt(String(row['weight_grams']).replace(/\D/g, ''), 10) || null
+          : null,
       };
     },
     validateRow(item, rowNum) {

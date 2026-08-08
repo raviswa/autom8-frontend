@@ -325,8 +325,11 @@ export default function CatalogItemEditor({
       payload.size_label = form.pack_size_label.trim() || null;
     }
 
-    if (isFood) {
+    if (isFood || isPsl || isRetail) {
       payload.weight_grams = form.weight_grams !== '' ? parseInt(form.weight_grams, 10) || null : null;
+    }
+
+    if (isFood) {
       payload.availability_status = form.availability_status || null;
       payload.launch_at = form.launch_at || null;
       payload.deposit_amount = form.deposit_amount !== ''
@@ -554,7 +557,12 @@ export default function CatalogItemEditor({
               <input style={inputStyle} value={form.variant_group_id} onChange={(e) => setField('variant_group_id', e.target.value)} />
             </FormField>
             {isFood && (
-              <FormField label="Weight (grams)">
+              <FormField label="Weight (grams)" hint="Used for courier rate quotes. Blank = packaging / store estimate.">
+                <input style={inputStyle} type="number" min={0} value={form.weight_grams} onChange={(e) => setField('weight_grams', e.target.value)} />
+              </FormField>
+            )}
+            {isPsl && (
+              <FormField label="Weight (grams)" hint="Optional parcel weight for courier quotes.">
                 <input style={inputStyle} type="number" min={0} value={form.weight_grams} onChange={(e) => setField('weight_grams', e.target.value)} />
               </FormField>
             )}
@@ -665,6 +673,9 @@ export default function CatalogItemEditor({
                 <input style={inputStyle} type="number" min={0} value={form.warranty_days} onChange={(e) => setField('warranty_days', e.target.value)} />
               </FormField>
             </div>
+            <FormField label="Weight (grams)" hint="Used for courier rate quotes. Blank = packaging / store estimate.">
+              <input style={inputStyle} type="number" min={0} value={form.weight_grams} onChange={(e) => setField('weight_grams', e.target.value)} />
+            </FormField>
             <SectionTitle>Trust</SectionTitle>
             <FormField label="Ingredients">
               <textarea style={{ ...inputStyle, minHeight: 56, resize: 'vertical' }} value={form.ingredients} onChange={(e) => setField('ingredients', e.target.value)} />

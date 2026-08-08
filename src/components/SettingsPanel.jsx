@@ -1984,6 +1984,9 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
         order_ops_mode: d.order_ops_mode === 'split' ? 'split' : 'combined',
         courier_name: d.courier_name ?? '',
         courier_rate_card: normalizeCourierRateCard(d.courier_rate_card),
+        courier_enabled: !!d.courier_enabled,
+        courier_min_order_amount: d.courier_min_order_amount ?? '',
+        courier_max_weight_kg: d.courier_max_weight_kg ?? '',
         shiprocket_connected: !!d.shiprocket_connected,
         shiprocket_email: d.shiprocket_email ?? '',
         shiprocket_api_key: '',
@@ -2156,6 +2159,17 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
         order_ops_mode: form.order_ops_mode === 'split' ? 'split' : 'combined',
         courier_name: (form.courier_name || '').trim() || null,
         courier_rate_card: serializeCourierRateCard(form.courier_rate_card),
+        courier_enabled: !isRest && !!form.courier_enabled,
+        courier_min_order_amount: (() => {
+          if (isRest || !form.courier_enabled) return null;
+          const n = parseFloat(form.courier_min_order_amount);
+          return Number.isFinite(n) && n > 0 ? n : null;
+        })(),
+        courier_max_weight_kg: (() => {
+          if (isRest || !form.courier_enabled) return null;
+          const n = parseFloat(form.courier_max_weight_kg);
+          return Number.isFinite(n) && n > 0 ? n : null;
+        })(),
         // Backend derives shiprocket_connected from whether email+password exist.
         ...(form.shiprocket_email?.trim() ? { shiprocket_email: form.shiprocket_email.trim() } : {}),
         ...(form.shiprocket_api_key?.trim() ? { shiprocket_api_key: form.shiprocket_api_key.trim() } : {}),
@@ -2555,7 +2569,65 @@ function TabKitchen({ apiClient, showToast, paidFeatures = [], lobType = 'restau
             Switch to your own courier if you have a contracted rate card
             (by weight slab and zone: local, within state, metro, non-metro, special).
             Shiprocket shipments are created after packing is marked ready — not at payment confirmation.
+            Distance-tiered km charges (chat) are separate — turn those off under Delivery if you only want flat / rate-card pricing.
           </div>
+
+          <label style={{
+            display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 16,
+            padding: '12px 14px', borderRadius: 10, cursor: 'pointer',
+            background: form.courier_enabled ? C.primaryLight : C.cardBg,
+            border: `0.5px solid ${form.courier_enabled ? C.primary : C.border}`,
+          }}>
+            <input
+              type="checkbox"
+              checked={!!form.courier_enabled}
+              onChange={() => {
+                const next = !form.courier_enabled;
+                setForm((p) => ({
+                  ...p,
+                  courier_enabled: next,
+                  // Prefer rate card path when enabling courier on webcart
+                  ...(next ? { shipping_provider: 'custom' } : {}),
+                }));
+                setSaved(false);
+              }}
+              style={{ marginTop: 2 }}
+            />
+            <span>
+              <div style={{ fontSize: 13, fontWeight: 600, color: form.courier_enabled ? C.primaryDark : C.text }}>
+                Offer Courier (outstation) on webcart Delivery
+              </div>
+              <div style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.45, marginTop: 4 }}>
+                Customers choose Home Delivery (local) vs Courier. Uses your rate card / outstation charge.
+                Optional min order and max weight hide Courier when the cart is too small or heavy.
+                Not available for restaurant LOB. Independent of distance-tiered delivery.
+              </div>
+            </span>
+          </label>
+          {!!form.courier_enabled && (
+            <div style={{ ...grid2, marginBottom: 16 }}>
+              <div>
+                <Label>Courier min order (₹)</Label>
+                <Input
+                  value={form.courier_min_order_amount}
+                  onChange={(v) => set('courier_min_order_amount', v)}
+                  type="number"
+                  placeholder="200"
+                />
+                <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>Blank = no minimum.</div>
+              </div>
+              <div>
+                <Label>Courier max weight (kg)</Label>
+                <Input
+                  value={form.courier_max_weight_kg}
+                  onChange={(v) => set('courier_max_weight_kg', v)}
+                  type="number"
+                  placeholder="5"
+                />
+                <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>Blank = no max.</div>
+              </div>
+            </div>
+          )}
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
             {[

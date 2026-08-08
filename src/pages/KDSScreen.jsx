@@ -692,6 +692,7 @@ function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked,
   const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
+  const [markingDelivered, setMarkingDelivered] = useState(false);
 
   const load = useCallback(async () => {
     if (!apiClient || (!tokenNumber && !orderNumber)) return;
@@ -772,9 +773,35 @@ function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked,
     && ['confirmed', 'auto_accepted'].includes(String(channelStatus || 'confirmed'));
   const needsRetry = fullyPacked && shiprocketReady && (!hasAwb || failed) && !isOwnTeam && !isPickup;
   const needsDeliveryDetails = fullyPacked && isOwnTeam && !isPickup
-    && !['shipped', 'own_team', 'awb_assigned'].includes(status)
+    && !['shipped', 'own_team', 'awb_assigned', 'delivered', 'out_for_delivery'].includes(status)
     && !hasAwb
     && channelNorm !== 'shiprocket';
+  const canMarkDelivered = fullyPacked && !isPickup
+    && ['shipped', 'own_team', 'awb_assigned', 'out_for_delivery'].includes(status);
+  const isDelivered = status === 'delivered';
+
+  const markDelivered = async () => {
+    if (!bookingId && !tokenNumber && !orderNumber) return;
+    setMarkingDelivered(true);
+    setError('');
+    try {
+      const res = await apiClient.post('/api/dashboard/shipment/delivered', {
+        booking_id: bookingId || undefined,
+        token_number: tokenNumber || undefined,
+        order_ref: orderNumber || undefined,
+      });
+      setShipment(res.data.meta ? {
+        ...(shipment || {}),
+        ...res.data.meta,
+        shipment_status: 'delivered',
+      } : { ...(shipment || {}), shipment_status: 'delivered' });
+      await load();
+    } catch (err) {
+      setError(err.response?.data?.error || err.message || 'Mark delivered failed');
+    } finally {
+      setMarkingDelivered(false);
+    }
+  };
 
   const skipLabels = {
     shiprocket_not_connected: 'Add Shiprocket API user in Settings',
@@ -792,6 +819,7 @@ function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked,
   if (isPickup) label = 'Store pickup · captain QR at collection';
   else if (isPending) label = 'Shiprocket · awaiting manager approval';
   else if (needsDeliveryDetails) label = 'Packed · how is this being delivered?';
+  else if (isDelivered) label = 'Delivered';
   else if (isOwnTeam) {
     const mode = String(ownTeamMode || shipment?.own_team_mode || '').toLowerCase();
     if (mode === 'local_rider_app') label = `Local rider · ${shipment?.courier_name || 'details saved'}`;
@@ -819,7 +847,7 @@ function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked,
   }
 
   return (
-    <div className={`kds-ship-bar ${failed ? 'kds-ship-bar-fail' : hasAwb || (isOwnTeam && !needsDeliveryDetails) || isPickup ? 'kds-ship-bar-ok' : isPending || needsDeliveryDetails ? 'kds-ship-bar-fail' : ''}`}>
+    <div className={`kds-ship-bar ${failed ? 'kds-ship-bar-fail' : hasAwb || isDelivered || (isOwnTeam && !needsDeliveryDetails) || isPickup ? 'kds-ship-bar-ok' : isPending || needsDeliveryDetails ? 'kds-ship-bar-fail' : ''}`}>
       <span className="kds-ship-label" title={error || shipment?.shiprocket_last_error || ''}>{label}</span>
       {needsDeliveryDetails && onRequestShipmentDetails && (
         <button
@@ -833,6 +861,16 @@ function ShiprocketStatusBar({ apiClient, tokenNumber, orderNumber, fullyPacked,
           })}
         >
           Set delivery
+        </button>
+      )}
+      {canMarkDelivered && (
+        <button
+          type="button"
+          className="kds-ship-retry"
+          onClick={markDelivered}
+          disabled={markingDelivered}
+        >
+          {markingDelivered ? 'Updating…' : 'Mark Delivered'}
         </button>
       )}
       {srId && (
@@ -1170,7 +1208,7 @@ export default function KDSScreen() {
     const courierName = String(shipmentModal.courierName || '').trim();
     const awb = String(shipmentModal.awb || '').trim();
     if (mode === 'local_rider_app' && !courierName) {
-      setShipmentModal((m) => m ? { ...m, error: 'Enter rider service name (Dunzo / Rapido / Porter)' } : m);
+      setShipmentModal((m) => m ? { ...m, error: 'Enter rider service name (Dunzo / Zepto / Rapido / Porter)' } : m);
       return;
     }
     if (mode === 'parcel_courier' && (!courierName || !awb)) {
@@ -1487,7 +1525,7 @@ const fetchFeed = useCallback(async () => {
                 checked={shipmentModal.mode === 'local_rider_app'}
                 onChange={() => setShipmentModal((m) => ({ ...m, mode: 'local_rider_app', error: '' }))}
               />
-              Local rider (Dunzo / Rapido / Porter)
+              Local rider (Dunzo / Zepto / Rapido / Porter)
             </label>
             <label className="kds-ship-radio">
               <input
@@ -1517,7 +1555,7 @@ const fetchFeed = useCallback(async () => {
             {shipmentModal.mode === 'local_rider_app' && (
               <div className="kds-ship-fields">
                 <input
-                  placeholder="Rider service — Dunzo, Rapido, Porter…"
+                  placeholder="Rider service — Dunzo, Zepto, Rapido, Porter…"
                   value={shipmentModal.courierName}
                   onChange={(e) => setShipmentModal((m) => ({ ...m, courierName: e.target.value }))}
                 />
